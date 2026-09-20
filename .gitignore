@@ -1,0 +1,8 @@
+# קובצי PDF של המשתמש: מכילים מידע אישי ואסור להעלות אותם לריפוזיטורי
+samples/
+*.pdf
+
+# מערכת
+.DS_Store
+Thumbs.db
+node_modules/

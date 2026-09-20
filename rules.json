@@ -1,0 +1,1559 @@
+{
+  "schema_version": 1,
+  "rules_version": "2026-09-20.1",
+  "updated": "2026-09-20",
+  "source": "טבלת פיצויי אצ\"א אל על (Artifact), על בסיס ההסכם הישן (פרק כ\"ה), הסכם 2018, הסכם אצ\"א 2024 והסכם 2026",
+  "precedence": "הסכם מאוחר גובר על מוקדם. סעיף שלא בוטל ולא שונה נשאר בתוקף. פיצויי 2018, 2024 ו‑2026 באים בנוסף לפיצויים מהסכמים אחרים.",
+  "unit": "credit_hours",
+  "crew": {
+    "position": "CP",
+    "fleet": "B737",
+    "domicile": "TLV"
+  },
+  "codes": {
+    "plan_to_report": {
+      "VAC_FLD": "VAC_F",
+      "FSC_PLND": "FSC_P",
+      "SCK_PLAN": "FSC_P",
+      "HOME_RGT": "HOME_",
+      "SIM_SHO": "SIM"
+    },
+    "relevant": [
+      "VAC_FLD",
+      "FSC_PLND",
+      "SCK_PLAN",
+      "HOME_RGT",
+      "SIM_SHO",
+      "SICK"
+    ],
+    "ignored_plan_notes": [
+      "REQ",
+      "RQ2",
+      "SUN DOR",
+      "UP/EUR",
+      "Pilot in Command",
+      "X",
+      "RCK",
+      "SIK",
+      "Abs",
+      "Off",
+      "Sic",
+      "FlD",
+      "Vac",
+      "Sim",
+      "DUMMY",
+      "DH/"
+    ],
+    "ignored_report_dd": [
+      "REQ",
+      "PIC",
+      "MUT",
+      "OSF",
+      "RCR"
+    ],
+    "ground_activity": [
+      "CRM",
+      "CPT",
+      "INV",
+      "INV_C",
+      "HOME_RGT",
+      "UNF_B",
+      "SBY_S"
+    ],
+    "unknown_code_policy": "ask_user"
+  },
+  "report_columns": {
+    "dynamic": true,
+    "note": "העמודות משתנות בין חודשים. יש לקרוא את שורת הכותרת בכל קובץ ולמפות לפי מיקום.",
+    "totals": {
+      "COMTOT": "COM + S/C",
+      "CRTOT": "Credit + Rig"
+    }
+  },
+  "rules": [
+    {
+      "id": "credit_scheduled",
+      "category": "base",
+      "title": "קרדיט טיסה לפי התכנון",
+      "when": "קרדיט כל רגל טיסה = STA − STD. זמני הביצוע (ATD/ATA) אינם משפיעים על הקרדיט.",
+      "amount": {
+        "unit": "credit_hours",
+        "value": null,
+        "text": "STA − STD"
+      },
+      "source": "הגדרת עבודה",
+      "status": "ok",
+      "valid_from": "2024-01-01",
+      "valid_to": null,
+      "logic": {
+        "id": "credit_from_scheduled",
+        "supported": true,
+        "params": {}
+      }
+    },
+    {
+      "id": "min_slip_credit",
+      "category": "plan",
+      "title": "זיכוי מינימלי לסליפ קצר",
+      "when": "סליפ טיסתי שמשכו המתוכנן קצר מ‑5 שעות.",
+      "amount": {
+        "unit": "credit_hours",
+        "value": 5.0,
+        "text": "5 ש' קרדיט במקום הקרדיט לפי שעות הטיסה"
+      },
+      "source": "2018 ס' 27.2",
+      "status": "ok",
+      "valid_from": "2018-01-01",
+      "valid_to": null,
+      "logic": {
+        "id": "min_slip_credit",
+        "supported": true,
+        "params": {
+          "min_credit_hours": 5.0
+        }
+      },
+      "note": "ההפרש בין הקרדיט בפועל למינימום נרשם בעמודת Rig."
+    },
+    {
+      "id": "absence_month_cap",
+      "category": "base",
+      "title": "תקרת זיכויים בחודש היעדרות מלא",
+      "when": "חודש שכולו היעדרות.",
+      "amount": {
+        "unit": "credit_hours",
+        "value": 75.0,
+        "text": "עד 75 ש' זיכוי"
+      },
+      "source": "2024 ס' 61",
+      "status": "ok",
+      "valid_from": "2024-01-01",
+      "valid_to": null,
+      "logic": {
+        "id": "absence_month_cap",
+        "supported": true,
+        "params": {
+          "cap_hours": 75.0
+        }
+      }
+    },
+    {
+      "id": "vacation_base_credit",
+      "category": "plan",
+      "title": "יום חופשה: זיכוי בסיסי",
+      "when": "כל יממת חופשה שנתית שאושרה ופורסמה בתוכנית החודשית. לא חל על חופשות מיוחדות.",
+      "amount": {
+        "unit": "credit_hours",
+        "value": 2.5,
+        "text": "2:30 ש' קרדיט, וגם 11 שעות שהייה (TAB) לצורכי זיכוי"
+      },
+      "source": "ישן, כ\"ה ס' 13.א–ב; 2024 ס' 61",
+      "status": "ok",
+      "valid_from": "2024-01-01",
+      "valid_to": null,
+      "logic": {
+        "id": "absence_day_credit",
+        "supported": true,
+        "params": {
+          "plan_codes": [
+            "VAC_FLD"
+          ],
+          "report_codes": [
+            "VAC_F"
+          ],
+          "report_flag_column": "VAC",
+          "credit_hours": 2.5,
+          "tab_hours": 11
+        }
+      },
+      "history": "2024 ס' 57: אין שינוי בזיכוי. 2024 ס' 61: ערך יום חופשה 2.5 ש' קרדיט, כולל לפדיון."
+    },
+    {
+      "id": "vacation_credit_balance",
+      "category": "plan",
+      "title": "יום חופשה: איזון קרדיט",
+      "when": "תוספת לכל יום חופשה בתשלום. מעל 20 ימי חופשה בחודש התוספת ליום יורדת לפי מדרגות.",
+      "amount": {
+        "unit": "credit_hours",
+        "value": 1.25,
+        "text": "1.25 ש' קרדיט ליום, עד 20 ימים; מעל זה לפי מדרגות"
+      },
+      "source": "2024 ס' 60, 64–65",
+      "status": "ok",
+      "valid_from": "2025-01-01",
+      "valid_to": null,
+      "logic": {
+        "id": "vacation_credit_balance",
+        "supported": true,
+        "params": {
+          "per_day_hours": 1.25,
+          "days_full_rate": 20,
+          "monthly_max_hours": 12.5,
+          "yearly_cap_days": 90,
+          "taper_examples": {
+            "21": 1.13,
+            "25": 0.75,
+            "30": 0.42
+          },
+          "taper_table_complete": false
+        }
+      },
+      "note": "מדרגות מעל 20 ימים חסרות בטבלה. עד שיושלמו, חודש עם יותר מ‑20 ימי חופשה מסומן לבדיקה ידנית.",
+      "history": "2024 ס' 59: מ‑1.1.2024 – 0.7 ש' ליום. ← 2024 ס' 60: מ‑1.1.2025 – 1.25 ש' ליום. ס' 62: חל גם על יום אבל מזכה בקרדיט."
+    },
+    {
+      "id": "planned_sick_credit",
+      "category": "plan",
+      "title": "יום מחלה מתוכנן",
+      "when": "יום מחלה שתוכנן בלוח (FSC_PLND / SCK_PLAN).",
+      "amount": {
+        "unit": "credit_hours",
+        "value": 2.5,
+        "text": "2:30 ש' קרדיט"
+      },
+      "source": "הגדרת בעל המוצר; טרם מופיע בטבלת החוקים",
+      "status": "ok",
+      "valid_from": "2024-01-01",
+      "valid_to": null,
+      "logic": {
+        "id": "absence_day_credit",
+        "supported": true,
+        "params": {
+          "plan_codes": [
+            "FSC_PLND",
+            "SCK_PLAN"
+          ],
+          "report_codes": [
+            "FSC_P"
+          ],
+          "report_flag_column": "SCKFM",
+          "credit_hours": 2.5,
+          "tab_hours": 11
+        }
+      },
+      "note": "אומת מול יולי 2026: Credit 02:30 ו‑1.00 בעמודה SCKFM."
+    },
+    {
+      "id": "sick_credit",
+      "category": "base",
+      "title": "יום מחלה",
+      "when": "יום מחלה שלא היה בתכנון.",
+      "amount": {
+        "unit": "credit_hours",
+        "value": 2.5,
+        "text": "2:30 ש' קרדיט"
+      },
+      "source": "אומת מול דוחות יולי ואוגוסט 2026",
+      "status": "ok",
+      "valid_from": "2024-01-01",
+      "valid_to": null,
+      "logic": {
+        "id": "absence_day_credit",
+        "supported": true,
+        "params": {
+          "report_codes": [
+            "SICK"
+          ],
+          "report_flag_column": "SICK",
+          "credit_hours": 2.5,
+          "tab_hours": 11
+        }
+      }
+    },
+    {
+      "id": "ground_training_credit",
+      "category": "base",
+      "title": "אימון קרקע בבית (HOME_RGT)",
+      "when": "יום אימון קרקע מהבית.",
+      "amount": {
+        "unit": "credit_hours",
+        "value": 3.75,
+        "text": "3:45 ש' קרדיט"
+      },
+      "source": "אומת מול יולי 2026",
+      "status": "ok",
+      "valid_from": "2024-01-01",
+      "valid_to": null,
+      "logic": {
+        "id": "absence_day_credit",
+        "supported": true,
+        "params": {
+          "plan_codes": [
+            "HOME_RGT"
+          ],
+          "report_codes": [
+            "HOME_"
+          ],
+          "report_flag_column": "CORS",
+          "credit_hours": 3.75,
+          "tab_hours": 11
+        }
+      },
+      "note": "בדוח מופיע גם 1.00 ב‑MEAL. הערך לא אומת מול מקור בהסכם."
+    },
+    {
+      "id": "sim_day_credit",
+      "category": "base",
+      "title": "יום סימולטור: זיכוי יומי",
+      "when": "יום אימון או בחינה בסימולטור.",
+      "amount": {
+        "unit": "credit_hours",
+        "value": 3.75,
+        "text": "3:45 ש' קרדיט"
+      },
+      "source": "2024 ס' 56",
+      "status": "ok",
+      "valid_from": "2024-01-01",
+      "valid_to": null,
+      "logic": {
+        "id": "absence_day_credit",
+        "supported": true,
+        "params": {
+          "plan_codes": [
+            "SIM_SHO"
+          ],
+          "report_codes": [
+            "SIM"
+          ],
+          "report_flag_column": "SIM",
+          "credit_hours": 3.75,
+          "tab_hours": 11
+        }
+      },
+      "note": "זיכוי, לא פיצוי. פיצויי הדרכה עצמם אינם בהיקף גרסה 1."
+    },
+    {
+      "id": "late_landing_home",
+      "category": "exec",
+      "title": "הארכת FDP לנחיתה בארץ",
+      "when": "FDP של טיסה לנחיתה בארץ שהתארך ביותר משעה לעומת התכנון. משווים ATA מול STA של הנחיתה בארץ, כולל רגל DHO.",
+      "amount": {
+        "unit": "credit_hours",
+        "value": 0.5,
+        "text": "0.5 ש' לכל שעה או חלק ממנה מעבר לשעה הראשונה"
+      },
+      "source": "2024 ס' 43",
+      "status": "ok",
+      "valid_from": "2024-01-01",
+      "valid_to": null,
+      "logic": {
+        "id": "late_landing_home",
+        "supported": true,
+        "params": {
+          "grace_minutes": 60,
+          "step_minutes": 60,
+          "hours_per_step": 0.5
+        }
+      },
+      "note": "אומת: 03/08 62 דק' → 0.5; 21/08 141 דק' → 1.0; 31/07 93 דק' → 0.5; 37 ו‑33 דק' → 0.",
+      "history": "2024, \"תמרוץ בביצוע\". דוגמאות מההסכם: 59 דק' = 0; 61 דק' = 0.5; 121 דק' = 1."
+    },
+    {
+      "id": "special_call",
+      "category": "exec",
+      "title": "קריאה מיוחדת",
+      "when": "שיבוץ לטיסה מהבסיס ביממה שבה אצ\"א לא היה משובץ לטיסה או לכוננות. לא כולל טיסות אימון ומבחן מקומיות, ולא החלפות לבקשת אצ\"א או הוועד.",
+      "amount": {
+        "unit": "credit_hours",
+        "value": 2.5,
+        "text": "2.5 ש' לכל יממה או חלק ממנה מחוץ לבסיס, בנוסף לשעות הטיסה"
+      },
+      "source": "ישן, כ\"ה ס' 12.ב–ג",
+      "status": "ok",
+      "valid_from": "2000-01-01",
+      "valid_to": null,
+      "logic": {
+        "id": "special_call",
+        "supported": true,
+        "params": {
+          "hours": 2.5,
+          "report_column": "S/C",
+          "second_day_min_gap_hours": 8,
+          "second_day_min_hours": 4,
+          "ask_user_if_no_sc": true
+        }
+      },
+      "note": "פיצוי שנרשם ב‑S/C מסמן שהטיסה לא הייתה מתוכננת, ולכן לא חל עליה חוק \"הגבוה מבין השתיים\". כשיש טיסה ביום לא מתוכנן בלי S/C – לשאול את המשתמש.",
+      "history": "לא בוטל. 2018 ס' 206.4 ו‑2024 ס' 50 מתייחסים אליו כפיצוי קיים. לא חל על חניך."
+    },
+    {
+      "id": "higher_of_planned_performed",
+      "category": "exec",
+      "title": "שינוי בתוכנית: תשלום לפי הגבוה",
+      "when": "שינוי בתוכנית החודשית, או הפעלה לטיסה אחרת במסגרת Soft Start בהסכמה.",
+      "amount": {
+        "unit": "credit_hours",
+        "value": null,
+        "text": "הגבוה מבין הטיסה שבוצעה לטיסה שבוטלה, כולל אש\"ל"
+      },
+      "source": "2018 ס' 127, 91.1",
+      "status": "ok",
+      "valid_from": "2018-01-01",
+      "valid_to": null,
+      "logic": {
+        "id": "higher_of_planned_performed",
+        "supported": true,
+        "params": {
+          "requires_user_answer": true,
+          "excluded_when_special_call": true,
+          "excluded_when_voluntary_swap": true,
+          "shortfall_column": "Rig"
+        }
+      },
+      "note": "חל רק כשהמשתמש מאשר שמדובר בהחלפה. ההפרש, אם הטיסה שבוצעה קצרה מהמתוכננת, נרשם ב‑Rig."
+    },
+    {
+      "id": "wet_lease_cancellation",
+      "category": "exec",
+      "title": "ביטול הצבה בגלל מטוס חכור",
+      "when": "הצבה שבוטלה כי הטיסה הועברה למטוס בחכירה רטובה, ולא נמצאה לאצ\"א טיסה חלופית.",
+      "amount": {
+        "unit": "credit_hours",
+        "value": null,
+        "text": "השעות שהפסיד"
+      },
+      "source": "2026 ס' 22.4",
+      "status": "ok",
+      "valid_from": "2026-01-01",
+      "valid_to": null,
+      "logic": {
+        "id": "lost_hours_credit",
+        "supported": true,
+        "params": {
+          "requires_user_answer": true,
+          "credit_column": "Rig",
+          "include_min_slip_credit": true
+        }
+      },
+      "note": "אומת מול 28/07/2026: LCA (FT 2:20) בוטלה, ונרשם Rig 05:00, כלומר הקרדיט המתוכנן כולל השלמה ל‑5 שעות.",
+      "history": "חדש ב‑2026. הסעיפים על חכירה רטובה פוקעים ב‑1.1.2030."
+    },
+    {
+      "id": "voluntary_swap",
+      "category": "exec",
+      "title": "החלפה מרצון אצ\"א",
+      "when": "אצ\"א ביקש להחליף טיסה מתוכננת בטיסה אחרת, גם בתאריך אחר.",
+      "amount": {
+        "unit": "credit_hours",
+        "value": 0,
+        "text": "רק הקרדיט של הטיסה שבוצעה. אין קריאה מיוחדת ואין \"הגבוה מבין השתיים\""
+      },
+      "source": "ישן, כ\"ה ס' 12.ב–ג (החרגת החלפות לבקשת אצ\"א); הבהרת בעל המוצר",
+      "status": "ok",
+      "valid_from": "2024-01-01",
+      "valid_to": null,
+      "logic": {
+        "id": "voluntary_swap",
+        "supported": true,
+        "params": {
+          "requires_user_answer": true
+        }
+      },
+      "note": "אומת מול יולי 2026: ATH ב‑21/07 הוחלפה ב‑RHO ב‑29/07 מרצון הטייס, ולא שולם פיצוי על אף אחת מהן."
+    },
+    {
+      "id": "cancelled_no_compensation",
+      "category": "exec",
+      "title": "טיסה שבוטלה ללא פיצוי",
+      "when": "טיסה מתוכננת שבוטלה ולא מזכה בקרדיט או בפיצוי.",
+      "amount": {
+        "unit": "credit_hours",
+        "value": 0,
+        "text": "אין פיצוי"
+      },
+      "source": "הבהרת בעל המוצר",
+      "status": "ok",
+      "valid_from": "2024-01-01",
+      "valid_to": null,
+      "logic": {
+        "id": "cancelled_no_compensation",
+        "supported": true,
+        "params": {
+          "requires_user_answer": true
+        }
+      },
+      "note": "אומת מול 30/07/2026: DME (12:45) בוטלה ולא שולם עליה דבר."
+    },
+    {
+      "id": "special_call_extended_stay",
+      "category": "exec",
+      "title": "הארכת שהייה מסיבות שאינן בשליטת החברה",
+      "when": "שביתה, סגירת נמל, תאונה וכדומה, שהאריכו את השהייה ביותר מ‑48 שעות מעבר למתוכנן.",
+      "amount": {
+        "unit": "credit_hours",
+        "value": null,
+        "text": "קריאה מיוחדת ל‑48 השעות הראשונות, וגם אש\"ל לכל התקופה"
+      },
+      "source": "ישן, כ\"ה ס' 10.ב",
+      "status": "ok",
+      "valid_from": "2024-01-01",
+      "valid_to": null,
+      "logic": {
+        "id": null,
+        "supported": false,
+        "params": {
+          "requires_user_answer": true
+        }
+      },
+      "note": "דורש מידע שאינו בקבצים. האפליקציה תשאל את המשתמש."
+    },
+    {
+      "id": "recall_from_vacation",
+      "category": "exec",
+      "title": "קריאה מחופשה",
+      "when": "אצ\"א שתוכנן לחופשה או יצא לחופשה מאושרת, ונקרא לחזור לטיסה.",
+      "amount": {
+        "unit": "credit_hours",
+        "value": null,
+        "text": "2.5 ש' לכל יממה של פעילות טיסתית בתקופת החופשה"
+      },
+      "source": "ישן, כ\"ה ס' 13.ג",
+      "status": "ok",
+      "valid_from": "2024-01-01",
+      "valid_to": null,
+      "logic": {
+        "id": null,
+        "supported": false,
+        "params": {
+          "requires_user_answer": true
+        }
+      },
+      "note": "דורש מידע שאינו בקבצים. האפליקציה תשאל את המשתמש."
+    },
+    {
+      "id": "training_cancelled_assigned_flight",
+      "category": "exec",
+      "title": "ביטול הדרכה או סימולטור והצבה לטיסה",
+      "when": "אצ\"א שתוכנן להדרכה, סימולטור או CPT, ההדרכה בוטלה, והוא הוצב לטיסה באותן יממות.",
+      "amount": {
+        "unit": "credit_hours",
+        "value": null,
+        "text": "קריאה מיוחדת"
+      },
+      "source": "ישן, כ\"ה ס' 17.ג",
+      "status": "ok",
+      "valid_from": "2024-01-01",
+      "valid_to": null,
+      "logic": {
+        "id": null,
+        "supported": false,
+        "params": {
+          "requires_user_answer": true
+        }
+      },
+      "note": "דורש מידע שאינו בקבצים. האפליקציה תשאל את המשתמש."
+    },
+    {
+      "id": "active_crew_activation",
+      "category": "exec",
+      "title": "הפעלה כאיש צוות פעיל",
+      "when": "אצ\"א שתוכנן לטיסה כאיש צוות לא פעיל, ושובץ בהסכמתו כאיש צוות פעיל.",
+      "amount": {
+        "unit": "credit_hours",
+        "value": null,
+        "text": "2.5 ש'"
+      },
+      "source": "2018 ס' 27.1",
+      "status": "ok",
+      "valid_from": "2024-01-01",
+      "valid_to": null,
+      "logic": {
+        "id": null,
+        "supported": false,
+        "params": {
+          "requires_user_answer": true
+        }
+      },
+      "note": "דורש מידע שאינו בקבצים. האפליקציה תשאל את המשתמש."
+    },
+    {
+      "id": "second_unplanned_activity",
+      "category": "exec",
+      "title": "פעילות שנייה לא מתוכננת באותה יממה",
+      "when": "טיסה או סימולטור לא מתוכננים של אצ\"א שנמצא בבסיס, באותה יממה שבה ביצע סימולטור או טיסה אחרת. לא כולל פעילות קרקעית, ולא שתי פעילויות באותו FDP.",
+      "amount": {
+        "unit": "credit_hours",
+        "value": null,
+        "text": "2.5 ש' בגין הפעילות השנייה"
+      },
+      "source": "2024 ס' 42.6–42.7",
+      "status": "ok",
+      "valid_from": "2024-01-01",
+      "valid_to": null,
+      "logic": {
+        "id": null,
+        "supported": false,
+        "params": {
+          "requires_user_answer": true
+        }
+      },
+      "note": "דורש מידע שאינו בקבצים. האפליקציה תשאל את המשתמש."
+    },
+    {
+      "id": "memorial_independence_day",
+      "category": "exec",
+      "title": "יום הזיכרון ויום העצמאות",
+      "when": "פעילות טיסתית עם איסוף מ‑16:00 בערב החג, או נחיתה עד 16:00 ביום עצמו. חל גם על שהייה מחוץ לבסיס. פיצוי נפרד על כל אחד מהימים.",
+      "amount": {
+        "unit": "credit_hours",
+        "value": null,
+        "text": "2.5 ש'"
+      },
+      "source": "2024 ס' 42.1–42.3, 42.5",
+      "status": "ok",
+      "valid_from": "2024-01-01",
+      "valid_to": null,
+      "logic": {
+        "id": null,
+        "supported": false,
+        "params": {
+          "requires_user_answer": true
+        }
+      },
+      "note": "דורש מידע שאינו בקבצים. האפליקציה תשאל את המשתמש."
+    },
+    {
+      "id": "first_school_day",
+      "category": "exec",
+      "title": "היום הראשון ללימודים",
+      "when": "פעילות מטעם החברה בין 07:00 ל‑11:00 ביום הראשון של שנת הלימודים. חל גם על שהייה מחוץ לבסיס.",
+      "amount": {
+        "unit": "credit_hours",
+        "value": null,
+        "text": "2.5 ש'"
+      },
+      "source": "2024 ס' 42.4–42.5",
+      "status": "ok",
+      "valid_from": "2024-01-01",
+      "valid_to": null,
+      "logic": {
+        "id": null,
+        "supported": false,
+        "params": {
+          "requires_user_answer": true
+        }
+      },
+      "note": "דורש מידע שאינו בקבצים. האפליקציה תשאל את המשתמש."
+    },
+    {
+      "id": "trainee_removal",
+      "category": "exec",
+      "title": "הורדה מטיסה בגלל חניך",
+      "when": "אצ\"א שהורד בהסכמתו מטיסה בשלב הביצוע, כי הוצב חניך.",
+      "amount": {
+        "unit": "credit_hours",
+        "value": null,
+        "text": "קרדיט מלא של הטיסה. אם ביצע טיסה אחרת, קרדיט על שתיהן"
+      },
+      "source": "2024 ס' 46",
+      "status": "ok",
+      "valid_from": "2024-01-01",
+      "valid_to": null,
+      "logic": {
+        "id": null,
+        "supported": false,
+        "params": {
+          "requires_user_answer": true
+        }
+      },
+      "note": "דורש מידע שאינו בקבצים. האפליקציה תשאל את המשתמש."
+    },
+    {
+      "id": "standby_end_for_bid",
+      "category": "exec",
+      "title": "סיום כוננות לטובת מכרז",
+      "when": "החברה אישרה לכונן לסיים כוננות ביומיים האחרונים של הרצף, בגלל זכייה במכרז.",
+      "amount": {
+        "unit": "credit_hours",
+        "value": null,
+        "text": "קרדיט הטיסה וקריאה מיוחדת"
+      },
+      "source": "2024 ס' 50",
+      "status": "ok",
+      "valid_from": "2024-01-01",
+      "valid_to": null,
+      "logic": {
+        "id": null,
+        "supported": false,
+        "params": {
+          "requires_user_answer": true
+        }
+      },
+      "note": "דורש מידע שאינו בקבצים. האפליקציה תשאל את המשתמש."
+    },
+    {
+      "id": "787_to_777_swap",
+      "category": "exec",
+      "title": "החלפת 787 ב‑777",
+      "when": "המטוס בסליפ הוחלף מ‑787 ל‑777, אצ\"א לא כשיר ל‑777, ולא נמצאה הצבה חלופית.",
+      "amount": {
+        "unit": "credit_hours",
+        "value": null,
+        "text": "תשלום על הטיסה שבוטלה, כולל אש\"ל"
+      },
+      "source": "2026 ס' 23.4",
+      "status": "ok",
+      "valid_from": "2024-01-01",
+      "valid_to": null,
+      "logic": {
+        "id": null,
+        "supported": false,
+        "params": {
+          "requires_user_answer": true
+        }
+      },
+      "note": "דורש מידע שאינו בקבצים. האפליקציה תשאל את המשתמש."
+    },
+    {
+      "id": "miami_delay_before_duty",
+      "category": "exec",
+      "title": "מיאמי: דחייה לפני זמן התפקיד",
+      "when": "קיצור נוסף של המנוחה במיאמי בגלל דחייה של יותר מ‑5 שעות לפני תחילת זמן התפקיד.",
+      "amount": {
+        "unit": "credit_hours",
+        "value": null,
+        "text": "+2.5 ש'"
+      },
+      "source": "2026 ס' 24.4",
+      "status": "ok",
+      "valid_from": "2024-01-01",
+      "valid_to": null,
+      "logic": {
+        "id": null,
+        "supported": false,
+        "params": {
+          "requires_user_answer": true
+        }
+      },
+      "note": "דורש מידע שאינו בקבצים. האפליקציה תשאל את המשתמש."
+    },
+    {
+      "id": "miami_delay_after_duty",
+      "category": "exec",
+      "title": "מיאמי: דחייה אחרי תחילת זמן התפקיד",
+      "when": "דחייה של שעתיים ומעלה בזמן ההמראה אחרי תחילת זמן התפקיד, בנוסף לקיצור המנוחה.",
+      "amount": {
+        "unit": "credit_hours",
+        "value": null,
+        "text": "+2.5 ש'"
+      },
+      "source": "2026 ס' 24.4",
+      "status": "ok",
+      "valid_from": "2024-01-01",
+      "valid_to": null,
+      "logic": {
+        "id": null,
+        "supported": false,
+        "params": {
+          "requires_user_answer": true
+        }
+      },
+      "note": "דורש מידע שאינו בקבצים. האפליקציה תשאל את המשתמש."
+    },
+    {
+      "id": "shabbat_holiday_activity",
+      "category": "exec",
+      "title": "פעילות טיסתית בשבת או בחג",
+      "when": "פעילות טיסתית בשבת או בחג, אחרי מיצוי מכסה שנתית. שבת = 45 דק' לפני כניסתה עד 15 דק' אחרי צאתה.",
+      "amount": {
+        "unit": "credit_hours",
+        "value": null,
+        "text": "2.5 ש' לפעילות מעבר למכסה"
+      },
+      "source": "2018 ס' 23, 27.5",
+      "status": "ok",
+      "valid_from": "2024-01-01",
+      "valid_to": null,
+      "logic": {
+        "id": null,
+        "supported": false,
+        "params": {
+          "requires_user_answer": true
+        }
+      },
+      "note": "דורש מידע שאינו בקבצים. האפליקציה תשאל את המשתמש."
+    },
+    {
+      "id": "white_flight",
+      "category": "exec",
+      "title": "טיסה לבנה",
+      "when": "אצ\"א שביצע \"טיסה לבנה\".",
+      "amount": {
+        "unit": "credit_hours",
+        "value": null,
+        "text": "2.5 ש'"
+      },
+      "source": "2018 ס' 27.4",
+      "status": "ok",
+      "valid_from": "2024-01-01",
+      "valid_to": null,
+      "logic": {
+        "id": null,
+        "supported": false,
+        "params": {
+          "requires_user_answer": true
+        }
+      },
+      "note": "דורש מידע שאינו בקבצים. האפליקציה תשאל את המשתמש."
+    },
+    {
+      "id": "test_flight",
+      "category": "exec",
+      "title": "טיסת מבחן",
+      "when": "השתתפות פעילה בטיסת מבחן, כשאצ\"א לא משובץ לטיסה ברצף אליה.",
+      "amount": {
+        "unit": "credit_hours",
+        "value": null,
+        "text": "2.5 ש' לכל טיסת מבחן"
+      },
+      "source": "ישן, פרק כ\"ו/1 ס' 17.ב",
+      "status": "ok",
+      "valid_from": "2024-01-01",
+      "valid_to": null,
+      "logic": {
+        "id": null,
+        "supported": false,
+        "params": {
+          "requires_user_answer": true
+        }
+      },
+      "note": "דורש מידע שאינו בקבצים. האפליקציה תשאל את המשתמש."
+    },
+    {
+      "id": "wrong_rest_planning",
+      "category": "plan",
+      "title": "תכנון מנוחה שגוי",
+      "when": "בתוכנית החודשית תוכננה מנוחה שלא עומדת במגבלות, הטעות לא תוקנה, ואצ\"א הסכים לבצע את הטיסה.",
+      "amount": {
+        "unit": "credit_hours",
+        "value": null,
+        "text": "2.5 ש'"
+      },
+      "source": "ישן, כ\"ה ס' 12.טו",
+      "status": "ok",
+      "valid_from": "2024-01-01",
+      "valid_to": null,
+      "logic": {
+        "id": null,
+        "supported": false,
+        "params": {
+          "requires_user_answer": true
+        }
+      },
+      "note": "דורש מידע שאינו בקבצים. האפליקציה תשאל את המשתמש."
+    },
+    {
+      "id": "short_rest_outside_base",
+      "category": "plan",
+      "title": "קיצור מנוחה מחוץ לבסיס",
+      "when": "אצ\"א שהסכים לבקשת החברה וביצע טיסה עם מנוחה קצרה מהמינימום החוזי.",
+      "amount": {
+        "unit": "credit_hours",
+        "value": null,
+        "text": "5 ש'"
+      },
+      "source": "2018 ס' 27.3",
+      "status": "ok",
+      "valid_from": "2024-01-01",
+      "valid_to": null,
+      "logic": {
+        "id": null,
+        "supported": false,
+        "params": {
+          "requires_user_answer": true
+        }
+      },
+      "note": "דורש מידע שאינו בקבצים. האפליקציה תשאל את המשתמש."
+    },
+    {
+      "id": "short_rest_las_vegas",
+      "category": "plan",
+      "title": "קיצור מנוחה בלאס וגאס",
+      "when": "מנוחה חוזית מקוצרת ל‑27 שעות, כל עוד החברה טסה ללאס וגאס פעם בשבוע.",
+      "amount": {
+        "unit": "credit_hours",
+        "value": null,
+        "text": "5 ש'"
+      },
+      "source": "2018 ס' 58.2",
+      "status": "ok",
+      "valid_from": "2024-01-01",
+      "valid_to": null,
+      "logic": {
+        "id": null,
+        "supported": false,
+        "params": {
+          "requires_user_answer": true
+        }
+      },
+      "note": "דורש מידע שאינו בקבצים. האפליקציה תשאל את המשתמש."
+    },
+    {
+      "id": "short_rest_miami",
+      "category": "plan",
+      "title": "קיצור מנוחה במיאמי (\"יום אחר יום\")",
+      "when": "תכנון \"יום אחר יום\" באמצע השבוע בטיסות למיאמי, כשהצוות לן שם לילה אחד בלבד. לילה = 23:00–05:00.",
+      "amount": {
+        "unit": "credit_hours",
+        "value": null,
+        "text": "5 ש'"
+      },
+      "source": "2026 ס' 24.1–24.3",
+      "status": "ok",
+      "valid_from": "2024-01-01",
+      "valid_to": null,
+      "logic": {
+        "id": null,
+        "supported": false,
+        "params": {
+          "requires_user_answer": true
+        }
+      },
+      "note": "דורש מידע שאינו בקבצים. האפליקציה תשאל את המשתמש."
+    },
+    {
+      "id": "waive_free_days",
+      "category": "plan",
+      "title": "ויתור על ימים ללא פעילות",
+      "when": "אצ\"א שוויתר בתכנון, לבקשת החברה ובהסכמתו, על ימים ללא פעילות.",
+      "amount": {
+        "unit": "credit_hours",
+        "value": null,
+        "text": "2.5 ש' מהיום השני"
+      },
+      "source": "2024 ס' 33",
+      "status": "ok",
+      "valid_from": "2024-01-01",
+      "valid_to": null,
+      "logic": {
+        "id": null,
+        "supported": false,
+        "params": {
+          "requires_user_answer": true
+        }
+      },
+      "note": "דורש מידע שאינו בקבצים. האפליקציה תשאל את המשתמש."
+    },
+    {
+      "id": "two_consecutive_saturdays",
+      "category": "plan",
+      "title": "שתי שבתות ברצף",
+      "when": "תכנון וביצוע של שני ימי שבת עוקבים, לבקשת החברה ובהסכמת אצ\"א.",
+      "amount": {
+        "unit": "credit_hours",
+        "value": null,
+        "text": "5 ש'"
+      },
+      "source": "2024 ס' 34",
+      "status": "ok",
+      "valid_from": "2024-01-01",
+      "valid_to": null,
+      "logic": {
+        "id": null,
+        "supported": false,
+        "params": {
+          "requires_user_answer": true
+        }
+      },
+      "note": "דורש מידע שאינו בקבצים. האפליקציה תשאל את המשתמש."
+    },
+    {
+      "id": "waive_base_rest",
+      "category": "plan",
+      "title": "ויתור על מנוחה חוזית בבסיס",
+      "when": "תכנון וביצוע של פעילות תוך ויתור על המנוחה החוזית בבסיס, לבקשת החברה ובהסכמת אצ\"א.",
+      "amount": {
+        "unit": "credit_hours",
+        "value": null,
+        "text": "2.5 ש'"
+      },
+      "source": "2024 ס' 35",
+      "status": "ok",
+      "valid_from": "2024-01-01",
+      "valid_to": null,
+      "logic": {
+        "id": null,
+        "supported": false,
+        "params": {
+          "requires_user_answer": true
+        }
+      },
+      "note": "דורש מידע שאינו בקבצים. האפליקציה תשאל את המשתמש."
+    },
+    {
+      "id": "legal_crew_composition",
+      "category": "plan",
+      "title": "הרכב צוות חוקי במקום חוזי",
+      "when": "תכנון טיסה בהרכב צוות חוקי ולא חוזי.",
+      "amount": {
+        "unit": "credit_hours",
+        "value": null,
+        "text": "5 ש' לכל חבר צוות שביצע"
+      },
+      "source": "2024 ס' 36",
+      "status": "ok",
+      "valid_from": "2024-01-01",
+      "valid_to": null,
+      "logic": {
+        "id": null,
+        "supported": false,
+        "params": {
+          "requires_user_answer": true
+        }
+      },
+      "note": "דורש מידע שאינו בקבצים. האפליקציה תשאל את המשתמש."
+    },
+    {
+      "id": "consecutive_night_rounds",
+      "category": "plan",
+      "title": "יותר משתי טיסות סבב לילה עוקבות",
+      "when": "תכנון וביצוע של יותר משתי טיסות סבב לילה עוקבות, לבקשת החברה ובהסכמת אצ\"א.",
+      "amount": {
+        "unit": "credit_hours",
+        "value": null,
+        "text": "2.5 ש'"
+      },
+      "source": "2024 ס' 37",
+      "status": "ok",
+      "valid_from": "2024-01-01",
+      "valid_to": null,
+      "logic": {
+        "id": null,
+        "supported": false,
+        "params": {
+          "requires_user_answer": true
+        }
+      },
+      "note": "דורש מידע שאינו בקבצים. האפליקציה תשאל את המשתמש."
+    },
+    {
+      "id": "two_rounds_same_fdp",
+      "category": "plan",
+      "title": "שתי טיסות סבב באותו זמן בתפקיד",
+      "when": "אצ\"א שתוכנן והתייצב לשתי טיסות סבב באותו FDP.",
+      "amount": {
+        "unit": "credit_hours",
+        "value": null,
+        "text": "2.5 ש', וגם זיכוי מינימלי של 5 ש' לכל סבב"
+      },
+      "source": "2024 ס' 38",
+      "status": "ok",
+      "valid_from": "2024-01-01",
+      "valid_to": null,
+      "logic": {
+        "id": null,
+        "supported": false,
+        "params": {
+          "requires_user_answer": true
+        }
+      },
+      "note": "דורש מידע שאינו בקבצים. האפליקציה תשאל את המשתמש."
+    },
+    {
+      "id": "night_landings_737",
+      "category": "plan",
+      "title": "נחיתות לילה ב‑737",
+      "when": "צי 737: תכנון ליותר מ‑2 טיסות בחודש שנחיתתן המתוכננת בין 03:00 ל‑08:00 שעון ישראל.",
+      "amount": {
+        "unit": "credit_hours",
+        "value": null,
+        "text": "2.5 ש' מהטיסה השלישית שבוצעה"
+      },
+      "source": "2024 ס' 39",
+      "status": "ok",
+      "valid_from": "2024-01-01",
+      "valid_to": null,
+      "logic": {
+        "id": null,
+        "supported": false,
+        "params": {
+          "requires_user_answer": true
+        }
+      },
+      "note": "דורש מידע שאינו בקבצים. האפליקציה תשאל את המשתמש."
+    },
+    {
+      "id": "ulh_787",
+      "category": "plan",
+      "title": "טיסות ULH, 787",
+      "when": "צוות כפול שתוכנן וביצע טיסה עם זמן בלוק של יותר מ‑17 ועד 19 שעות.",
+      "amount": {
+        "unit": "credit_hours",
+        "value": null,
+        "text": "5 ש'"
+      },
+      "source": "2026 ס' 21.2",
+      "status": "ok",
+      "valid_from": "2024-01-01",
+      "valid_to": null,
+      "logic": {
+        "id": null,
+        "supported": false,
+        "params": {
+          "requires_user_answer": true
+        }
+      },
+      "note": "דורש מידע שאינו בקבצים. האפליקציה תשאל את המשתמש."
+    },
+    {
+      "id": "plan_table_excess",
+      "category": "plan",
+      "title": "חריגה בתכנון מטבלת זמני טיסה/תפקיד",
+      "when": "בוטל.",
+      "amount": {
+        "unit": "credit_hours",
+        "value": null,
+        "text": "1:20 ש' לכל שעה או חלק ממנה"
+      },
+      "source": "ישן, כ\"ה ס' 6",
+      "status": "cancelled",
+      "valid_from": "2024-01-01",
+      "valid_to": null,
+      "logic": {
+        "id": null,
+        "supported": false,
+        "params": {}
+      },
+      "history": "2018 ס' 25.10: בוטל"
+    },
+    {
+      "id": "planned_intermediate_landing",
+      "category": "plan",
+      "title": "נחיתת ביניים מתוכננת",
+      "when": "בוטל.",
+      "amount": {
+        "unit": "credit_hours",
+        "value": null,
+        "text": "2.5 ש'"
+      },
+      "source": "ישן, כ\"ה ס' 12.יב",
+      "status": "cancelled",
+      "valid_from": "2024-01-01",
+      "valid_to": null,
+      "logic": {
+        "id": null,
+        "supported": false,
+        "params": {}
+      },
+      "history": "2018 ס' 25.7: בוטל"
+    },
+    {
+      "id": "planned_stay_over_9",
+      "category": "plan",
+      "title": "שהייה מתוכננת מעל 9 יממות",
+      "when": "בוטל.",
+      "amount": {
+        "unit": "credit_hours",
+        "value": null,
+        "text": "2.5 ש' לכל יממה מהעשירית"
+      },
+      "source": "ישן, כ\"ה ס' 12.יג",
+      "status": "cancelled",
+      "valid_from": "2024-01-01",
+      "valid_to": null,
+      "logic": {
+        "id": null,
+        "supported": false,
+        "params": {}
+      },
+      "history": "2018 ס' 25.8: בוטל"
+    },
+    {
+      "id": "cancel_after_report",
+      "category": "exec",
+      "title": "ביטול טיסה אחרי התייצבות בשדה",
+      "when": "בוטל.",
+      "amount": {
+        "unit": "credit_hours",
+        "value": null,
+        "text": "2.5 ש'"
+      },
+      "source": "ישן, כ\"ה ס' 10.ג",
+      "status": "cancelled",
+      "valid_from": "2024-01-01",
+      "valid_to": null,
+      "logic": {
+        "id": null,
+        "supported": false,
+        "params": {}
+      },
+      "history": "2018 ס' 25.1: בוטל"
+    },
+    {
+      "id": "short_notice_assignment",
+      "category": "exec",
+      "title": "הצבה בהתראה קצרה מכוננות רגילה",
+      "when": "בוטל.",
+      "amount": {
+        "unit": "credit_hours",
+        "value": null,
+        "text": "2.5 ש'"
+      },
+      "source": "ישן, כ\"ה ס' 11.ט",
+      "status": "cancelled",
+      "valid_from": "2024-01-01",
+      "valid_to": null,
+      "logic": {
+        "id": null,
+        "supported": false,
+        "params": {}
+      },
+      "history": "2018 ס' 25.2: בוטל"
+    },
+    {
+      "id": "assignment_change_after_1700",
+      "category": "exec",
+      "title": "שינוי הצבה אחרי 17:00",
+      "when": "בוטל.",
+      "amount": {
+        "unit": "credit_hours",
+        "value": null,
+        "text": "לא מוגדר"
+      },
+      "source": "2018 ס' 25.4",
+      "status": "cancelled",
+      "valid_from": "2024-01-01",
+      "valid_to": null,
+      "logic": {
+        "id": null,
+        "supported": false,
+        "params": {}
+      },
+      "history": "2018 ס' 25.4: בוטל"
+    },
+    {
+      "id": "late_return_to_base",
+      "category": "exec",
+      "title": "חזרה מאוחרת לבסיס",
+      "when": "בוטל.",
+      "amount": {
+        "unit": "credit_hours",
+        "value": null,
+        "text": "2.5 ש' לכל יממה חורגת"
+      },
+      "source": "ישן, כ\"ה ס' 12.ח",
+      "status": "cancelled",
+      "valid_from": "2024-01-01",
+      "valid_to": null,
+      "logic": {
+        "id": null,
+        "supported": false,
+        "params": {}
+      },
+      "history": "2018 ס' 25.5: בוטל"
+    },
+    {
+      "id": "flight_moved_earlier",
+      "category": "exec",
+      "title": "הקדמת טיסה ליממה הקודמת",
+      "when": "בוטל.",
+      "amount": {
+        "unit": "credit_hours",
+        "value": null,
+        "text": "2.5 ש'"
+      },
+      "source": "ישן, כ\"ה ס' 12.ט",
+      "status": "cancelled",
+      "valid_from": "2024-01-01",
+      "valid_to": null,
+      "logic": {
+        "id": null,
+        "supported": false,
+        "params": {}
+      },
+      "history": "2018 ס' 25.6: בוטל"
+    },
+    {
+      "id": "stay_extended_over_9",
+      "category": "exec",
+      "title": "הארכת שהייה מעל 9 יממות",
+      "when": "בוטל.",
+      "amount": {
+        "unit": "credit_hours",
+        "value": null,
+        "text": "2.5 ש' לכל יממה מהעשירית"
+      },
+      "source": "ישן, כ\"ה ס' 12.יד",
+      "status": "cancelled",
+      "valid_from": "2024-01-01",
+      "valid_to": null,
+      "logic": {
+        "id": null,
+        "supported": false,
+        "params": {}
+      },
+      "history": "2018 ס' 25.9: בוטל"
+    },
+    {
+      "id": "many_series_737",
+      "category": "plan",
+      "title": "ריבוי סדרות ב‑737",
+      "when": "בוטל.",
+      "amount": {
+        "unit": "credit_hours",
+        "value": null,
+        "text": "3 ש' לכל סדרה מהעשירית"
+      },
+      "source": "ישן, כ\"ה ס' 24",
+      "status": "cancelled",
+      "valid_from": "2024-01-01",
+      "valid_to": null,
+      "logic": {
+        "id": null,
+        "supported": false,
+        "params": {}
+      },
+      "history": "בוטל, מקור הביטול בהסכם שאינו בתיקייה"
+    },
+    {
+      "id": "pickup_comp_737",
+      "category": "plan",
+      "title": "פיצוי איסוף 737",
+      "when": "בוטל.",
+      "amount": {
+        "unit": "credit_hours",
+        "value": null,
+        "text": "לא מוגדר"
+      },
+      "source": "2018 ס' 25.11",
+      "status": "cancelled",
+      "valid_from": "2024-01-01",
+      "valid_to": null,
+      "logic": {
+        "id": null,
+        "supported": false,
+        "params": {}
+      },
+      "history": "2018 ס' 25.11: בוטל"
+    },
+    {
+      "id": "sim_night_window_2024",
+      "category": "train",
+      "title": "סימולטור בשעות לילה או במוצ\"ש",
+      "when": "ראו טבלת החוקים המקורית.",
+      "amount": {
+        "unit": "credit_hours",
+        "value": null,
+        "text": "3.75 ש'"
+      },
+      "source": "2024 ס' 18",
+      "status": "ok",
+      "valid_from": "2024-01-01",
+      "valid_to": null,
+      "logic": {
+        "id": null,
+        "supported": false,
+        "params": {
+          "out_of_scope_v1": true
+        }
+      },
+      "note": "קטגוריית הדרכה וסימולטור אינה בהיקף גרסה 1."
+    },
+    {
+      "id": "sim_night_window_2026",
+      "category": "train",
+      "title": "סימולטור בחלון לילה",
+      "when": "ראו טבלת החוקים המקורית.",
+      "amount": {
+        "unit": "credit_hours",
+        "value": null,
+        "text": "3.75 ש'"
+      },
+      "source": "2026 ס' 18.1.7",
+      "status": "ok",
+      "valid_from": "2024-01-01",
+      "valid_to": null,
+      "logic": {
+        "id": null,
+        "supported": false,
+        "params": {
+          "out_of_scope_v1": true
+        }
+      },
+      "note": "קטגוריית הדרכה וסימולטור אינה בהיקף גרסה 1."
+    },
+    {
+      "id": "sim_saturday_night_2026",
+      "category": "train",
+      "title": "סימולטור במוצאי שבת",
+      "when": "ראו טבלת החוקים המקורית.",
+      "amount": {
+        "unit": "credit_hours",
+        "value": null,
+        "text": "3.75 ש'"
+      },
+      "source": "2026 ס' 18.1.8",
+      "status": "ok",
+      "valid_from": "2024-01-01",
+      "valid_to": null,
+      "logic": {
+        "id": null,
+        "supported": false,
+        "params": {
+          "out_of_scope_v1": true
+        }
+      },
+      "note": "קטגוריית הדרכה וסימולטור אינה בהיקף גרסה 1."
+    },
+    {
+      "id": "sim_session_extension",
+      "category": "train",
+      "title": "הארכת אימון סימולטור",
+      "when": "ראו טבלת החוקים המקורית.",
+      "amount": {
+        "unit": "credit_hours",
+        "value": null,
+        "text": "2.5 ש'"
+      },
+      "source": "2024 ס' 17",
+      "status": "ok",
+      "valid_from": "2024-01-01",
+      "valid_to": null,
+      "logic": {
+        "id": null,
+        "supported": false,
+        "params": {
+          "out_of_scope_v1": true
+        }
+      },
+      "note": "קטגוריית הדרכה וסימולטור אינה בהיקף גרסה 1."
+    },
+    {
+      "id": "local_training_flights",
+      "category": "train",
+      "title": "טיסות הדרכה ומבחן מקומיות",
+      "when": "ראו טבלת החוקים המקורית.",
+      "amount": {
+        "unit": "credit_hours",
+        "value": null,
+        "text": "2.5 ש' לטיסה, או 45 דק' לשעה, לפי הגבוה"
+      },
+      "source": "ישן, פרק כ\"ו/1 ס' 18.א",
+      "status": "ok",
+      "valid_from": "2024-01-01",
+      "valid_to": null,
+      "logic": {
+        "id": null,
+        "supported": false,
+        "params": {
+          "out_of_scope_v1": true
+        }
+      },
+      "note": "קטגוריית הדרכה וסימולטור אינה בהיקף גרסה 1."
+    },
+    {
+      "id": "sim_instructor_day",
+      "category": "train",
+      "title": "מאמן או בוחן בסימולטור",
+      "when": "ראו טבלת החוקים המקורית.",
+      "amount": {
+        "unit": "credit_hours",
+        "value": null,
+        "text": "3.5 ש' ליום"
+      },
+      "source": "2018 ס' 182.5.2",
+      "status": "ok",
+      "valid_from": "2024-01-01",
+      "valid_to": null,
+      "logic": {
+        "id": null,
+        "supported": false,
+        "params": {
+          "out_of_scope_v1": true
+        }
+      },
+      "note": "קטגוריית הדרכה וסימולטור אינה בהיקף גרסה 1."
+    },
+    {
+      "id": "sim_screener",
+      "category": "train",
+      "title": "ממיין שאינו מאמן או בוחן",
+      "when": "ראו טבלת החוקים המקורית.",
+      "amount": {
+        "unit": "credit_hours",
+        "value": null,
+        "text": "2.5 ש' ליום"
+      },
+      "source": "2018 ס' 182.5.3",
+      "status": "ok",
+      "valid_from": "2024-01-01",
+      "valid_to": null,
+      "logic": {
+        "id": null,
+        "supported": false,
+        "params": {
+          "out_of_scope_v1": true
+        }
+      },
+      "note": "קטגוריית הדרכה וסימולטור אינה בהיקף גרסה 1."
+    },
+    {
+      "id": "sim_friday_holiday_eve",
+      "category": "train",
+      "title": "סימולטור ביום שישי או בערב חג",
+      "when": "ראו טבלת החוקים המקורית.",
+      "amount": {
+        "unit": "credit_hours",
+        "value": null,
+        "text": "2.5 ש'"
+      },
+      "source": "2018 ס' 182.5.5",
+      "status": "ok",
+      "valid_from": "2024-01-01",
+      "valid_to": null,
+      "logic": {
+        "id": null,
+        "supported": false,
+        "params": {
+          "out_of_scope_v1": true
+        }
+      },
+      "note": "קטגוריית הדרכה וסימולטור אינה בהיקף גרסה 1."
+    },
+    {
+      "id": "senior_instructor_65",
+      "category": "train",
+      "title": "מדריך ותיק (+65) בסימולטור",
+      "when": "ראו טבלת החוקים המקורית.",
+      "amount": {
+        "unit": "credit_hours",
+        "value": null,
+        "text": "1.75 / 3.5 / 4.5 / 7.25 ש' לאימון, לפי מדרגה"
+      },
+      "source": "2024 ס' 23",
+      "status": "ok",
+      "valid_from": "2024-01-01",
+      "valid_to": null,
+      "logic": {
+        "id": null,
+        "supported": false,
+        "params": {
+          "out_of_scope_v1": true
+        }
+      },
+      "note": "קטגוריית הדרכה וסימולטור אינה בהיקף גרסה 1."
+    },
+    {
+      "id": "examiner_training_boost",
+      "category": "train",
+      "title": "מאיץ הדרכה לבוחנים",
+      "when": "ראו טבלת החוקים המקורית.",
+      "amount": {
+        "unit": "credit_hours",
+        "value": null,
+        "text": "2.5 ש' לכל סליפ מעבר לסף"
+      },
+      "source": "2024 ס' 12",
+      "status": "ok",
+      "valid_from": "2024-01-01",
+      "valid_to": null,
+      "logic": {
+        "id": null,
+        "supported": false,
+        "params": {
+          "out_of_scope_v1": true
+        }
+      },
+      "note": "קטגוריית הדרכה וסימולטור אינה בהיקף גרסה 1."
+    }
+  ]
+}
