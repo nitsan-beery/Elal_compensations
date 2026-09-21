@@ -168,8 +168,15 @@ function absence_day_credit(ctx, params, rule) {
       }
     }
     ctx.expect(day.date, 'absence', credit, rule, rule.title);
-    if (params.report_flag_column) ctx.expectFlag(day.date, params.report_flag_column, 1, rule);
-    if (params.tab_hours != null) ctx.expectTab(day.date, H(params.tab_hours), rule);
+    // יום בתוך סבב, בלי טיסה משלו (SIM_BER ב-18/11/2025, באמצע סבב BER): ה-TAB הוא של השהייה בחו"ל,
+    // וסימון העמודה נרשם ביום תחילת הסבב.
+    const away = !day.exec?.legs?.length && !day.plan?.legs?.length
+      ? ctx.execPairings.find((p) => p.from < day.date && day.date < p.to) : null;
+    if (params.report_flag_column) {
+      const flagDate = away && params.away_flag_on_pairing_start ? away.from : day.date;
+      ctx.expectFlag(flagDate, params.report_flag_column, 1, rule);
+    }
+    if (params.tab_hours != null && !away) ctx.expectTab(day.date, H(params.tab_hours), rule);
     ctx.markAbsence(day.date, rule.id);
   }
 }
@@ -610,7 +617,7 @@ export const LOGIC = {
 export const KNOWN_PARAMS = {
   credit_from_scheduled: [],
   min_slip_credit: ['min_credit_hours', 'per_fdp', 'legal_rest_hours', 'report_minutes_before_std'],
-  absence_day_credit: ['plan_codes', 'report_codes', 'plan_code_prefixes', 'report_code_prefixes', 'report_flag_column', 'credit_hours', 'tab_hours', 'requires_assigned_activity', 'flight_day_takes_higher'],
+  absence_day_credit: ['plan_codes', 'report_codes', 'plan_code_prefixes', 'report_code_prefixes', 'report_flag_column', 'credit_hours', 'tab_hours', 'requires_assigned_activity', 'flight_day_takes_higher', 'away_flag_on_pairing_start'],
   vacation_credit_balance: ['per_day_hours', 'days_full_rate', 'monthly_max_hours', 'yearly_cap_days', 'taper_table', 'taper_table_complete', 'taper_monthly_totals'],
   absence_month_cap: ['cap_hours'],
   late_landing_home: ['grace_minutes', 'step_minutes', 'hours_per_step'],
