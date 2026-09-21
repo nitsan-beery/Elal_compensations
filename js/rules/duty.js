@@ -11,6 +11,7 @@
 
 import { hoursToMin, minToHhmm } from '../time.js';
 import { describePairing } from '../model.js';
+import { stationOffset } from '../airports.js';
 
 const H = (hours) => hoursToMin(hours) ?? 0;
 const dayMs = 86400000;
@@ -315,7 +316,7 @@ function night_landings(ctx, params, rule) {
   // נחיתה לא ודאית נשלחת לבדיקה רק כשהיא יכולה לשנות את התוצאה.
   if (unsure.length && night.length + unsure.length >= params.min_planned_count) {
     for (const leg of unsure) {
-      ctx.review(`${ddmm(leg.date)} ${leg.flight}: הנחיתה ב-${leg.dst} היא ${minToHhmm(leg.arr.min)} שעון מקומי, ולא ידוע ההפרש לשעון ישראל. ` +
+      ctx.review(`${ddmm(leg.date)} ${leg.flight}: הנחיתה ב-${leg.dst} היא ${minToHhmm(leg.arr.min)} שעון מקומי, והשדה לא בטבלת אזורי הזמן, כך שלא ידוע ההפרש לשעון ישראל. ` +
         `לא ניתן לדעת אם היא נחיתת לילה, וזה משנה את ${rule.title}. דורש בדיקה ידנית.`, rule);
     }
   }
@@ -389,7 +390,11 @@ function arrivalAtBaseClock(ctx, leg) {
       if (l.org === leg.dst && l.dst === ctx.domicile) found.push({ date: day.date, off: mod(l.std + l.skdDur - l.sta + 720, 1440) - 720 });
     }
   }
-  if (!found.length) return null;
+  if (!found.length) {
+    // אין הפרש בקבצים: לפי אזור הזמן של השדה (LTN → לונדון), כולל שעון קיץ.
+    const off = stationOffset(leg.dst, leg.date, ctx.domicile);
+    return off == null ? null : mod(leg.arr.min - off, 1440);
+  }
   const closest = found.sort((a, b) => Math.abs(Date.parse(a.date) - Date.parse(leg.date)) - Math.abs(Date.parse(b.date) - Date.parse(leg.date)))[0];
   return mod(leg.arr.min - closest.off, 1440);
 }

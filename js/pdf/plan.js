@@ -11,6 +11,7 @@
 
 import { extractPages, toRows, pageText } from './extract.js';
 import { clockToMin, hhmmToMin, isoDate } from '../time.js';
+import { stationOffset } from '../airports.js';
 
 /** היסטים קבועים מעמודת ה-date של הבלוק. תבנית הדוח זהה בין חודשים. */
 const COL = { date: 0, h: 25, duty: 42, flt: 56, r: 95, org: 103, t1: 125, t2: 146, dst: 168, ac: 185, info: 215, val: 240 };
@@ -205,7 +206,8 @@ function readTimedRow(c, anchorItem) {
  * כדי לחשב STA − STD של רגל DH צריך את הפרש השעון של התחנה, ולומדים אותו מאותו
  * קובץ: יום עם תחנה זרה אחת שה-FT שלו מתיישב עם הפרש אחד בלבד. הלוך-חזור באותו
  * יום לא מלמד כלום, כי ההפרש מתקזז. בוחרים את ההפרש שנלמד ביום הקרוב ביותר,
- * בגלל מעברי שעון קיץ. אם אין – `dur` נשאר null, והמנוע מנסה את הדוח.
+ * בגלל מעברי שעון קיץ. אם אין – לפי טבלת אזורי הזמן (airports.js), ואם השדה לא שם –
+ * `dur` נשאר null, והמנוע מנסה את הדוח.
  * מחזיר את ההפרשים שנלמדו (תחנה → [{date, off}], ‏off = שעון מקומי − שעון הבסיס בדקות),
  * כדי שחוקים יוכלו להמיר שעת נחיתה בחו"ל לשעון הבסיס.
  */
@@ -235,6 +237,7 @@ function resolveDeadheads(days) {
         if (!t.foreign) continue;
         const closest = (learned[station] || []).sort((a, b) => dist(a.date, day.date) - dist(b.date, day.date))[0];
         if (closest) offsets[station] = closest.off;
+        else offsets[station] = stationOffset(station, day.date);
       }
       const missing = [[leg.dep, leg.org], [leg.arr, leg.dst]].some(([t, s]) => t.foreign && offsets[s] == null);
       if (!missing) leg.dur = legDuration(leg, offsets);
