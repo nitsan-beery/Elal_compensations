@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "rules_version": "2026-09-21.7",
+  "rules_version": "2026-09-21.9",
   "updated": "2026-09-21",
   "source": "טבלת פיצויי אצ\"א אל על (Artifact), על בסיס ההסכם הישן (פרק כ\"ה), הסכם 2018, הסכם אצ\"א 2024 והסכם 2026",
   "precedence": "הסכם מאוחר גובר על מוקדם. סעיף שלא בוטל ולא שונה נשאר בתוקף. פיצויי 2018, 2024 ו‑2026 באים בנוסף לפיצויים מהסכמים אחרים.",
@@ -114,7 +114,7 @@
       "when": "סליפ טיסתי שמשכו המתוכנן קצר מ‑5 שעות.",
       "amount": {
         "unit": "credit_hours",
-        "value": 5.0,
+        "value": 5,
         "text": "5 ש' קרדיט במקום הקרדיט לפי שעות הטיסה"
       },
       "source": "2018 ס' 27.2",
@@ -125,10 +125,13 @@
         "id": "min_slip_credit",
         "supported": true,
         "params": {
-          "min_credit_hours": 5.0
+          "min_credit_hours": 5.0,
+          "per_fdp": true,
+          "legal_rest_hours": 10,
+          "report_minutes_before_std": 60
         }
       },
-      "note": "ההפרש בין הקרדיט בפועל למינימום נרשם בעמודת Rig."
+      "note": "ההפרש בין הקרדיט בפועל למינימום נרשם בעמודת Rig. כמה סבבים באותו FDP (בלי 10 שעות מנוחה ביניהם) מקבלים את המינימום יחד: 5 שעות כפול מספר הסבבים, מול הקרדיט של כולם (אומת: 25/11/2025 ו-30/12/2025, BUS ו-LCA, ‏Rig 02:41)."
     },
     {
       "id": "absence_month_cap",
@@ -137,7 +140,7 @@
       "when": "חודש שכולו היעדרות.",
       "amount": {
         "unit": "credit_hours",
-        "value": 75.0,
+        "value": 75,
         "text": "עד 75 ש' זיכוי"
       },
       "source": "2024 ס' 61",
@@ -608,30 +611,37 @@
       "id": "recall_from_vacation",
       "category": "exec",
       "title": "קריאה מחופשה",
-      "when": "אצ\"א שתוכנן לחופשה או יצא לחופשה מאושרת, ונקרא לחזור לטיסה.",
+      "when": "יום שתוכנן בו VAC, ובדוח הביצוע יש בו טיסה או פעילות אחרת, ואין בו VAC.",
       "amount": {
         "unit": "credit_hours",
-        "value": null,
-        "text": "2.5 ש' לכל יממה של פעילות טיסתית בתקופת החופשה"
+        "value": 2.5,
+        "text": "2:30 ש' לתשלום לכל יממה או חלק ממנה של פעילות בימי החופשה, בנוסף לקרדיט של מה שבוצע"
       },
       "source": "ישן, כ\"ה ס' 13.ג",
       "status": "ok",
       "valid_from": "2024-01-01",
       "valid_to": null,
       "logic": {
-        "id": null,
-        "supported": false,
+        "id": "vacation_recall",
+        "supported": true,
         "params": {
-          "requires_user_answer": true
+          "plan_codes": [
+            "VAC_FLD"
+          ],
+          "report_codes": [
+            "VAC_F"
+          ],
+          "hours": 2.5,
+          "report_column": "COM"
         }
       },
-      "note": "דורש מידע שאינו בקבצים. האפליקציה תשאל את המשתמש."
+      "note": "העמודה בדוח (COM) לא אומתה: עוד לא נראה דוח עם קריאה מחופשה. טיסה בימי חופשה מתוכננים לא נשאלת \"מה קרה\", כי ידוע שנקראת מחופשה. קריאה מיוחדת נבדקת בנפרד לפי S/C בדוח."
     },
     {
       "id": "training_cancelled_assigned_flight",
       "category": "exec",
       "title": "ביטול הדרכה או סימולטור והצבה לטיסה",
-      "when": "אצ\"א שתוכנן להדרכה, סימולטור או CPT, ההדרכה בוטלה, והוא הוצב לטיסה באותן יממות.",
+      "when": "יום שתוכננו בו סימולטור או פעילות קרקע (שאינה HOME), ובדוח הביצוע יש בו טיסה.",
       "amount": {
         "unit": "credit_hours",
         "value": null,
@@ -642,13 +652,26 @@
       "valid_from": "2024-01-01",
       "valid_to": null,
       "logic": {
-        "id": null,
-        "supported": false,
+        "id": "training_cancelled_flight",
+        "supported": true,
         "params": {
-          "requires_user_answer": true
+          "plan_codes": [
+            "CPT_BAS",
+            "CRM_CRS",
+            "INV_C"
+          ],
+          "plan_code_prefixes": [
+            "SIM",
+            "CPT",
+            "CRM",
+            "INV"
+          ],
+          "moved_ok_prefixes": [
+            "HOME"
+          ]
         }
       },
-      "note": "דורש מידע שאינו בקבצים. האפליקציה תשאל את המשתמש."
+      "note": "הטיסה נבדקת כקריאה מיוחדת גם כשהדוח לא רשם S/C. HOME שזז ליום אחר בחודש אינו מזכה בפיצוי (החלטת בעל המוצר, 21/09/2026; 07/06/2026: HOME_RGT זז ל-09). HOME שלא בוצע ביום אחר נשלח לבדיקה ידנית. כוננות (SBY_S) ו-UNF_B אינן הדרכה."
     },
     {
       "id": "active_crew_activation",

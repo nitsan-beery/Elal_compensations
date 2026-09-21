@@ -556,6 +556,7 @@ function renderRules() {
           <select aria-label="קטגוריה">
             <option value="">כל הקטגוריות</option>
             ${Object.entries(CATEGORY_LABEL).map(([k, v]) => `<option value="${k}">${v}</option>`).join('')}
+            <option value="unsupported">לא נתמך</option>
           </select>
           <label class="small"><input type="checkbox"> רק חוקים שבתוקף ונתמכים</label>
           <span class="spacer"></span>
@@ -587,7 +588,8 @@ function renderRuleList() {
     const expired = !!(r.valid_to && r.valid_to < today);
     const active = r.status !== 'cancelled' && !expired && !reasonOf.has(r.id);
     if (rulesUi.onlyActive && !active) return false;
-    if (rulesUi.category && r.category !== rulesUi.category) return false;
+    if (rulesUi.category === 'unsupported') { if (!reasonOf.has(r.id)) return false; }
+    else if (rulesUi.category && r.category !== rulesUi.category) return false;
     if (!q) return true;
     return [r.id, r.title, r.when, r.amount?.text, r.source, r.note, r.logic?.id].some((s) => String(s ?? '').toLowerCase().includes(q));
   });

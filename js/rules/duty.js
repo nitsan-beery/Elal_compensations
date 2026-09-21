@@ -480,6 +480,24 @@ function special_date_activity(ctx, params, rule) {
   }
 }
 
+/**
+ * קיבוץ סבבי הביצוע ל-FDP: סבבים עוקבים שאין ביניהם מנוחה חוקית, לפי STD/STA. סבב חתוך,
+ * או סבב שחסרים לו זמנים, עומד לבד.
+ */
+export function execFdpGroups(pairings, domicile, legalRest, reportMin) {
+  const sorted = [...pairings].sort((a, b) => a.from.localeCompare(b.from));
+  const groups = [];
+  let prev = null;
+  for (const p of sorted) {
+    const span = execSpan(p, domicile, true);
+    const joins = prev && prev.span.end != null && span.start != null && restBetween(prev.span, span, reportMin) < legalRest;
+    if (joins) groups.at(-1).push(p);
+    else groups.push([p]);
+    prev = { span };
+  }
+  return groups;
+}
+
 export const DUTY_LOGIC = {
   same_fdp_rounds,
   second_unplanned_activity,

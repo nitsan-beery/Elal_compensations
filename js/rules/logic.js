@@ -6,7 +6,7 @@
 
 import { hoursToMin, minToHhmm } from '../time.js';
 import { describePairing } from '../model.js';
-import { DUTY_LOGIC, DUTY_PARAMS } from './duty.js';
+import { DUTY_LOGIC, DUTY_PARAMS, execFdpGroups } from './duty.js';
 
 const H = (hours) => hoursToMin(hours) ?? 0;
 
@@ -87,13 +87,33 @@ const sumLegs = (pairing) =>
  */
 function min_slip_credit(ctx, params, rule) {
   const min = H(params.min_credit_hours);
-  for (const pairing of ctx.execPairings) {
-    if (ctx.pairingHandledBy(pairing, 'lost_hours_credit')) continue;
-    if (pairing.cutAtStart || pairing.cutAtEnd) continue;
-    const credit = sumLegs(pairing);
-    if (credit == null || credit === 0 || credit >= min) continue;
-    ctx.expectPairing(pairing, 'rig', min - credit, rule, `השלמה ל-${params.min_credit_hours} שעות`);
+  const groups = params.per_fdp
+    ? execFdpGroups(ctx.execPairings, ctx.domicile, H(params.legal_rest_hours), params.report_minutes_before_std ?? 0)
+    : ctx.execPairings.map((p) => [p]);
+  for (const group of groups) {
+    const slips = group.filter((p) => !ctx.pairingHandledBy(p, 'lost_hours_credit') && !p.cutAtStart && !p.cutAtEnd);
+    if (slips.length !== group.length) {
+      // סבב חתוך או סבב שבוטל בגלל מטוס חכור: שאר ה-FDP נבדק לבד, כל סבב בנפרד.
+      for (const p of slips) expectMinSlip(ctx, [p], min, params, rule);
+      continue;
+    }
+    expectMinSlip(ctx, group, min, params, rule);
   }
+}
+
+/**
+ * המינימום ל-FDP הוא המינימום לסליפ כפול מספר הסבבים שבו, מול הקרדיט של כולם יחד
+ * (25/11/2025: BUS 05:04 ו-LCA 02:15 → Rig 02:41 = 2 × 5:00 − 07:19, ולא 02:45).
+ */
+function expectMinSlip(ctx, group, min, params, rule) {
+  const credits = group.map(sumLegs);
+  if (credits.some((c) => c == null)) return;
+  const credit = credits.reduce((s, c) => s + c, 0);
+  if (credit === 0 || credit >= min * group.length) return;
+  const note = group.length === 1
+    ? `השלמה ל-${params.min_credit_hours} שעות`
+    : `השלמה ל-${group.length} × ${params.min_credit_hours} שעות על ${group.length} סבבים באותו FDP (${group.map(describePairing).join(', ')})`;
+  ctx.expectPairing(group.at(-1), 'rig', min * group.length - credit, rule, note);
 }
 
 // ---------- ימי היעדרות וזיכוי ----------
@@ -274,7 +294,8 @@ function special_call(ctx, params, rule) {
     const reported = ctx.reportedOn(match.exec, column);
     const answer = ctx.answerFor(match);
 
-    if (reported > 0 || answer?.value === 'special_call') {
+    const training = ctx.pairingHandledBy(match.exec, 'training_cancelled');
+    if (reported > 0 || answer?.value === 'special_call' || training) {
       ctx.markPairing(match.exec, 'special_call');
       const stay = awayFromBase(match.exec, ctx.domicile, ctx.timeline.at(-1).date);
       if (stay.error) {
@@ -288,7 +309,7 @@ function special_call(ctx, params, rule) {
       continue;
     }
     // טיסה לא מתוכננת בלי S/C: לא מנחשים, שואלים.
-    if (match.how === 'unplanned' && params.ask_user_if_no_sc && !answer) {
+    if (match.how === 'unplanned' && params.ask_user_if_no_sc && !answer && !ctx.pairingHandledBy(match.exec, 'vacation_recall')) {
       ctx.ask({
         id: `unplanned:${match.exec.id}`,
         date: match.exec.from,
@@ -490,6 +511,79 @@ function cancelled_no_compensation(ctx, params, rule) {
   }
 }
 
+// ---------- שינויים בפעילות שאינה טיסה ----------
+
+/**
+ * קריאה מחופשה (ישן כ"ה ס' 13.ג): יום שתוכנן בו VAC ובדוח יש בו טיסה או פעילות אחרת, ואין VAC.
+ * התשלום הוא לכל יממה או חלק ממנה של פעילות בתקופת החופשה, בנוסף לקרדיט של מה שבוצע.
+ * הסבב מסומן, וקריאה מיוחדת לא שואלת עליו "מה קרה": ידוע שהחברה קראה לחזור מחופשה.
+ */
+function vacation_recall(ctx, params, rule) {
+  if (!ctx.hasPlan || !ctx.hasExec) return;
+  const hours = H(params.hours);
+  const key = params.report_column === 'S/C' ? 'sc' : 'com';
+  const byPairing = new Map();
+  for (const day of ctx.timeline) {
+    if (!(day.plan?.codes ?? []).some((c) => codeIn(c, params.plan_codes, params.plan_code_prefixes))) continue;
+    if (ctx.execCodes(day).some((c) => codeIn(c, params.report_codes, params.report_code_prefixes))) continue;
+    const pairing = ctx.execPairings.find((p) => p.from <= day.date && day.date <= p.to);
+    if (pairing) {
+      if (!byPairing.has(pairing)) byPairing.set(pairing, []);
+      byPairing.get(pairing).push(day.date);
+      continue;
+    }
+    const activity = ctx.activityCodes(day);
+    if (activity.length) ctx.expect(day.date, key, hours, rule, `${rule.title}: ${activity.join(', ')} ביום חופשה מתוכנן.`);
+  }
+  for (const [pairing, dates] of byPairing) {
+    ctx.markPairing(pairing, 'vacation_recall');
+    ctx.expectPairing(pairing, key, dates.length * hours, rule,
+      `${rule.title}: ${dates.length === 1 ? 'יממה אחת' : `${dates.length} יממות`} של טיסה בימי חופשה מתוכננים (${dates.map(dayOf).join(', ')}).`);
+  }
+}
+
+/**
+ * ביטול הדרכה והצבה לטיסה (ישן כ"ה ס' 17.ג): יום שתוכננו בו סימולטור או הדרכת קרקע,
+ * ובדוח יש בו טיסה. הטיסה היא קריאה מיוחדת, גם כשהדוח לא רשם S/C. הסבב מסומן, והחישוב
+ * עצמו נעשה בקריאה מיוחדת.
+ *
+ * פעילות שמתחילה ב-`moved_ok_prefixes` (HOME) אינה הדרכה לעניין הזה: אם היא זזה ליום אחר
+ * בחודש אין פיצוי (07/06/2026: HOME_RGT תוכנן ל-07 ובוצע ב-09). אם לא זזה – בדיקה ידנית.
+ */
+function training_cancelled_flight(ctx, params, rule) {
+  if (!ctx.hasPlan || !ctx.hasExec) return;
+  const marked = new Set();
+  for (const day of ctx.timeline) {
+    // רק טיסה שהמריאה ביום הזה. יום שהייה בחו"ל בתוך סבב אינו הצבה לטיסה: SIM_BER ב-18/11/2025
+    // הוא סימולטור בברלין, בתוך סבב BER 17–19 שתוכנן בשבילו.
+    if (!day.exec?.legs?.length || (day.plan?.legs?.length ?? 0) > 0) continue;
+    const pairing = ctx.execPairings.find((p) => p.from <= day.date && day.date <= p.to);
+    if (!pairing) continue;
+    const planCodes = day.plan?.codes ?? [];
+
+    const training = planCodes.filter((c) => codeIn(c, params.plan_codes, params.plan_code_prefixes));
+    if (training.length && !marked.has(pairing)) {
+      marked.add(pairing);
+      ctx.markPairing(pairing, 'training_cancelled');
+      ctx.note(day.date, `${training.join(', ')} תוכנן ל-${dayOf(day.date)}, ובמקומו הוצבת ל-${describePairing(pairing)}. ` +
+        'זו קריאה מיוחדת לפי ס\' 17.ג.', rule);
+    }
+
+    for (const code of planCodes.filter((c) => codeIn(c, [], params.moved_ok_prefixes))) {
+      const prefix = params.moved_ok_prefixes.find((p) => code.startsWith(p));
+      const movedTo = ctx.timeline.filter((d) => d.date !== day.date && ctx.execCodes(d).some((c) => c.startsWith(prefix)) &&
+        !(d.plan?.codes ?? []).some((c) => c.startsWith(prefix)));
+      if (movedTo.length) {
+        ctx.note(day.date, `${code} תוכנן ל-${dayOf(day.date)} ובוצע ב-${movedTo.map((d) => dayOf(d.date)).join(', ')}, ` +
+          `ובמקומו הוצבת ל-${describePairing(pairing)}. הזזה בתוך החודש אינה מזכה בפיצוי.`, rule);
+      } else {
+        ctx.review(`${code} תוכנן ל-${dayOf(day.date)}, ובמקומו הוצבת ל-${describePairing(pairing)}. ` +
+          `${code} לא בוצע ביום אחר בחודש. דורש בדיקה ידנית.`, rule);
+      }
+    }
+  }
+}
+
 export const LOGIC = {
   credit_from_scheduled,
   min_slip_credit,
@@ -503,6 +597,8 @@ export const LOGIC = {
   lost_hours_credit,
   voluntary_swap,
   cancelled_no_compensation,
+  vacation_recall,
+  training_cancelled_flight,
   ...DUTY_LOGIC,
 };
 
@@ -513,7 +609,7 @@ export const LOGIC = {
  */
 export const KNOWN_PARAMS = {
   credit_from_scheduled: [],
-  min_slip_credit: ['min_credit_hours'],
+  min_slip_credit: ['min_credit_hours', 'per_fdp', 'legal_rest_hours', 'report_minutes_before_std'],
   absence_day_credit: ['plan_codes', 'report_codes', 'plan_code_prefixes', 'report_code_prefixes', 'report_flag_column', 'credit_hours', 'tab_hours', 'requires_assigned_activity', 'flight_day_takes_higher'],
   vacation_credit_balance: ['per_day_hours', 'days_full_rate', 'monthly_max_hours', 'yearly_cap_days', 'taper_table', 'taper_table_complete', 'taper_monthly_totals'],
   absence_month_cap: ['cap_hours'],
@@ -524,6 +620,8 @@ export const KNOWN_PARAMS = {
   lost_hours_credit: ['requires_user_answer', 'credit_column', 'include_min_slip_credit'],
   voluntary_swap: ['requires_user_answer'],
   cancelled_no_compensation: ['requires_user_answer'],
+  vacation_recall: ['plan_codes', 'plan_code_prefixes', 'report_codes', 'report_code_prefixes', 'hours', 'report_column'],
+  training_cancelled_flight: ['plan_codes', 'plan_code_prefixes', 'moved_ok_prefixes'],
   ...DUTY_PARAMS,
 };
 
@@ -536,6 +634,9 @@ export const LOGIC_ORDER = [
   'long_flight_day',
   'cancelled_no_compensation',
   'voluntary_swap',
+  // מסמנים סבבים שקריאה מיוחדת צריכה להכיר: קריאה מחופשה, והדרכה שבוטלה.
+  'vacation_recall',
+  'training_cancelled_flight',
   'special_call',
   'lost_hours_credit',
   'min_slip_credit',

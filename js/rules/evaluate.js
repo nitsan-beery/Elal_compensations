@@ -10,6 +10,7 @@ import { LOGIC, LOGIC_ORDER } from './logic.js';
 import { rulesInEffect, partitionRules, rulesByLogic, classifyCode } from './catalog.js';
 import { buildTimeline, buildPairings, markCarryIn, matchPairings, describePairing } from '../model.js';
 import { hoursToMin } from '../time.js';
+import { OPTIONAL_COLUMNS } from '../pdf/exec.js';
 
 /** עמודות הדוח שכל סוג ציפייה נבדק מולן. */
 const KEY_COLUMNS = {
@@ -110,6 +111,7 @@ export function evaluate({ rulesData, plan = null, exec = null, answers = {} }) 
   if (exec) {
     out.comparison = compare({ out, timeline, execPairings, domicile, codes });
     out.totals = compareTotals(out, exec);
+    warnMissingColumns(out, exec);
   }
   if (plan) out.planCheck = checkPlanFictTime(plan, mode === 'plan' ? out : evaluate({ rulesData, plan }));
   return out;
@@ -506,10 +508,14 @@ function compare({ out, timeline, execPairings, domicile }) {
   return rows.sort((a, b) => a.dates[0].localeCompare(b.dates[0]) || COMPARED_COLUMNS.indexOf(a.column) - COMPARED_COLUMNS.indexOf(b.column));
 }
 
-/** סיכום חודשי מול שורת הסיכום בדוח. CRTOT = Credit + Rig, ‏COMTOT = COM + S/C. */
+/**
+ * סיכום חודשי מול שורת הסיכום בדוח. CRTOT = Credit + Rig, ‏COMTOT = COM + S/C.
+ * עמודת פיצוי שאינה בדוח פירושה שלא היה פיצוי כזה בחודש, והיא נקראת כ-0.
+ */
 function compareTotals(out, exec) {
   const sum = (column) => out.comparison.filter((r) => r.column === column).reduce((s, r) => s + r.expected, 0);
-  const t = exec.totals ?? {};
+  const t = { ...exec.totals };
+  for (const c of exec.missingColumns ?? []) if (OPTIONAL_COLUMNS.includes(c)) t[c] ??= 0;
   const rows = [
     { column: 'Credit', expected: sum('Credit'), reported: t.Credit ?? null },
     { column: 'Rig', expected: sum('Rig'), reported: t.Rig ?? null },
@@ -531,6 +537,19 @@ function checkPlanFictTime(plan, alone) {
   const expected = deadheads + alone.expectations.filter((e) => e.key === 'absence').reduce((s, e) => s + e.min, 0);
   const reported = plan.summary.fictFlightTime;
   return { expected, reported, ok: expected === reported };
+}
+
+/**
+ * עמודת פיצוי חסרה אינה תקלה, אבל אם יש פער בסיכום שהיא חלק ממנו, ייתכן שהיא נחתכה בהדפסה.
+ */
+function warnMissingColumns(out, exec) {
+  const missing = (exec.missingColumns ?? []).filter((c) => OPTIONAL_COLUMNS.includes(c));
+  for (const [total, parts] of [['CRTOT', ['Rig']], ['COMTOT', ['COM', 'S/C']]]) {
+    const absent = parts.filter((c) => missing.includes(c));
+    if (!absent.length || out.totals.find((t) => t.column === total)?.ok !== false) continue;
+    out.warnings.push(`יש פער ב-${total}, ו${absent.length === 1 ? 'עמודת' : 'עמודות'} ${absent.join(' ו-')} לא ${absent.length === 1 ? 'מופיעה' : 'מופיעות'} בדוח. ` +
+      'בדרך כלל זה אומר שלא היה פיצוי כזה בחודש, אבל ייתכן שהעמודה נחתכה בהדפסה.');
+  }
 }
 
 function checkSameMonthAndEmployee(plan, exec, warnings) {

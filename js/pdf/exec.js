@@ -13,6 +13,11 @@ const LEG_COLUMNS = ['Details', 'Flt', 'Seq', 'DHD', 'DD', 'ORG', 'DST', 'POS', 
 
 /** עמודות שהחוקים נשענים עליהן. היעדרן מדווח למשתמש. */
 const REQUIRED_COLUMNS = ['Day', 'Details', 'Credit', 'Rig', 'FLT', 'COM', 'S/C'];
+/**
+ * עמודות פיצוי שהדוח משמיט בחודש שאין בו פיצוי כזה (10/2025: בלי Rig ו-S/C). עמודה כזו
+ * שחסרה נקראת כ-0, והאזהרה מוצגת רק כשיש פער בסיכום (evaluate.js).
+ */
+export const OPTIONAL_COLUMNS = ['Rig', 'COM', 'S/C'];
 
 const MAX_SNAP = 16; // מרחק מרבי בין מרכז פריט למרכז כותרת
 
@@ -60,8 +65,9 @@ export async function parseExec(data) {
   const present = dayCols ? Object.keys(dayCols) : [];
   const missing = REQUIRED_COLUMNS.filter((c) => !present.includes(c));
   if (!dayCols) throw new Error('לא נמצאה טבלת הימים בדוח הביצוע.');
-  if (missing.length) {
-    warnings.push(`עמודות חסרות בדוח: ${missing.join(', ')}. ייתכן שהן נחתכו בהדפסה. חוקים שתלויים בהן לא ייבדקו.`);
+  const missingRequired = missing.filter((c) => !OPTIONAL_COLUMNS.includes(c));
+  if (missingRequired.length) {
+    warnings.push(`עמודות חסרות בדוח: ${missingRequired.join(', ')}. ייתכן שהן נחתכו בהדפסה. חוקים שתלויים בהן לא ייבדקו.`);
   }
   if (header.status && !/closed/i.test(header.status)) {
     warnings.push(`סטטוס החודש הוא "${header.status}" ולא Closed. הנתונים אינם סופיים.`);
