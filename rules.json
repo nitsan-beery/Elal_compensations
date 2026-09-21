@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "rules_version": "2026-09-21.5",
+  "rules_version": "2026-09-21.6",
   "updated": "2026-09-21",
   "source": "טבלת פיצויי אצ\"א אל על (Artifact), על בסיס ההסכם הישן (פרק כ\"ה), הסכם 2018, הסכם אצ\"א 2024 והסכם 2026",
   "precedence": "הסכם מאוחר גובר על מוקדם. סעיף שלא בוטל ולא שונה נשאר בתוקף. פיצויי 2018, 2024 ו‑2026 באים בנוסף לפיצויים מהסכמים אחרים.",
@@ -680,7 +680,7 @@
       "when": "טיסה או סימולטור לא מתוכננים של אצ\"א שנמצא בבסיס, באותה יממה שבה ביצע סימולטור או טיסה אחרת. לא כולל פעילות קרקעית, ולא שתי פעילויות באותו FDP.",
       "amount": {
         "unit": "credit_hours",
-        "value": null,
+        "value": 2.5,
         "text": "2.5 ש' בגין הפעילות השנייה"
       },
       "source": "2024 ס' 42.6–42.7",
@@ -688,13 +688,22 @@
       "valid_from": "2024-01-01",
       "valid_to": null,
       "logic": {
-        "id": null,
-        "supported": false,
+        "id": "second_unplanned_activity",
+        "supported": true,
         "params": {
-          "requires_user_answer": true
+          "legal_rest_hours": 10,
+          "report_minutes_before_std": 60,
+          "hours": 2.5,
+          "report_column": "COM",
+          "sim_report_codes": [
+            "SIM"
+          ],
+          "sim_plan_codes": [
+            "SIM_SHO"
+          ]
         }
       },
-      "note": "דורש מידע שאינו בקבצים. האפליקציה תשאל את המשתמש."
+      "note": "לא מתוכננת = לא בקובץ התכנון (החלטת בעל המוצר, 21/09/2026). FDP = פעילויות בלי מנוחה חוקית ביניהן: פחות מ‑legal_rest_hours (10, לפי FAR 117 שאליו מפנה הגדרת ה‑FDP בהסכם 2018; החלטת בעל המוצר, 21/09/2026) מה‑On block בבסיס ועד ההתייצבות לפעילות הבאה. זמן ההתייצבות = STD פחות report_minutes_before_std (2018 ס' 52.1, צי צר גוף). שתי פעילויות מתוכננות באותו FDP הן חוק two_rounds_same_fdp. החלפה מרצון אינה פעילות לא מתוכננת. לסימולטור אין שעות בקבצים, ולכן שואלים אם הייתה מנוחה. העמודה בדוח (COM) עוד לא אומתה."
     },
     {
       "id": "memorial_independence_day",
@@ -703,21 +712,68 @@
       "when": "פעילות טיסתית עם איסוף מ‑16:00 בערב החג, או נחיתה עד 16:00 ביום עצמו. חל גם על שהייה מחוץ לבסיס. פיצוי נפרד על כל אחד מהימים.",
       "amount": {
         "unit": "credit_hours",
-        "value": null,
-        "text": "2.5 ש'"
+        "value": 2.5,
+        "text": "2.5 ש' לכל אחד מהימים"
       },
       "source": "2024 ס' 42.1–42.3, 42.5",
       "status": "ok",
       "valid_from": "2024-01-01",
       "valid_to": null,
       "logic": {
-        "id": null,
-        "supported": false,
+        "id": "special_date_activity",
+        "supported": true,
         "params": {
-          "requires_user_answer": true
+          "occasions": [
+            {
+              "title": "ערב יום הזיכרון ויום הזיכרון",
+              "dates": {
+                "2024": "2024-05-13",
+                "2025": "2025-04-30",
+                "2026": "2026-04-21",
+                "2027": "2027-05-11"
+              },
+              "months": [
+                4,
+                5
+              ],
+              "from": {
+                "day_offset": -1,
+                "time": "16:00"
+              },
+              "to": {
+                "day_offset": 0,
+                "time": "16:00"
+              }
+            },
+            {
+              "title": "ערב יום העצמאות ויום העצמאות",
+              "dates": {
+                "2024": "2024-05-14",
+                "2025": "2025-05-01",
+                "2026": "2026-04-22",
+                "2027": "2027-05-12"
+              },
+              "months": [
+                4,
+                5
+              ],
+              "from": {
+                "day_offset": -1,
+                "time": "16:00"
+              },
+              "to": {
+                "day_offset": 0,
+                "time": "16:00"
+              }
+            }
+          ],
+          "flight_activity_only": true,
+          "hours": 2.5,
+          "report_column": "COM",
+          "report_minutes_before_std": 60
         }
       },
-      "note": "דורש מידע שאינו בקבצים. האפליקציה תשאל את המשתמש."
+      "note": "התאריכים לפי הלוח העברי (ד' ו‑ה' באייר, אחרי הזזות). יש להוסיף שנה חדשה ל‑dates; בחודש של שנה חסרה האפליקציה מתריעה ולא מדלגת. \"איסוף מ‑16:00 בערב ו/או נחיתה עד 16:00 ביום עצמו\" נבדק כחפיפה בין הסבב (מההתייצבות ועד הנחיתה בבסיס, כולל שהייה מחוץ לבסיס, ס' 42.5) לבין החלון. העמודה בדוח (COM) עוד לא אומתה."
     },
     {
       "id": "first_school_day",
@@ -726,21 +782,43 @@
       "when": "פעילות מטעם החברה בין 07:00 ל‑11:00 ביום הראשון של שנת הלימודים. חל גם על שהייה מחוץ לבסיס.",
       "amount": {
         "unit": "credit_hours",
-        "value": null,
+        "value": 2.5,
         "text": "2.5 ש'"
       },
       "source": "2024 ס' 42.4–42.5",
       "status": "ok",
-      "valid_from": "2024-01-01",
+      "valid_from": "2025-09-01",
       "valid_to": null,
       "logic": {
-        "id": null,
-        "supported": false,
+        "id": "special_date_activity",
+        "supported": true,
         "params": {
-          "requires_user_answer": true
+          "occasions": [
+            {
+              "title": "היום הראשון ללימודים",
+              "dates": {
+                "2025": "2025-09-01"
+              },
+              "months": [
+                9
+              ],
+              "from": {
+                "day_offset": 0,
+                "time": "07:00"
+              },
+              "to": {
+                "day_offset": 0,
+                "time": "11:00"
+              }
+            }
+          ],
+          "flight_activity_only": false,
+          "hours": 2.5,
+          "report_column": "COM",
+          "report_minutes_before_std": 60
         }
       },
-      "note": "דורש מידע שאינו בקבצים. האפליקציה תשאל את המשתמש."
+      "note": "חל משנת הלימודים שנפתחה בספטמבר 2025. יש להוסיף את תאריך הפתיחה של כל שנה ל‑dates; בחודש של שנה חסרה האפליקציה מתריעה. טיסה או שהייה מחוץ לבסיס בחלון מזכות. פעילות קרקע, סימולטור או כוננות – אין שעות בקבצים, ולכן שואלים. העמודה בדוח (COM) עוד לא אומתה."
     },
     {
       "id": "trainee_removal",
@@ -874,11 +952,9 @@
       "logic": {
         "id": null,
         "supported": false,
-        "params": {
-          "requires_user_answer": true
-        }
+        "params": {}
       },
-      "note": "דורש מידע שאינו בקבצים. האפליקציה תשאל את המשתמש."
+      "note": "לא נתמך: הפיצוי משולם רק אחרי מיצוי מכסה שנתית של כל הקטגוריה (5 × מספר אצ\"א בצי ובקטגוריה ביולי), וזה נתון קבוצתי שאינו בשום קובץ (החלטת בעל המוצר, 21/09/2026)."
     },
     {
       "id": "white_flight",
@@ -930,10 +1006,10 @@
       "id": "wrong_rest_planning",
       "category": "plan",
       "title": "תכנון מנוחה שגוי",
-      "when": "בתוכנית החודשית תוכננה מנוחה שלא עומדת במגבלות, הטעות לא תוקנה, ואצ\"א הסכים לבצע את הטיסה.",
+      "when": "בתוכנית החודשית תוכננה מנוחה בבסיס שלא עומדת במגבלות, הטעות לא תוקנה, ואצ\"א הסכים לבצע את הטיסה.",
       "amount": {
         "unit": "credit_hours",
-        "value": null,
+        "value": 2.5,
         "text": "2.5 ש'"
       },
       "source": "ישן, כ\"ה ס' 12.טו",
@@ -941,13 +1017,23 @@
       "valid_from": "2024-01-01",
       "valid_to": null,
       "logic": {
-        "id": null,
-        "supported": false,
+        "id": "base_rest_shortfall",
+        "supported": true,
         "params": {
-          "requires_user_answer": true
+          "answer_value": "planning_error",
+          "hours": 2.5,
+          "report_column": "COM",
+          "report_minutes_before_std": 60,
+          "rest_buffer_minutes": 90,
+          "legal_rest_hours": 10,
+          "short_stay_max_hours": 48,
+          "short_stay_factor": 2,
+          "long_stay_share": 0.5,
+          "long_stay_min_hours": 36,
+          "long_stay_max_hours": null
         }
       },
-      "note": "דורש מידע שאינו בקבצים. האפליקציה תשאל את המשתמש."
+      "note": "מנוחה חוזית בבסיס (2018 ס' 53–54): מ‑1.5 ש' אחרי תום ה‑FDP ועד 1.5 ש' לפני ההתייצבות. בשהייה של עד 48 ש' – פי 2 משעות הטיסה בבלוק המקובע; מעל 48 ש' – חצי מהשהייה, לפחות 36 ש'. הספרות בשכבת הטקסט של הסכם 2018 משובשות, והערכים פוענחו (21/09/2026); התקרה לא נקראה, ולכן long_stay_max_hours הוא null, ומקרה שתלוי בה נשלח לבדיקה ידנית. רצף טיסות סבב עוקבות מותר בתכנון עם מנוחה קצרה (2018 ס' 55) ואינו נבדק. נבדקת רק המנוחה בין שני סבבי טיסה. חוקי waive_base_rest ו‑wrong_rest_planning חולקים שאלה אחת, וכל אחד מזכה בתשובה שלו. העמודה בדוח (COM) עוד לא אומתה. ההסכם הישן חל גם על מנוחה בחו\"ל, שאינה נבדקת (ראו short_rest_outside_base)."
     },
     {
       "id": "short_rest_outside_base",
@@ -966,11 +1052,9 @@
       "logic": {
         "id": null,
         "supported": false,
-        "params": {
-          "requires_user_answer": true
-        }
+        "params": {}
       },
-      "note": "דורש מידע שאינו בקבצים. האפליקציה תשאל את המשתמש."
+      "note": "לא נתמך: דורש את טבלת המנוחה החוזית מחוץ לבסיס מההסכם הישן, שאינה נקראת בשכבת הטקסט של הקובץ. נדרשים הערכים מבעל המוצר (21/09/2026)."
     },
     {
       "id": "short_rest_las_vegas",
@@ -1071,7 +1155,7 @@
       "when": "תכנון וביצוע של פעילות תוך ויתור על המנוחה החוזית בבסיס, לבקשת החברה ובהסכמת אצ\"א.",
       "amount": {
         "unit": "credit_hours",
-        "value": null,
+        "value": 2.5,
         "text": "2.5 ש'"
       },
       "source": "2024 ס' 35",
@@ -1079,13 +1163,23 @@
       "valid_from": "2024-01-01",
       "valid_to": null,
       "logic": {
-        "id": null,
-        "supported": false,
+        "id": "base_rest_shortfall",
+        "supported": true,
         "params": {
-          "requires_user_answer": true
+          "answer_value": "company_request",
+          "hours": 2.5,
+          "report_column": "COM",
+          "report_minutes_before_std": 60,
+          "rest_buffer_minutes": 90,
+          "legal_rest_hours": 10,
+          "short_stay_max_hours": 48,
+          "short_stay_factor": 2,
+          "long_stay_share": 0.5,
+          "long_stay_min_hours": 36,
+          "long_stay_max_hours": null
         }
       },
-      "note": "דורש מידע שאינו בקבצים. האפליקציה תשאל את המשתמש."
+      "note": "מנוחה חוזית בבסיס (2018 ס' 53–54): מ‑1.5 ש' אחרי תום ה‑FDP ועד 1.5 ש' לפני ההתייצבות. בשהייה של עד 48 ש' – פי 2 משעות הטיסה בבלוק המקובע; מעל 48 ש' – חצי מהשהייה, לפחות 36 ש'. הספרות בשכבת הטקסט של הסכם 2018 משובשות, והערכים פוענחו (21/09/2026); התקרה לא נקראה, ולכן long_stay_max_hours הוא null, ומקרה שתלוי בה נשלח לבדיקה ידנית. רצף טיסות סבב עוקבות מותר בתכנון עם מנוחה קצרה (2018 ס' 55) ואינו נבדק. נבדקת רק המנוחה בין שני סבבי טיסה. חוקי waive_base_rest ו‑wrong_rest_planning חולקים שאלה אחת, וכל אחד מזכה בתשובה שלו. העמודה בדוח (COM) עוד לא אומתה."
     },
     {
       "id": "legal_crew_composition",
@@ -1140,7 +1234,7 @@
       "when": "אצ\"א שתוכנן והתייצב לשתי טיסות סבב באותו FDP.",
       "amount": {
         "unit": "credit_hours",
-        "value": null,
+        "value": 2.5,
         "text": "2.5 ש', וגם זיכוי מינימלי של 5 ש' לכל סבב"
       },
       "source": "2024 ס' 38",
@@ -1148,13 +1242,16 @@
       "valid_from": "2024-01-01",
       "valid_to": null,
       "logic": {
-        "id": null,
-        "supported": false,
+        "id": "same_fdp_rounds",
+        "supported": true,
         "params": {
-          "requires_user_answer": true
+          "legal_rest_hours": 10,
+          "report_minutes_before_std": 60,
+          "hours": 2.5,
+          "report_column": "COM"
         }
       },
-      "note": "דורש מידע שאינו בקבצים. האפליקציה תשאל את המשתמש."
+      "note": "FDP = פעילויות בלי מנוחה חוקית ביניהן: פחות מ‑legal_rest_hours (10, לפי FAR 117 שאליו מפנה הגדרת ה‑FDP בהסכם 2018; החלטת בעל המוצר, 21/09/2026) מה‑On block בבסיס ועד ההתייצבות לפעילות הבאה. זמן ההתייצבות = STD פחות report_minutes_before_std (2018 ס' 52.1, צי צר גוף). טיסת סבב = סבב שזמן הקרקע שלו בחו\"ל (משך הסבב פחות שעות הטיסה) קצר מהמנוחה החוקית. בביצוע נדרש שתיהן בוצעו כמתוכנן. הזיכוי המינימלי לכל סבב נבדק בחוק min_slip_credit. העמודה בדוח (COM) עוד לא אומתה."
     },
     {
       "id": "night_landings_737",
@@ -1163,21 +1260,28 @@
       "when": "צי 737: תכנון ליותר מ‑2 טיסות בחודש שנחיתתן המתוכננת בין 03:00 ל‑08:00 שעון ישראל.",
       "amount": {
         "unit": "credit_hours",
-        "value": null,
-        "text": "2.5 ש' מהטיסה השלישית שבוצעה"
+        "value": 2.5,
+        "text": "2.5 ש' לכל טיסה כזאת שבוצעה, מהשלישית"
       },
-      "source": "2024 ס' 39",
+      "source": "2024 ס' 39–40",
       "status": "ok",
       "valid_from": "2024-01-01",
       "valid_to": null,
       "logic": {
-        "id": null,
-        "supported": false,
+        "id": "night_landings",
+        "supported": true,
         "params": {
-          "requires_user_answer": true
+          "fleet": "B737",
+          "window_from": "03:00",
+          "window_to": "08:00",
+          "min_planned_count": 3,
+          "paid_from_count": 3,
+          "hours": 2.5,
+          "report_column": "COM",
+          "base_landings_only": false
         }
       },
-      "note": "דורש מידע שאינו בקבצים. האפליקציה תשאל את המשתמש."
+      "note": "הנחיתה המתוכננת לפי התכנון, בשעון ישראל, כולל שתי הקצוות. רגלי DH אינן נספרות. base_landings_only=false: נספרת גם נחיתה בחו\"ל (למשל LCA ב‑07:40), כקריאה מילולית של \"לפי שעון ישראל\"; טרם אושר. ביטול או שינוי הצבה ביוזמת החברה נחשב ביצוע (ס' 40), ולכן סבב שבוטל ואין ידוע אם זה ביוזמת החברה נשאל, רק כשזה משנה את התוצאה. \"מהשלישית שבוצעה\" – החלטת בעל המוצר (21/09/2026). ביוני ובאוגוסט 2026 תוכננו 3 טיסות כאלה ובוצעה אחת בכל חודש, והדוח לא שילם – תואם. העמודה בדוח (COM) עוד לא אומתה."
     },
     {
       "id": "ulh_787",

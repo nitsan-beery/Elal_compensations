@@ -89,7 +89,8 @@ export function evaluate({ rulesData, plan = null, exec = null, answers = {} }) 
         'אין חוק נתמך שקובע מה מגיע במקרה הזה. דורש בדיקה ידנית.' });
   }
 
-  const ctx = makeContext({ out, timeline, domicile, codes, answers, plan, exec, supported, matches,
+  const ctx = makeContext({ out, timeline, domicile, codes, answers, plan, exec, supported, matches, planPairings,
+    period, fleet: rulesData.crew?.fleet ?? null,
     // בלי דוח ביצוע, הסבבים המתוכננים משמשים לחישוב הקרדיט והרי"ג הצפויים.
     execPairings: exec ? execPairings : planPairings });
 
@@ -116,11 +117,12 @@ export function evaluate({ rulesData, plan = null, exec = null, answers = {} }) 
 
 // ---------- ctx: מה שהלוגיקות רואות ----------
 
-function makeContext({ out, timeline, domicile, codes, answers, plan, exec, supported, matches, execPairings }) {
+function makeContext({ out, timeline, domicile, codes, answers, plan, exec, supported, matches, planPairings, period, fleet, execPairings }) {
   const absenceBy = new Map(); // date → Set(ruleId)
   const pairingTags = new Map(); // pairing.id → Set(tag)
   const askedIds = new Set();
   const noteKeys = new Set();
+  const reviewKeys = new Set();
   const ruleRef = (rule) => ({ ruleId: rule.id, ruleTitle: rule.title });
   const linkedSwap = (prefix, pairingId) => {
     const hit = Object.entries(answers).find(([id, a]) =>
@@ -135,9 +137,23 @@ function makeContext({ out, timeline, domicile, codes, answers, plan, exec, supp
   return {
     timeline,
     execPairings,
+    planPairings,
     matches,
     domicile,
+    period,
+    fleet,
+    monthFirst: timeline[0].date,
+    stationOffsets: plan?.stationOffsets ?? null,
     hasExec: !!exec,
+    hasPlan: !!plan,
+    answer: (id) => answers[id] ?? null,
+
+    /** קודי פעילות ביום (קרקע, סימולטור, כוננות), בלי היעדרות, הערות ו-DUM. לפי הדוח כשיש. */
+    activityCodes(day) {
+      const list = exec ? execCodesOf(day) : (day.plan?.codes ?? []);
+      return list.filter((c) => !isLeaveCode(c, leave, codes) && !isIgnoredPlanCode(c, codes) &&
+        (activityCodes.has(c) || activityCodes.has(expandCode(c, codes))));
+    },
 
     expect(date, key, min, rule, note) {
       if (!min) return;
@@ -185,6 +201,9 @@ function makeContext({ out, timeline, domicile, codes, answers, plan, exec, supp
     },
 
     review(message, rule) {
+      // שני חוקים שחולקים בדיקה (מנוחה בבסיס) מגיעים לאותה הודעה. מציגים אותה פעם אחת.
+      if (reviewKeys.has(message)) return;
+      reviewKeys.add(message);
       out.reviews.push({ message, ...ruleRef(rule) });
     },
     note(date, message, rule) {
@@ -318,6 +337,7 @@ function explainByActivity(matches, timeline, codes) {
     if (kinds.has('other')) continue; // קוד לא מוכר: לא מסיקים ממנו, והשאלה תישאל
     m.how = kinds.has('ground') ? 'replaced_by_ground' : 'replaced_by_leave';
     m.replacedBy = found;
+    m.byLeave = kinds.has('leave'); // היעדרות של אצ"א בימי הסבב, גם כשאחריה פעילות קרקע
   }
 }
 
@@ -374,6 +394,11 @@ function execCodesOf(day) {
 
 /** קוד היעדרות: ברשימה, או מתחיל בקידומת היעדרות (SCK_F, 21/06/2026). */
 const isLeaveCode = (code, list, codes) => list.has(code) || (codes.leave_prefixes ?? []).some((p) => code.startsWith(p));
+
+/** קוד מקוצר בדוח → הקוד המלא בתכנון (HOME_ → HOME_RGT). */
+function expandCode(code, codes) {
+  return Object.entries(codes.plan_to_report ?? {}).find(([, short]) => short === code)?.[0] ?? code;
+}
 
 function isIgnoredPlanCode(code, codes) {
   return (codes.ignored_plan_notes ?? []).some((n) => code === n || code.startsWith(n));

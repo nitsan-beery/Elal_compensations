@@ -75,7 +75,11 @@ const isAirReturnOnly =(pairing) => pairing.legs.every((l) => l.org === l.dst);
 
 function closePairing(pairings, pairing, closed) {
   pairing.closed = closed;
-  pairing.id = `${pairing.from}..${pairing.to}:${pairing.destinations.join('-') || '?'}`;
+  const id = `${pairing.from}..${pairing.to}:${pairing.destinations.join('-') || '?'}`;
+  // שתי טיסות סבב לאותו יעד באותו יום (שתיהן באותו FDP). המזהה משמש לתשובות שנשמרו,
+  // ולכן מוסיפים סיומת רק כשיש התנגשות, והמזהים הקיימים לא משתנים.
+  const same = pairings.filter((p) => p.id === id || p.id.startsWith(`${id}#`)).length;
+  pairing.id = same ? `${id}#${same + 1}` : id;
   pairings.push(pairing);
 }
 
@@ -89,7 +93,9 @@ export function matchPairings(planPairings, execPairings) {
   const usedExec = new Set();
 
   for (const p of planPairings) {
-    let hit = findExec(execPairings, usedExec, (e) => overlaps(p, e) && sameDestinations(p, e));
+    // קודם לפי מספרי הטיסות: שתי טיסות סבב לאותו יעד באותו יום (באותו FDP) נבדלות רק בהם.
+    let hit = findExec(execPairings, usedExec, (e) => overlaps(p, e) && sameDestinations(p, e) && sameFlights(p, e))
+      ?? findExec(execPairings, usedExec, (e) => overlaps(p, e) && sameDestinations(p, e));
     let how = 'exact';
     if (!hit) { hit = findExec(execPairings, usedExec, (e) => overlaps(p, e)); how = 'dates'; }
     if (hit) { usedExec.add(hit); matched.push({ plan: p, exec: hit, how }); }
@@ -108,6 +114,7 @@ const firstDate = (m) => (m.plan ?? m.exec).from;
 const overlaps = (a, b) => a.dates.some((d) => b.dates.includes(d));
 const sameDestinations = (a, b) =>
   a.destinations.length > 0 && a.destinations.join() === b.destinations.join();
+const sameFlights = (a, b) => a.legs[0]?.flight != null && a.legs[0].flight === b.legs[0]?.flight;
 
 /** תיאור קריא של סבב, לתצוגה ולשאלות למשתמש. */
 export function describePairing(p) {

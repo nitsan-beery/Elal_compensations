@@ -45,12 +45,13 @@ export async function parsePlan(data) {
     }
   }
 
-  resolveDeadheads(days);
+  const stationOffsets = resolveDeadheads(days);
 
   return {
     kind: 'plan',
     ...header,
     days,
+    stationOffsets,
     codesSeen: [...rawCodes].sort(),
     summary: parseSummary(pages),
     warnings,
@@ -205,6 +206,8 @@ function readTimedRow(c, anchorItem) {
  * קובץ: יום עם תחנה זרה אחת שה-FT שלו מתיישב עם הפרש אחד בלבד. הלוך-חזור באותו
  * יום לא מלמד כלום, כי ההפרש מתקזז. בוחרים את ההפרש שנלמד ביום הקרוב ביותר,
  * בגלל מעברי שעון קיץ. אם אין – `dur` נשאר null, והמנוע מנסה את הדוח.
+ * מחזיר את ההפרשים שנלמדו (תחנה → [{date, off}], ‏off = שעון מקומי − שעון הבסיס בדקות),
+ * כדי שחוקים יוכלו להמיר שעת נחיתה בחו"ל לשעון הבסיס.
  */
 function resolveDeadheads(days) {
   const learned = {}; // station → [{date, off}]
@@ -237,6 +240,7 @@ function resolveDeadheads(days) {
       if (!missing) leg.dur = legDuration(leg, offsets);
     }
   }
+  return learned;
 }
 
 /** STA − STD בדקות, כשזמן עם ! מומר לשעון הבסיס לפי ההפרש של התחנה. */

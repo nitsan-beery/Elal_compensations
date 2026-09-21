@@ -6,6 +6,7 @@
 
 import { hoursToMin, minToHhmm } from '../time.js';
 import { describePairing } from '../model.js';
+import { DUTY_LOGIC, DUTY_PARAMS } from './duty.js';
 
 const H = (hours) => hoursToMin(hours) ?? 0;
 
@@ -502,6 +503,7 @@ export const LOGIC = {
   lost_hours_credit,
   voluntary_swap,
   cancelled_no_compensation,
+  ...DUTY_LOGIC,
 };
 
 /**
@@ -522,6 +524,7 @@ export const KNOWN_PARAMS = {
   lost_hours_credit: ['requires_user_answer', 'credit_column', 'include_min_slip_credit'],
   voluntary_swap: ['requires_user_answer'],
   cancelled_no_compensation: ['requires_user_answer'],
+  ...DUTY_PARAMS,
 };
 
 /** סדר ההרצה. חוקים שמסמנים סבבים חייבים לרוץ לפני חוקים שבודקים את הסימון. */
@@ -537,5 +540,11 @@ export const LOGIC_ORDER = [
   'lost_hours_credit',
   'min_slip_credit',
   'higher_of_planned_performed',
+  // אחרי החוקים שמסמנים סבבים ועונים על שאלות ההחלפה: נחיתות לילה נספרות לפי הסיבה לביטול.
+  'night_landings',
+  'same_fdp_rounds',
+  'second_unplanned_activity',
+  'base_rest_shortfall',
+  'special_date_activity',
   'absence_month_cap',
 ];

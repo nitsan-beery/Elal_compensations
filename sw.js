@@ -3,7 +3,7 @@
 // רשת קודם, ואם אין רשת – מהמטמון. כך עדכון בקוד או ב-rules.json מגיע מיד כשיש חיבור,
 // ובלי חיבור האפליקציה נפתחת מהעותק האחרון. בכל עדכון של רשימת הקבצים מעלים את CACHE.
 
-const CACHE = 'elal-compensations-v2';
+const CACHE = 'elal-compensations-v3';
 const SHELL = [
   './',
   'index.html',
@@ -20,6 +20,7 @@ const SHELL = [
   'js/rules/catalog.js',
   'js/rules/evaluate.js',
   'js/rules/logic.js',
+  'js/rules/duty.js',
   'vendor/pdfjs/pdf.mjs',
   'vendor/pdfjs/pdf.worker.mjs',
   'icons/icon.svg',
