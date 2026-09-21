@@ -103,6 +103,8 @@ export function classifyCode(code, codes, supportedRules) {
   for (const rule of supportedRules) {
     const p = rule.logic.params || {};
     if (p.plan_codes?.includes(code) || p.report_codes?.includes(code)) return 'relevant';
+    const prefixes = [...(p.plan_code_prefixes ?? []), ...(p.report_code_prefixes ?? [])];
+    if (prefixes.some((x) => code.startsWith(x))) return 'relevant';
   }
   return 'unknown';
 }

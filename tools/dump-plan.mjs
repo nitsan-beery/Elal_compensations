@@ -19,6 +19,6 @@ for (const d of Object.values(p.days).sort((a, b) => a.date.localeCompare(b.date
   const bits = [];
   if (d.codes.length) bits.push(d.codes.join('+'));
   if (d.pickup) bits.push(`PICKUP ${d.pickup.org} ${t(d.pickup.dep)}/${t(d.pickup.arr)}`);
-  for (const l of d.legs) bits.push(`${l.flight} ${l.org}${t(l.dep)}->${l.dst}${t(l.arr)} ${l.ac || ''}`.trim());
+  for (const l of d.legs) bits.push(`${l.dh ? `DH(${l.dur == null ? "?" : minToHhmm(l.dur)}) ` : ""}${l.flight} ${l.org}${t(l.dep)}->${l.dst}${t(l.arr)} ${l.ac || ''}`.trim());
   console.log(`${d.date} ${d.dow}  ${(bits.join(' | ') || '-').padEnd(76)} ${info}`);
 }

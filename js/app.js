@@ -307,6 +307,10 @@ function renderQuestion(q, i) {
   </div>`;
 }
 
+/** פער לטובת אצ"א (הדוח נתן יותר מהצפוי) בירוק, ולרעתו באדום. */
+const gapClass = (diff) => (diff > 0 ? 'gain' : 'bad');
+const signed = (min) => (min > 0 ? '+' : '') + minToHhmm(min);
+
 function renderTotals(res) {
   if (!res.totals.length) return '';
   // כל עוד יש שאלות פתוחות, פער בסיכום אינו ממצא: הצפוי תלוי בתשובות.
@@ -314,10 +318,10 @@ function renderTotals(res) {
   return `<div class="card">
     <h2>סיכום חודשי מול הדוח</h2>
     <div class="totals">${res.totals.map((t) => {
-      const gap = `פער <span class="num">${minToHhmm(t.reported - t.expected)}</span>`;
+      const gap = `פער <span class="num">${signed(t.reported - t.expected)}</span>`;
       const status = t.ok === true ? '✓' : t.ok === false ? (pending ? `ממתין · ${gap}` : `✗ ${gap}`) : '';
       return `
-      <div class="total ${t.ok === true ? 'ok' : t.ok === false && !pending ? 'bad' : ''}">
+      <div class="total ${t.ok === true ? 'ok' : t.ok === false && !pending ? gapClass(t.reported - t.expected) : ''}">
         <div class="label">${esc(t.column)}</div>
         <div class="val num">${minToHhmm(t.expected)}</div>
         <div class="rep">בדוח <span class="num">${minToHhmm(t.reported)}</span> ${status}</div>
@@ -342,14 +346,14 @@ function renderComparison(res) {
     <div class="table-wrap"><table>
       <thead><tr><th>ימים</th><th>עמודה</th><th>צפוי</th><th>בדוח</th><th>פער</th><th></th></tr></thead>
       <tbody>${rows.map((c) => {
-        const cls = c.ok === false ? 'bad' : c.pending ? 'pending' : '';
-        const status = c.pending ? '<span class="status pending">ממתין</span>' : c.ok ? '<span class="status ok">✓</span>' : '<span class="status bad">✗</span>';
+        const cls = c.ok === false ? gapClass(c.diff) : c.pending ? 'pending' : '';
+        const status = c.pending ? '<span class="status pending">ממתין</span>' : c.ok ? '<span class="status ok">✓</span>' : `<span class="status ${gapClass(c.diff)}">✗</span>`;
         const why = c.items.filter((e) => e.ruleTitle || e.note)
           .map((e) => `${esc(e.ruleTitle ?? '')}${e.note ? `: ${esc(e.note)}` : ''}${e.min != null && c.unit !== 'count' ? ` <span class="num">${minToHhmm(e.min)}</span>` : ''}`).join('<br>');
         return `<tr class="${cls}">
           <td>${esc(c.label)}</td><td class="col">${esc(c.column)}</td>
           <td class="num">${hm(c.expected, c.unit)}</td><td class="num">${hm(c.reported, c.unit)}</td>
-          <td class="num">${c.ok ? '' : hm(c.diff, c.unit)}</td><td>${status}</td></tr>
+          <td class="num">${c.ok ? '' : (c.diff > 0 ? '+' : '') + hm(c.diff, c.unit)}</td><td>${status}</td></tr>
           ${c.ok !== true && why ? `<tr class="detail"><td colspan="6">${why}</td></tr>` : ''}`;
       }).join('') || '<tr><td colspan="6" class="muted">אין שורות בסינון הזה.</td></tr>'}</tbody>
     </table></div>

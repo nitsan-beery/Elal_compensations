@@ -13,24 +13,56 @@ const H = (hours) => hoursToMin(hours) ?? 0;
 
 /** קרדיט כל רגל = STA − STD. הדוח כבר נותן את זה ב-SkdDur, אחרי המרת אזורי זמן. */
 function credit_from_scheduled(ctx, params, rule) {
+  const monthEnd = ctx.timeline.at(-1).date;
   for (const pairing of ctx.execPairings) {
     const credit = sumLegs(pairing);
     if (credit == null) {
       ctx.review(`${describePairing(pairing)}: חסרות שעות מתוכננות (SkdDur) בדוח, ולא ניתן לחשב קרדיט.`, rule);
       continue;
     }
+    const cut = pairing.cutAtEnd ? monthEndSplit(pairing, monthEnd, ctx.domicile) : null;
+    if (cut?.error) {
+      ctx.review(`${describePairing(pairing)}: ${cut.error} דורש בדיקה ידנית.`, rule);
+      continue;
+    }
+    if (cut) {
+      ctx.expectPairing(pairing, 'flight', credit - cut.leg.skdDur + cut.before, rule,
+        `קרדיט לפי STA − STD. ${cut.leg.flight} חוצה את סוף החודש: בחודש הזה ${minToHhmm(cut.before)} מההמראה בפועל עד חצות, והשאר בחודש הבא`);
+      continue;
+    }
     ctx.expectPairing(pairing, 'flight', credit, rule, 'קרדיט לפי STA − STD');
   }
+}
+
+/**
+ * רגל שנוחתת אחרי חצות של היום האחרון בחודש: הדוח מזכה בחודש הזה את הזמן מההמראה בפועל
+ * ועד חצות בשעון הבסיס, והשאר בחודש הבא (31/05/2026: LY387, ‏ATD 19:38 → 04:22, יותר
+ * מ-SkdDur 04:15). כך הדוח מפצל טיסת לילה גם בין שני ימים בתוך החודש (25/01/2026).
+ */
+function monthEndSplit(pairing, monthEnd, domicile) {
+  const leg = pairing.legs.findLast((l) => l.date === monthEnd);
+  if (!leg) return null;
+  const dur = leg.actDur ?? leg.skdDur;
+  let dep = null; // המראה בשעון הבסיס
+  if (leg.org === domicile) dep = leg.atd ?? leg.std;
+  else if (leg.dst === domicile && (leg.ata ?? leg.sta) != null && dur != null) dep = mod((leg.ata ?? leg.sta) - dur, 1440);
+  if (dep == null || dur == null) return { error: `לא ניתן לדעת כמה מ-${leg.flight} חל לפני סוף החודש.` };
+  if (dep + dur <= 1440) return null;
+  return { leg, before: 1440 - dep };
 }
 
 const sumLegs = (pairing) =>
   pairing.legs.reduce((acc, l) => (acc == null || l.skdDur == null ? null : acc + l.skdDur), 0);
 
-/** סליפ שהקרדיט שלו קצר מהמינימום מקבל השלמה, וההפרש נרשם ב-Rig. */
+/**
+ * סליפ שהקרדיט שלו קצר מהמינימום מקבל השלמה, וההפרש נרשם ב-Rig. סליפ שנחתך בגבול
+ * החודש לא נבדק: ההשלמה נקבעת על הסליפ כולו (28/02/2026: BUD 03:35 בלי Rig).
+ */
 function min_slip_credit(ctx, params, rule) {
   const min = H(params.min_credit_hours);
   for (const pairing of ctx.execPairings) {
     if (ctx.pairingHandledBy(pairing, 'lost_hours_credit')) continue;
+    if (pairing.cutAtStart || pairing.cutAtEnd) continue;
     const credit = sumLegs(pairing);
     if (credit == null || credit === 0 || credit >= min) continue;
     ctx.expectPairing(pairing, 'rig', min - credit, rule, `השלמה ל-${params.min_credit_hours} שעות`);
@@ -75,12 +107,16 @@ function absence_day_credit(ctx, params, rule) {
   }
 }
 
+/**
+ * כשיש דוח ביצוע, רק הדוח קובע: פעילות קרקע שתוכננה ליום אחד יכולה לזוז ליום אחר
+ * (HOME_RGT תוכנן ל-07/01/2026 ובוצע ב-05/01). קוד התכנון משמש רק בלי דוח.
+ */
 function matchesCode(day, params, ctx) {
-  const planCodes = params.plan_codes ?? [];
-  const reportCodes = params.report_codes ?? [];
-  if (day.plan?.codes?.some((c) => planCodes.includes(c))) return true;
-  return (ctx.execCodes(day) ?? []).some((c) => reportCodes.includes(c));
+  if (ctx.hasExec) return ctx.execCodes(day).some((c) => codeIn(c, params.report_codes, params.report_code_prefixes));
+  return (day.plan?.codes ?? []).some((c) => codeIn(c, params.plan_codes, params.plan_code_prefixes));
 }
+
+const codeIn = (code, list = [], prefixes = []) => list.includes(code) || prefixes.some((p) => code.startsWith(p));
 
 /**
  * איזון קרדיט לימי חופשה. מספר ימי החופשה בחודש קובע תוספת אחת לכל הימים.
@@ -154,6 +190,28 @@ function late_landing_home(ctx, params, rule) {
   }
 }
 
+/**
+ * טיסה ארוכה עם נחיתת ביניים (ישן כ"ה ס' 12.יב, בפרשנות בעל המוצר): הרגליים שהמריאו
+ * באותו יום בשעון הבסיס הן יותר מרגל אחת, וסכום הקרדיט המתוכנן שלהן (STA − STD, כולל
+ * DH) עולה על `over_flight_hours`. הפיצוי נרשם ב-COM.
+ * אומת: DME הלוך-חזור 12:45 → COM 02:30 (18/01, 09/02, 17/05, 03/06/2026).
+ */
+function long_flight_day(ctx, params, rule) {
+  const over = H(params.over_flight_hours);
+  for (const pairing of ctx.execPairings) {
+    const byDate = new Map();
+    for (const leg of pairing.legs) {
+      if (leg.skdDur == null) continue;
+      const d = byDate.get(leg.date) ?? { legs: 0, min: 0 };
+      byDate.set(leg.date, { legs: d.legs + 1, min: d.min + leg.skdDur });
+    }
+    for (const [date, { legs, min: flown }] of byDate) {
+      if (legs < 2 || flown <= over) continue;
+      ctx.expect(date, 'com', H(params.hours), rule, `${describePairing(pairing)}: ${minToHhmm(flown)} שעות טיסה ביום`);
+    }
+  }
+}
+
 /** הפרש בין שעון לשעון, כשנחיתה אחרי חצות שייכת ליום הבא. */
 function wrapDelta(delta) {
   if (delta < -720) return delta + 1440;
@@ -171,7 +229,7 @@ function special_call(ctx, params, rule) {
 
     if (reported > 0 || answer?.value === 'special_call') {
       ctx.markPairing(match.exec, 'special_call');
-      const stay = awayFromBase(match.exec, ctx.domicile);
+      const stay = awayFromBase(match.exec, ctx.domicile, ctx.timeline.at(-1).date);
       if (stay.error) {
         ctx.review(`${describePairing(match.exec)}: ${stay.error} לא ניתן לספור יממות לקריאה המיוחדת. דורש בדיקה ידנית.`, rule);
         continue;
@@ -206,31 +264,25 @@ function special_call(ctx, params, rule) {
  *
  * בדוח הביצוע כל שעה רשומה בשעון המקומי של התחנה. רגל היציאה מהבסיס היא כבר בשעון
  * הבסיס. בנחיתה בבסיס ידוע השעון בבסיס, ושעת ההמראה בשעון הבסיס מחושבת לאחור לפי משך
- * הטיסה. ההנחה היא שהרגל רשומה בדוח תחת יום ההמראה בשעון הבסיס (אומת: LY336 ב-16/07).
+ * הטיסה. הרגל רשומה בדוח תחת יום ההמראה בשעון הבסיס, גם כשבשעון המקומי ההמראה כבר
+ * ביום הבא (אומת: LY336 ב-16/07; LY5110 ב-06/01, 25/01 ו-29/01/2026, המראה אחרי חצות בטביליסי).
  */
-function awayFromBase(pairing, domicile) {
+function awayFromBase(pairing, domicile, monthEnd) {
   const out = pairing.legs.find((l) => l.org === domicile);
   const home = [...pairing.legs].reverse().find((l) => l.dst === domicile);
-  if (!out || !home) return { error: 'הסבב לא יוצא מהבסיס או לא חוזר אליו.' };
+  if (!out || (!home && !pairing.cutAtEnd)) return { error: 'הסבב לא יוצא מהבסיס או לא חוזר אליו.' };
 
   const first = pairing.from;
   const depClock = [out.std, out.atd].filter((t) => t != null);
   if (!depClock.length) return { error: 'חסרה שעת המראה מהבסיס.' };
   const start = daysBetween(first, out.date) * 1440 + Math.min(...depClock);
+  // הסבב חוזר בחודש הבא: בחודש הזה נספרות היממות עד סוף החודש.
+  if (!home) return { first, start, end: (daysBetween(first, monthEnd) + 1) * 1440, cutAtEnd: true };
 
   const arrClock = home.ata ?? home.sta;
   const dur = home.ata != null ? (home.actDur ?? home.skdDur) : home.skdDur;
   if (arrClock == null || dur == null) return { error: 'חסרים שעת נחיתה בבסיס או משך הטיסה.' };
   const homeDep = mod(arrClock - dur, 1440); // שעת ההמראה של רגל החזרה, בשעון הבסיס
-  // אם ההמראה בשעון המקומי חלה ביום קלנדרי אחר מאשר בשעון הבסיס, לא ברור תחת איזה יום
-  // הרגל נרשמה, וההנחה שלמעלה לא מחזיקה.
-  const localDep = home.atd ?? home.std;
-  if (localDep != null) {
-    const offset = wrapDelta(localDep - homeDep);
-    if (homeDep + offset < 0 || homeDep + offset >= 1440) {
-      return { error: 'ההמראה בחזרה לבסיס חלה ביום אחר בשעון המקומי ובשעון הבסיס, ולא ברור לאיזה יום לשייך אותה.' };
-    }
-  }
   const end = daysBetween(first, home.date) * 1440 + homeDep + dur;
   return { first, start, end };
 }
@@ -245,6 +297,7 @@ function countSpecialCallDays(stay, params) {
   const lastDay = Math.floor((stay.end - 1) / 1440);
   const all = [];
   for (let d = firstDay; d <= lastDay; d++) all.push(addDays(stay.first, d));
+  if (stay.cutAtEnd) return { counted: all, reason: 'הסבב חוזר בחודש הבא; נספרות היממות עד סוף החודש, והיממה האחרונה נבדקת בחודש הבא.' };
   if (all.length === 1) return { counted: all, reason: 'יממה אחת.' };
 
   const total = stay.end - stay.start;
@@ -282,8 +335,16 @@ function higher_of_planned_performed(ctx, params, rule) {
     if (planned == null || performed == null) continue;
     if (planned <= performed) continue;
 
-    // יש הפרש לתשלום. החלפה לבקשת אצ"א אינה מזכה, והסיבה לא בקבצים: שואלים.
-    if (params.requires_user_answer && answer?.value !== 'replaced') {
+    // יש הפרש לתשלום. החלפה לבקשת אצ"א אינה מזכה, והסיבה לא בקבצים: שואלים. אבל אם
+    // הדוח כבר השלים בדיוק את ההפרש, החברה עצמה קבעה שזו החלפה שלה (05/05/2026: TBS → BUD,
+    // Rig 00:06), ואין מה לשאול.
+    const column = params.shortfall_column === 'Rig' ? 'rig' : 'com';
+    const paid = match.exec && !answer
+      && ctx.reportedOn(match.exec, params.shortfall_column ?? 'COM') - ctx.expectedOn(match.exec, column) === planned - performed;
+    if (paid) {
+      ctx.note(match.plan.from, `${describePairing(match.plan)} → ${describePairing(match.exec)}: הדוח השלים את ההפרש ` +
+        `${minToHhmm(planned - performed)} לפי "הגבוה מבין השתיים", ולכן לא נשאלת שאלה.`, rule);
+    } else if (params.requires_user_answer && answer?.value !== 'replaced') {
       if (answer) continue;
       ctx.ask({
         id: `replaced:${match.plan.id}`,
@@ -301,7 +362,7 @@ function higher_of_planned_performed(ctx, params, rule) {
     }
 
     const target = match.exec ?? match.plan;
-    ctx.expectPairing(target, params.shortfall_column === 'Rig' ? 'rig' : 'com', planned - performed, rule,
+    ctx.expectPairing(target, column, planned - performed, rule,
       `המתוכנן (${describePairing(match.plan)}) גבוה מהמבוצע. ההפרש לפי "הגבוה מבין השתיים".`);
   }
 }
@@ -376,6 +437,7 @@ export const LOGIC = {
   vacation_credit_balance,
   absence_month_cap,
   late_landing_home,
+  long_flight_day,
   special_call,
   higher_of_planned_performed,
   lost_hours_credit,
@@ -391,10 +453,11 @@ export const LOGIC = {
 export const KNOWN_PARAMS = {
   credit_from_scheduled: [],
   min_slip_credit: ['min_credit_hours'],
-  absence_day_credit: ['plan_codes', 'report_codes', 'report_flag_column', 'credit_hours', 'tab_hours', 'requires_assigned_activity'],
+  absence_day_credit: ['plan_codes', 'report_codes', 'plan_code_prefixes', 'report_code_prefixes', 'report_flag_column', 'credit_hours', 'tab_hours', 'requires_assigned_activity'],
   vacation_credit_balance: ['per_day_hours', 'days_full_rate', 'monthly_max_hours', 'yearly_cap_days', 'taper_table', 'taper_table_complete', 'taper_monthly_totals'],
   absence_month_cap: ['cap_hours'],
   late_landing_home: ['grace_minutes', 'step_minutes', 'hours_per_step'],
+  long_flight_day: ['over_flight_hours', 'hours'],
   special_call: ['hours', 'report_column', 'second_day_min_gap_hours', 'second_day_min_hours', 'ask_user_if_no_sc'],
   higher_of_planned_performed: ['requires_user_answer', 'excluded_when_special_call', 'excluded_when_voluntary_swap', 'shortfall_column'],
   lost_hours_credit: ['requires_user_answer', 'credit_column', 'include_min_slip_credit'],
@@ -408,6 +471,7 @@ export const LOGIC_ORDER = [
   'vacation_credit_balance',
   'credit_from_scheduled',
   'late_landing_home',
+  'long_flight_day',
   'cancelled_no_compensation',
   'voluntary_swap',
   'special_call',

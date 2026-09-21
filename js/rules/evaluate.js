@@ -45,7 +45,7 @@ export function evaluate({ rulesData, plan = null, exec = null, answers = {} }) 
   const domicile = exec?.domicile ?? guessDomicile(plan);
   if (!domicile) warnings.push('לא ניתן לקבוע את בסיס הבית מהקבצים. חוקים שתלויים בבסיס לא ייבדקו.');
 
-  const planPairings = plan ? buildPairings(timeline, domicile, (d) => planLegsWithCredit(d.plan)) : [];
+  const planPairings = plan ? buildPairings(timeline, domicile, planLegsWithCredit).map(ftOnLastDay) : [];
   const execPairings = exec ? buildPairings(timeline, domicile, (d) => d.exec?.legs) : [];
   const matches = mode === 'full'
     ? matchPairings(planPairings, execPairings)
@@ -86,7 +86,7 @@ export function evaluate({ rulesData, plan = null, exec = null, answers = {} }) 
         'אין חוק נתמך שקובע מה מגיע במקרה הזה. דורש בדיקה ידנית.' });
   }
 
-  const ctx = makeContext({ out, timeline, domicile, codes, answers, plan, supported, matches,
+  const ctx = makeContext({ out, timeline, domicile, codes, answers, plan, exec, supported, matches,
     // בלי דוח ביצוע, הסבבים המתוכננים משמשים לחישוב הקרדיט והרי"ג הצפויים.
     execPairings: exec ? execPairings : planPairings });
 
@@ -113,7 +113,7 @@ export function evaluate({ rulesData, plan = null, exec = null, answers = {} }) 
 
 // ---------- ctx: מה שהלוגיקות רואות ----------
 
-function makeContext({ out, timeline, domicile, codes, answers, plan, supported, matches, execPairings }) {
+function makeContext({ out, timeline, domicile, codes, answers, plan, exec, supported, matches, execPairings }) {
   const absenceBy = new Map(); // date → Set(ruleId)
   const pairingTags = new Map(); // pairing.id → Set(tag)
   const askedIds = new Set();
@@ -134,6 +134,7 @@ function makeContext({ out, timeline, domicile, codes, answers, plan, supported,
     execPairings,
     matches,
     domicile,
+    hasExec: !!exec,
 
     expect(date, key, min, rule, note) {
       if (!min) return;
@@ -221,16 +222,10 @@ function makeContext({ out, timeline, domicile, codes, answers, plan, supported,
       pairingTags.get(pairing.id).add(tag);
     },
 
-    /** קרדיט מתוכנן של סבב: סכום ה-FT בתכנון. FT כבר מתוקן לאזורי זמן. */
+    /** קרדיט מתוכנן של סבב: ה-FT בתכנון (כבר מתוקן לאזורי זמן) ועוד רגלי DH. */
     plannedCredit(planPairing) {
       if (!plan) return null;
-      let sum = 0;
-      for (const date of planPairing.dates) {
-        const ft = plan.days[date]?.info?.FT;
-        if (ft == null) return null;
-        sum += ft;
-      }
-      return sum || null;
+      return sumSkd(planPairing.legs) || null;
     },
 
     minSlipMinutes() {
@@ -243,6 +238,10 @@ function makeContext({ out, timeline, domicile, codes, answers, plan, supported,
       return reportDates(pairing, timeline, domicile)
         .reduce((s, date) => s + (dayOf(timeline, date)?.exec?.values?.[column]?.min ?? 0), 0);
     },
+
+    /** מה שכבר צפוי על סבב בסוג מסוים (למשל השלמה לסליפ קצר ב-Rig). */
+    expectedOn: (pairing, key) => out.expectations
+      .filter((e) => e.pairingId === pairing.id && e.key === key).reduce((s, e) => s + e.min, 0),
 
     capAbsenceTotal(capMin, rule) {
       const total = out.expectations.filter((e) => e.key === 'absence').reduce((s, e) => s + e.min, 0);
@@ -257,14 +256,34 @@ function makeContext({ out, timeline, domicile, codes, answers, plan, supported,
 
 /**
  * רגלי התכנון, עם קרדיט לכל רגל כדי שהלוגיקות יוכלו לסכם אותו. בתכנון ה-FT מופיע
- * על הרגל האחרונה של היום בלבד, והוא הקרדיט של כל הרגליים באותו יום.
+ * על הרגל האחרונה של היום בלבד, והוא הקרדיט של כל הרגליים באותו יום חוץ מ-DH.
+ * רגל DH מזוכה כמו טיסה רגילה. המשך שלה מחושב בחילוץ, ואם לא הצליח – נלקח מאותה
+ * רגל בדוח הביצוע.
  */
-function planLegsWithCredit(planDay) {
-  const legs = planDay?.legs ?? [];
+function planLegsWithCredit(day) {
+  const legs = day.plan?.legs ?? [];
   if (!legs.length) return legs;
-  const ft = planDay.info?.FT ?? null;
-  return legs.map((l, i) => ({ ...l, skdDur: i === legs.length - 1 ? ft : ft == null ? null : 0 }));
+  const ft = day.plan.info?.FT ?? null;
+  const lastFlown = legs.findLastIndex((l) => !l.dh);
+  return legs.map((l, i) => {
+    if (l.dh) {
+      const reported = day.exec?.legs?.find((e) => e.flight === l.flight)?.skdDur ?? null;
+      return { ...l, skdDur: l.dur ?? reported };
+    }
+    return { ...l, skdDur: i === lastFlown ? ft : ft == null ? null : 0 };
+  });
 }
+
+/**
+ * בטיסת לילה ה-FT של הסבב כולו רשום ביום הנחיתה, וביום ההמראה אין FT (05–06/05/2026).
+ * לכן רגל ביום בלי FT מקבלת 0 כשיום אחר באותו סבב נושא FT. סבב שאין בו FT בכלל נשאר null.
+ */
+function ftOnLastDay(pairing) {
+  if (!pairing.legs.some((l) => !l.dh && l.skdDur != null)) return pairing;
+  return { ...pairing, legs: pairing.legs.map((l) => (!l.dh && l.skdDur == null ? { ...l, skdDur: 0 } : l)) };
+}
+
+const sumSkd = (legs) => legs.reduce((acc, l) => (acc == null || l.skdDur == null ? null : acc + l.skdDur), 0);
 
 /** בסיס הבית בלי דוח ביצוע: שדה ההתייצבות הנפוץ בתכנון. */
 function guessDomicile(plan) {
@@ -339,11 +358,15 @@ function attachLinkCandidates(questions, matches, ctx) {
 
 // ---------- קודים ----------
 
-/** קודי היום בדוח הביצוע, בלי מסלולי הטיסה ("TLV-AMS"). */
+/**
+ * קודי היום בדוח הביצוע, בלי מסלולי הטיסה ("TLV-AMS"). רגל שחוזרת לשדה המוצא
+ * (TLV→TLV) מופיעה במסלולים כ-"LEG" (15/02/2026), ולכן גם הוא מסלול ביום שיש בו רגל כזו.
+ */
 function execCodesOf(day) {
   const details = day?.exec?.details;
   if (!details) return [];
-  return details.split(/[,\s]+/).filter((t) => t && !/^[A-Z]{3}-[A-Z]{3}$/.test(t));
+  const hasReturnLeg = (day.exec.legs ?? []).some((l) => l.org && l.org === l.dst);
+  return details.split(/[,\s]+/).filter((t) => t && !/^[A-Z]{3}-[A-Z]{3}$/.test(t) && !(hasReturnLeg && t === 'LEG'));
 }
 
 function isIgnoredPlanCode(code, codes) {
@@ -434,9 +457,12 @@ function compare({ out, timeline, execPairings, domicile }) {
   }
 
   // עמודות הסימון (VAC, SICK...) ו-TAB בימי היעדרות: יום-יום.
+  // לחוק יכולות להיות כמה עמודות סימון אפשריות (מחלה: SICK או SCKFM, לפי הקוד).
   for (const f of out.flags) {
-    const reported = dayOf(timeline, f.date)?.exec?.values?.[f.column]?.count ?? 0;
-    rows.push({ dates: [f.date], label: ddmm(f.date), column: f.column, expected: f.count, reported,
+    const columns = [].concat(f.column);
+    const values = dayOf(timeline, f.date)?.exec?.values ?? {};
+    const reported = columns.reduce((s, c) => s + (values[c]?.count ?? 0), 0);
+    rows.push({ dates: [f.date], label: ddmm(f.date), column: columns.join('/'), expected: f.count, reported,
       diff: reported - f.count, ok: reported === f.count, unit: 'count', items: [f] });
   }
   for (const t of out.tabs) {
@@ -465,12 +491,13 @@ function compareTotals(out, exec) {
 }
 
 /**
- * Fict. flight time בסיכום התכנון = סך הזיכויים שאינם טיסה. משווים לסך זיכויי
- * ההיעדרות בהרצה על התכנון לבד (`alone`).
+ * Fict. flight time בסיכום התכנון = סך הזיכויים שאינם טיסה, ועוד רגלי DH (אומת בינואר
+ * 2026: DH 04:10 נכלל). משווים לסך זיכויי ההיעדרות בהרצה על התכנון לבד (`alone`).
  */
 function checkPlanFictTime(plan, alone) {
   if (plan.summary?.fictFlightTime == null) return null;
-  const expected = alone.expectations.filter((e) => e.key === 'absence').reduce((s, e) => s + e.min, 0);
+  const deadheads = Object.values(plan.days).flatMap((d) => d.legs).filter((l) => l.dh).reduce((s, l) => s + (l.dur ?? 0), 0);
+  const expected = deadheads + alone.expectations.filter((e) => e.key === 'absence').reduce((s, e) => s + e.min, 0);
   const reported = plan.summary.fictFlightTime;
   return { expected, reported, ok: expected === reported };
 }

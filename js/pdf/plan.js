@@ -45,6 +45,8 @@ export async function parsePlan(data) {
     }
   }
 
+  resolveDeadheads(days);
+
   return {
     kind: 'plan',
     ...header,
@@ -118,6 +120,9 @@ function parseBlock(bodyRows, origin, period, days, rawCodes, warnings) {
     const from = anchor.idx;
     const to = i + 1 < anchors.length ? anchors[i + 1].idx : cells.length;
     const date = isoDate(period.year, period.month, anchor.day);
+    // אחרי היום האחרון מודפס לפעמים "לידיעה בלבד" המשך של סבב לחודש הבא ("Mon01" במאי 2026
+    // הוא 1 ביוני). יום בשבוע שאינו תואם לתאריך בחודש המודפס אינו שייך לחודש.
+    if (DOW[(new Date(`${date}T00:00:00Z`).getUTCDay() + 6) % 7] !== anchor.dow) return;
     const day = (days[date] ||= { date, dow: anchor.dow, codes: [], pickup: null, legs: [], info: {} });
     for (let r = from; r < to; r++) parseDayRow(cells[r].cells, day, rawCodes, warnings, date);
   });
@@ -132,11 +137,18 @@ function parseDayRow(c, day, rawCodes, warnings, date) {
     if (val) day.info[m[1]] = hhmmToMin(val.s.slice(0, -1));
   }
 
+  // רגל DH מתחילה ב-"DH/LY", שיושב שמאלה מעמודת duty ונופל לעמודה H.
+  for (const it of c.h || []) {
+    if (it.s !== 'DH/LY') continue;
+    const leg = readLeg(c, it, warnings, date);
+    if (leg) day.legs.push({ ...leg, dh: true });
+  }
+
   for (const it of c.duty || []) {
     const s = it.s;
-    if (s === 'LY') {
+    if (s === 'LY' || s === 'DH/LY') {
       const leg = readLeg(c, it, warnings, date);
-      if (leg) day.legs.push(leg);
+      if (leg) day.legs.push(s === 'LY' ? leg : { ...leg, dh: true });
     } else if (s === 'PICKUP') {
       day.pickup = readTimedRow(c, it);
     } else if (/^[A-Z][A-Z0-9]*(_[A-Z0-9]*)*$/.test(s) && s.length >= 2) {
@@ -163,7 +175,7 @@ function readLeg(c, lyItem, warnings, date) {
   return {
     flight: 'LY' + num.s,
     org: timed.org,
-    dst: near(c.dst, lyItem.y)?.s ?? null,
+    dst: near(c.dst, lyItem.y)?.s ?? timed.dst ?? null,
     dep: timed.dep,
     arr: timed.arr,
     ac: near(c.ac, lyItem.y)?.s ?? null,
@@ -172,25 +184,68 @@ function readLeg(c, lyItem, warnings, date) {
 
 /**
  * שעות המראה ונחיתה. לפעמים שתיהן מגיעות כפריט אחד ("1615 !2030"),
- * ולפעמים כשני פריטים בעמודות t1 ו-t2.
+ * ולפעמים כשני פריטים בעמודות t1 ו-t2. נחיתה ביום שאחרי ההמראה מגיעה לפעמים עם
+ * "+1" והיעד צמודים אליה ("!0118+1TBS", 05/05/2026).
  */
 function readTimedRow(c, anchorItem) {
   const y = anchorItem.y;
   const org = near(c.org, y)?.s ?? null;
   const a = near(c.t1, y)?.s ?? null;
   const b = near(c.t2, y)?.s ?? null;
-  let dep = null;
-  let arr = null;
-  if (a && /\s/.test(a)) {
-    const parts = a.split(/\s+/);
-    dep = clockToMin(parts[0]);
-    arr = clockToMin(parts[1]);
-  } else {
-    dep = clockToMin(a);
-    arr = clockToMin(b);
-  }
-  return { org, dep, arr };
+  const [depRaw, arrRaw] = a && /\s/.test(a) ? a.split(/\s+/) : [a, b];
+  const m = arrRaw?.match(/^(!?\d{4})(?:\+(\d))?([A-Z]{3})?$/);
+  return { org, dep: clockToMin(depRaw), arr: clockToMin(m ? m[1] : arrRaw), dst: m?.[3] ?? null };
 }
+
+// ---------- משך רגלי DH ----------
+
+/**
+ * ה-FT בתכנון אינו כולל רגלי DH, והשעות בתכנון הן שעון מקומי (עם !) או שעון הבסיס.
+ * כדי לחשב STA − STD של רגל DH צריך את הפרש השעון של התחנה, ולומדים אותו מאותו
+ * קובץ: יום עם תחנה זרה אחת שה-FT שלו מתיישב עם הפרש אחד בלבד. הלוך-חזור באותו
+ * יום לא מלמד כלום, כי ההפרש מתקזז. בוחרים את ההפרש שנלמד ביום הקרוב ביותר,
+ * בגלל מעברי שעון קיץ. אם אין – `dur` נשאר null, והמנוע מנסה את הדוח.
+ */
+function resolveDeadheads(days) {
+  const learned = {}; // station → [{date, off}]
+  for (const day of Object.values(days)) {
+    const legs = day.legs.filter((l) => !l.dh);
+    if (!legs.length || day.info.FT == null || legs.some((l) => !l.dep || !l.arr)) continue;
+    const foreign = new Set(legs.flatMap((l) => [l.dep.foreign && l.org, l.arr.foreign && l.dst]).filter(Boolean));
+    if (foreign.size !== 1) continue;
+    const [station] = foreign;
+    const fits = [];
+    for (let off = -720; off <= 840; off += 15) {
+      const sum = legs.reduce((s, l) => s + legDuration(l, { [station]: off }), 0);
+      if (sum === day.info.FT) fits.push(off);
+    }
+    if (fits.length === 1) (learned[station] ||= []).push({ date: day.date, off: fits[0] });
+  }
+
+  for (const day of Object.values(days)) {
+    for (const leg of day.legs) {
+      if (!leg.dh) continue;
+      leg.dur = null;
+      if (!leg.dep || !leg.arr) continue;
+      const offsets = {};
+      for (const [t, station] of [[leg.dep, leg.org], [leg.arr, leg.dst]]) {
+        if (!t.foreign) continue;
+        const closest = (learned[station] || []).sort((a, b) => dist(a.date, day.date) - dist(b.date, day.date))[0];
+        if (closest) offsets[station] = closest.off;
+      }
+      const missing = [[leg.dep, leg.org], [leg.arr, leg.dst]].some(([t, s]) => t.foreign && offsets[s] == null);
+      if (!missing) leg.dur = legDuration(leg, offsets);
+    }
+  }
+}
+
+/** STA − STD בדקות, כשזמן עם ! מומר לשעון הבסיס לפי ההפרש של התחנה. */
+function legDuration(leg, offsets) {
+  const base = (t, station) => (t.foreign ? t.min - offsets[station] : t.min);
+  return (((base(leg.arr, leg.dst) - base(leg.dep, leg.org)) % 1440) + 1440) % 1440;
+}
+
+const dist = (a, b) => Math.abs(Date.parse(a) - Date.parse(b));
 
 const near = (list, y, tol = 3) => (list || []).find((i) => Math.abs(i.y - y) <= tol) || null;
 
