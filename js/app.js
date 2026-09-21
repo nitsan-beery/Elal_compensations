@@ -16,7 +16,7 @@ const MONTH_NAMES = ['ינואר', 'פברואר', 'מרץ', 'אפריל', 'מא
 const monthName = (p) => `${MONTH_NAMES[p.month - 1]} ${p.year}`;
 const KIND_LABEL = { plan: 'קובץ תכנון', exec: 'קובץ ביצוע' };
 const MODE_LABEL = { full: 'תכנון וביצוע', plan: 'תכנון בלבד', exec: 'ביצוע בלבד' };
-const CATEGORY_LABEL = { base: 'בסיס', plan: 'תכנון', exec: 'ביצוע', train: 'הדרכה' };
+const CATEGORY_LABEL = { plan: 'תכנון', exec: 'ביצוע', train: 'הדרכה' };
 const KEY_LABEL = { flight: 'קרדיט טיסה', absence: 'זיכוי היעדרות', credit: 'קרדיט', rig: 'Rig', com: 'COM', sc: 'S/C' };
 // תוויות לתשובות שכבר ניתנו. ערך שאינו כאן מוצג כמות שהוא.
 const ANSWER_LABEL = {
@@ -254,13 +254,6 @@ function renderAlerts(res) {
   const out = [];
   if (res.warnings.length) {
     out.push(`<div class="notice warn"><strong>אזהרות</strong><ul>${res.warnings.map((w) => `<li>${esc(w)}</li>`).join('')}</ul></div>`);
-  }
-  if (res.rules.unsupported.length) {
-    const inScope = res.rules.unsupported.filter((u) => u.category !== 'train');
-    out.push(`<details class="notice warn"><summary><strong>${res.rules.unsupported.length} חוקים לא נתמכים, דורשים עדכון</strong>
-      ${inScope.length ? `(${inScope.length} מהם בקטגוריות תכנון, ביצוע ובסיס)` : ''}. החוקים האלה לא נבדקו.</summary>
-      <ul>${res.rules.unsupported.map((u) => `<li>${esc(u.title)} <span class="tag">${esc(CATEGORY_LABEL[u.category] ?? u.category)}</span> <span class="small">${esc(u.reason)}</span></li>`).join('')}</ul>
-    </details>`);
   }
   if (res.unknownCodes.length) {
     out.push(`<div class="notice bad"><strong>קודים לא מוכרים</strong> – האפליקציה לא יודעת מה מגיע עליהם ולא ניחשה:
@@ -599,7 +592,7 @@ function renderRuleList() {
     return [r.id, r.title, r.when, r.amount?.text, r.source, r.note, r.logic?.id].some((s) => String(s ?? '').toLowerCase().includes(q));
   });
 
-  $('[data-role="count"]', root).textContent = `מוצגים ${rules.length} מתוך ${data.rules.length} חוקים`;
+  $('[data-role="count"]', root).textContent = `מוצגים ${rules.length} מתוך ${data.rules.length} חוקים (מתוכם ${rules.filter((r) => reasonOf.has(r.id)).length} לא נתמכים)`;
   $('[data-role="list"]', root).innerHTML = rules.map((r) => {
     const expired = !!(r.valid_to && r.valid_to < today);
     const reason = reasonOf.get(r.id);

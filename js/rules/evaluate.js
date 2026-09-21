@@ -506,17 +506,17 @@ function compare({ out, timeline, execPairings, domicile }) {
   return rows.sort((a, b) => a.dates[0].localeCompare(b.dates[0]) || COMPARED_COLUMNS.indexOf(a.column) - COMPARED_COLUMNS.indexOf(b.column));
 }
 
-/** סיכום חודשי מול שורת הסיכום בדוח. COMTOT = COM + S/C. */
+/** סיכום חודשי מול שורת הסיכום בדוח. CRTOT = Credit + Rig, ‏COMTOT = COM + S/C. */
 function compareTotals(out, exec) {
   const sum = (column) => out.comparison.filter((r) => r.column === column).reduce((s, r) => s + r.expected, 0);
   const t = exec.totals ?? {};
   const rows = [
     { column: 'Credit', expected: sum('Credit'), reported: t.Credit ?? null },
     { column: 'Rig', expected: sum('Rig'), reported: t.Rig ?? null },
+    { column: 'CRTOT', expected: sum('Credit') + sum('Rig'), reported: t.Credit != null ? t.Credit + (t.Rig ?? 0) : null },
     { column: 'COM', expected: sum('COM'), reported: t.COM ?? null },
     { column: 'S/C', expected: sum('S/C'), reported: t['S/C'] ?? null },
     { column: 'COMTOT', expected: sum('COM') + sum('S/C'), reported: t.COM != null || t['S/C'] != null ? (t.COM ?? 0) + (t['S/C'] ?? 0) : null },
-    { column: 'CRTOT', expected: sum('Credit') + sum('Rig'), reported: t.Credit != null ? t.Credit + (t.Rig ?? 0) : null },
   ];
   return rows.map((r) => ({ ...r, ok: r.reported == null ? null : r.reported === r.expected }));
 }

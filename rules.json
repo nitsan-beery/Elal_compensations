@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "rules_version": "2026-09-21.6",
+  "rules_version": "2026-09-21.7",
   "updated": "2026-09-21",
   "source": "טבלת פיצויי אצ\"א אל על (Artifact), על בסיס ההסכם הישן (פרק כ\"ה), הסכם 2018, הסכם אצ\"א 2024 והסכם 2026",
   "precedence": "הסכם מאוחר גובר על מוקדם. סעיף שלא בוטל ולא שונה נשאר בתוקף. פיצויי 2018, 2024 ו‑2026 באים בנוסף לפיצויים מהסכמים אחרים.",
@@ -89,7 +89,7 @@
   "rules": [
     {
       "id": "credit_scheduled",
-      "category": "base",
+      "category": "plan",
       "title": "קרדיט טיסה לפי התכנון",
       "when": "קרדיט כל רגל טיסה = STA − STD. זמני הביצוע (ATD/ATA) אינם משפיעים על הקרדיט.",
       "amount": {
@@ -132,7 +132,7 @@
     },
     {
       "id": "absence_month_cap",
-      "category": "base",
+      "category": "plan",
       "title": "תקרת זיכויים בחודש היעדרות מלא",
       "when": "חודש שכולו היעדרות.",
       "amount": {
@@ -280,7 +280,7 @@
     },
     {
       "id": "sick_credit",
-      "category": "base",
+      "category": "plan",
       "title": "יום מחלה",
       "when": "יום מחלה שלא היה בתכנון, ביום שבו אצ\"א היה מוצב לפעילות. על ימי מחלה שבהם לא היה מוצב לפעילות אין קרדיט.",
       "amount": {
@@ -309,7 +309,7 @@
     },
     {
       "id": "ground_training_credit",
-      "category": "base",
+      "category": "plan",
       "title": "אימון קרקע (HOME_RGT, INV_C, CPT_BAS, CRM_CRS)",
       "when": "יום אימון קרקע: מהבית (HOME_RGT), פעילות קרקע INV_C, CPT_BAS או CRM_CRS.",
       "amount": {
@@ -345,7 +345,7 @@
     },
     {
       "id": "short_call_standby_credit",
-      "category": "base",
+      "category": "plan",
       "title": "יום כוננות במצב הכן מיידי (SBY_S)",
       "when": "יום כוננות במצב הכן מיידי (short-call reserve) שלא הופעל בו לטיסה. ביום שבו הופעל לסליפ, הזיכוי הוא הגבוה מבין שעות הטיסה והשהייה של הסליפ לבין ערך ימי הכוננות.",
       "amount": {
@@ -376,7 +376,7 @@
     },
     {
       "id": "sim_day_credit",
-      "category": "base",
+      "category": "plan",
       "title": "יום סימולטור: זיכוי יומי",
       "when": "יום אימון או בחינה בסימולטור.",
       "amount": {
