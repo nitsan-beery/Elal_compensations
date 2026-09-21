@@ -98,7 +98,7 @@ export function evaluate({ rulesData, plan = null, exec = null, answers = {} }) 
     }
   }
 
-  attachLinkCandidates(out.questions, matches);
+  attachLinkCandidates(out.questions, matches, ctx);
   if (exec) {
     out.comparison = compare({ out, timeline, execPairings, domicile, codes });
     out.totals = compareTotals(out, exec);
@@ -115,6 +115,11 @@ function makeContext({ out, timeline, domicile, codes, answers, plan, supported,
   const askedIds = new Set();
   const noteKeys = new Set();
   const ruleRef = (rule) => ({ ruleId: rule.id, ruleTitle: rule.title });
+  const linkedSwap = (prefix, pairingId) => {
+    const hit = Object.entries(answers).find(([id, a]) =>
+      id.startsWith(prefix) && a.value === 'voluntary_swap' && a.link === pairingId);
+    return hit ? { value: 'voluntary_swap', via: hit[0] } : null;
+  };
 
   const planRanges = plan ? buildPairings(timeline, domicile, (d) => d.plan?.legs) : [];
   const leave = new Set(codes.leave ?? []);
@@ -186,15 +191,22 @@ function makeContext({ out, timeline, domicile, codes, answers, plan, supported,
       out.questions.push(question);
     },
 
-    /** התשובה שרלוונטית להתאמה. החלפה מרצון שקושרה לסבב מתוכנן סוגרת גם את השאלה עליו. */
+    /**
+     * התשובה שרלוונטית להתאמה. החלפה מרצון שקושרה לסבב בצד השני סוגרת גם את
+     * השאלה עליו, בשני הכיוונים: ביצוע לא מתוכנן ↔ תכנון שלא בוצע.
+     */
     answerFor(match) {
-      if (match.exec && answers[`unplanned:${match.exec.id}`]) return answers[`unplanned:${match.exec.id}`];
+      if (match.exec) {
+        const direct = answers[`unplanned:${match.exec.id}`];
+        if (direct) return direct;
+        const linked = linkedSwap('cancelled:', match.exec.id);
+        if (linked) return linked;
+      }
       if (match.plan) {
         const direct = answers[`cancelled:${match.plan.id}`] ?? answers[`replaced:${match.plan.id}`];
         if (direct) return direct;
-        const linked = Object.entries(answers).find(([id, a]) =>
-          id.startsWith('unplanned:') && a.value === 'voluntary_swap' && a.link === match.plan.id);
-        if (linked) return { value: 'voluntary_swap', via: linked[0] };
+        const linked = linkedSwap('unplanned:', match.plan.id);
+        if (linked) return linked;
       }
       return null;
     },
@@ -305,11 +317,19 @@ function describeMatch(m) {
   };
 }
 
-/** לשאלה שמבקשת לקשר לסבב אחר: הסבבים המתוכננים שלא בוצעו. */
-function attachLinkCandidates(questions, matches) {
-  const candidates = matches.filter((m) => m.how === 'cancelled').map((m) => ({ id: m.plan.id, label: describePairing(m.plan) }));
+/**
+ * לשאלה שמבקשת לקשר החלפה מרצון לסבב בצד השני: על פעילות לא מתוכננת – הסבבים
+ * המתוכננים שלא בוצעו; על סבב שלא בוצע – הפעילויות הלא מתוכננות. תמיד אפשר גם
+ * "בחודש אחר", כי ההחלפה יכולה להיות עם טיסה שאינה בקבצים של החודש.
+ */
+function attachLinkCandidates(questions, matches, ctx) {
+  const cancelled = matches.filter((m) => m.how === 'cancelled').map((m) => ({ id: m.plan.id, label: describePairing(m.plan) }));
+  // פעילות שזוהתה כקריאה מיוחדת (S/C בדוח) אינה החלפה.
+  const unplanned = matches.filter((m) => m.how === 'unplanned' && !ctx.pairingHandledBy(m.exec, 'special_call')).map((m) => ({ id: m.exec.id, label: describePairing(m.exec) }));
+  const elsewhere = { id: null, label: 'טיסה בחודש אחר, או בלי טיסה חלופית' };
   for (const q of questions) {
-    for (const o of q.options ?? []) if (o.needsLink) o.linkCandidates = candidates;
+    const pool = q.id.startsWith('unplanned:') ? cancelled : q.id.startsWith('cancelled:') ? unplanned : [];
+    for (const o of q.options ?? []) if (o.needsLink) o.linkCandidates = [...pool, elsewhere];
   }
 }
 
