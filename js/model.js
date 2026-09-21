@@ -28,8 +28,9 @@ export function buildTimeline(period, plan, exec) {
  * חזרה לבסיס אחרי המראה (רגל TLV→TLV שאחריה יוצא אותו מספר טיסה מהבסיס) היא חלק
  * מהסבב שאחריה ולא סבב נפרד (אומת: LY2367 ב-15/02/2026, הקרדיט שלה נכלל בסליפ).
  *
- * סבב שנחתך בגבול החודש מסומן: `cutAtStart` – הרגל הראשונה בחודש לא יוצאת מהבסיס;
- * `cutAtEnd` – בסוף החודש הסבב עוד לא חזר. החלק השני שלו בדוח של החודש השכן.
+ * סבב שנחתך בגבול החודש מסומן: `cutAtStart` – הרגל הראשונה בחודש לא יוצאת מהבסיס, או
+ * שהיא יצאה עוד בחודש הקודם (`prevMonth`, ראו markCarryIn); `cutAtEnd` – בסוף החודש
+ * הסבב עוד לא חזר. החלק השני שלו בדוח של החודש השכן.
  */
 export function buildPairings(days, domicile, getLegs) {
   const all = days.flatMap((day) => (getLegs(day) ?? []).map((leg) => ({ ...leg, date: day.date })));
@@ -40,7 +41,9 @@ export function buildPairings(days, domicile, getLegs) {
     if (open && leg.org === domicile && !isAirReturnOnly(open)) { closePairing(pairings, open, false); open = null; }
     if (!open) {
       open = { from: leg.date, to: leg.date, dates: [], legs: [], destinations: [] };
-      if (!pairings.length && leg.org !== domicile) open.cutAtStart = true;
+      if (!pairings.length && (leg.org !== domicile || leg.prevMonth)) open.cutAtStart = true;
+      // סבב שהתחיל בחודש הקודם מתואר לפי התחנה שבה הוא נמצא בתחילת החודש.
+      if (open.cutAtStart && leg.org !== domicile) open.destinations.push(leg.org);
     }
     if (!open.dates.includes(leg.date)) open.dates.push(leg.date);
     open.to = leg.date;
@@ -56,7 +59,19 @@ export function buildPairings(days, domicile, getLegs) {
   return pairings;
 }
 
-const isAirReturnOnly = (pairing) => pairing.legs.every((l) => l.org === l.dst);
+/**
+ * דוח הביצוע חוזר ביום 1 על סבב שיצא בחודש הקודם, כולל הרגל שכבר זוכתה שם
+ * (01/06/2026: LY387 יצאה ב-31/05 ומופיעה שוב ב-01/06). הסימן: TAB של 24:00 ביום 1,
+ * כלומר מחוץ לבסיס מתחילת החודש, והרגל הראשונה יוצאת מהבסיס. רק הרגל הזאת מסומנת.
+ */
+export function markCarryIn(days, domicile) {
+  const first = days[0]?.exec;
+  const leg = first?.legs?.[0];
+  if (!leg || leg.org !== domicile || (first.values?.TAB?.min ?? 0) < 1440) return;
+  leg.prevMonth = true;
+}
+
+const isAirReturnOnly =(pairing) => pairing.legs.every((l) => l.org === l.dst);
 
 function closePairing(pairings, pairing, closed) {
   pairing.closed = closed;

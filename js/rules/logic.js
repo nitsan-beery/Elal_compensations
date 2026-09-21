@@ -21,16 +21,23 @@ function credit_from_scheduled(ctx, params, rule) {
       continue;
     }
     const cut = pairing.cutAtEnd ? monthEndSplit(pairing, monthEnd, ctx.domicile) : null;
-    if (cut?.error) {
-      ctx.review(`${describePairing(pairing)}: ${cut.error} דורש בדיקה ידנית.`, rule);
+    const carry = pairing.cutAtStart ? carriedIn(pairing, ctx.domicile) : null;
+    const error = cut?.error ?? carry?.error;
+    if (error) {
+      ctx.review(`${describePairing(pairing)}: ${error} דורש בדיקה ידנית.`, rule);
       continue;
+    }
+    let expected = credit;
+    const why = ['קרדיט לפי STA − STD'];
+    if (carry) {
+      expected -= carry.before;
+      why.push(`${carry.leg.flight} יצאה בחודש הקודם, ושם זוכו ${minToHhmm(carry.before)}. בחודש הזה ${minToHhmm(carry.leg.skdDur - carry.before)} מתוך ${minToHhmm(carry.leg.skdDur)}`);
     }
     if (cut) {
-      ctx.expectPairing(pairing, 'flight', credit - cut.leg.skdDur + cut.before, rule,
-        `קרדיט לפי STA − STD. ${cut.leg.flight} חוצה את סוף החודש: בחודש הזה ${minToHhmm(cut.before)} מההמראה בפועל עד חצות, והשאר בחודש הבא`);
-      continue;
+      expected += cut.before - cut.leg.skdDur;
+      why.push(`${cut.leg.flight} חוצה את סוף החודש: בחודש הזה ${minToHhmm(cut.before)} מההמראה בפועל עד חצות, והשאר בחודש הבא`);
     }
-    ctx.expectPairing(pairing, 'flight', credit, rule, 'קרדיט לפי STA − STD');
+    ctx.expectPairing(pairing, 'flight', expected, rule, why.join('. '));
   }
 }
 
@@ -42,13 +49,32 @@ function credit_from_scheduled(ctx, params, rule) {
 function monthEndSplit(pairing, monthEnd, domicile) {
   const leg = pairing.legs.findLast((l) => l.date === monthEnd);
   if (!leg) return null;
+  const before = beforeMidnight(leg, domicile);
+  if (before?.error) return before;
+  if (before == null) return null;
+  return { leg, before };
+}
+
+/**
+ * החלק השני של monthEndSplit: הרגל שיצאה בחודש הקודם מזוכה בחודש הזה ב-SkdDur פחות מה
+ * שזוכה עליה שם. 01/06/2026: LY387, ‏SkdDur 04:15, זוכו 04:22 במאי → ‎−00:07 ביוני.
+ */
+function carriedIn(pairing, domicile) {
+  const leg = pairing.legs[0];
+  if (!leg?.prevMonth) return null;
+  const before = beforeMidnight(leg, domicile);
+  if (before?.error) return before;
+  return { leg, before: before ?? leg.skdDur }; // נחתה לפני חצות: כולה זוכתה בחודש הקודם
+}
+
+/** כמה מהרגל חל לפני חצות בשעון הבסיס, או null אם היא לא חוצה חצות. */
+function beforeMidnight(leg, domicile) {
   const dur = leg.actDur ?? leg.skdDur;
   let dep = null; // המראה בשעון הבסיס
   if (leg.org === domicile) dep = leg.atd ?? leg.std;
   else if (leg.dst === domicile && (leg.ata ?? leg.sta) != null && dur != null) dep = mod((leg.ata ?? leg.sta) - dur, 1440);
-  if (dep == null || dur == null) return { error: `לא ניתן לדעת כמה מ-${leg.flight} חל לפני סוף החודש.` };
-  if (dep + dur <= 1440) return null;
-  return { leg, before: 1440 - dep };
+  if (dep == null || dur == null) return { error: `לא ניתן לדעת כמה מ-${leg.flight} חל לפני חצות של סוף החודש.` };
+  return dep + dur <= 1440 ? null : 1440 - dep;
 }
 
 const sumLegs = (pairing) =>
@@ -72,13 +98,33 @@ function min_slip_credit(ctx, params, rule) {
 // ---------- ימי היעדרות וזיכוי ----------
 
 /**
- * זיכוי יומי לפי קוד: חופשה, מחלה, אימון קרקע וסימולטור.
- * חמישה חוקים שונים משתמשים בלוגיקה הזאת, כל אחד עם קודים וערכים משלו.
+ * זיכוי יומי לפי קוד: חופשה, מחלה, אימון קרקע, סימולטור וכוננות.
+ * כמה חוקים שונים משתמשים בלוגיקה הזאת, כל אחד עם קודים וערכים משלו.
+ *
+ * `flight_day_takes_higher`: יום שבו הופעל לסליפ (כוננות, 03/06/2026) מזוכה לפי הגבוה מבין
+ * קרדיט הסליפ לבין ערך ימי הקוד שבו. כשהסליפ גבוה – הקרדיט שלו כבר צפוי ואין תוספת.
  */
 function absence_day_credit(ctx, params, rule) {
   const credit = H(params.credit_hours);
+  const onFlightDay = new Set();
   for (const day of ctx.timeline) {
     if (!matchesCode(day, params, ctx)) continue;
+    if (params.flight_day_takes_higher) {
+      const pairing = ctx.execPairings.find((p) => p.dates.includes(day.date));
+      if (pairing) {
+        if (onFlightDay.has(pairing)) continue;
+        onFlightDay.add(pairing);
+        const days = ctx.timeline.filter((d) => pairing.dates.includes(d.date) && matchesCode(d, params, ctx)).length;
+        const flown = sumLegs(pairing);
+        if (flown == null || flown < credit * days) {
+          ctx.review(`${describePairing(pairing)}: ${rule.title} ביום שבו הופעלת לסליפ. הקרדיט הוא הגבוה מבין הסליפ ` +
+            `(${flown == null ? 'לא ידוע' : minToHhmm(flown)}) לבין ${days} ימים × ${minToHhmm(credit)}. דורש בדיקה ידנית.`, rule);
+        } else {
+          ctx.note(day.date, `${rule.title}: הופעלת לסליפ, וקרדיט הסליפ (${minToHhmm(flown)}) גבוה מערך הכוננות, ולכן אין תוספת.`, rule);
+        }
+        continue;
+      }
+    }
     if (params.requires_assigned_activity) {
       const assigned = ctx.wasAssigned(day.date);
       if (assigned == null) {
@@ -181,7 +227,7 @@ function late_landing_home(ctx, params, rule) {
       if (leg.dst !== ctx.domicile || leg.sta == null || leg.ata == null) continue;
       const delay = wrapDelta(leg.ata - leg.sta);
       if (delay <= grace) {
-        if (delay > 0) ctx.note(day.date, `${leg.flight} נחתה באיחור של ${delay} דק', מתחת לסף של ${grace} דק'. אין פיצוי.`, rule);
+        if (delay > 0) ctx.note(day.date, `${leg.flight} נחתה באיחור של ${delay} דק', לא מעבר לסף של ${grace} דק'. אין פיצוי.`, rule);
         continue;
       }
       const steps = Math.ceil((delay - grace) / step);
@@ -337,13 +383,14 @@ function higher_of_planned_performed(ctx, params, rule) {
 
     // יש הפרש לתשלום. החלפה לבקשת אצ"א אינה מזכה, והסיבה לא בקבצים: שואלים. אבל אם
     // הדוח כבר השלים בדיוק את ההפרש, החברה עצמה קבעה שזו החלפה שלה (05/05/2026: TBS → BUD,
-    // Rig 00:06), ואין מה לשאול.
+    // Rig 00:06), ואין מה לשאול. לפעמים ההשלמה נרשמת על סבב סמוך ולא על המחליף עצמו
+    // (10/06/2026: LTN 11–12 → OTP 11, ה-Rig 05:10 נרשם על OTP של 10/06).
     const column = params.shortfall_column === 'Rig' ? 'rig' : 'com';
-    const paid = match.exec && !answer
-      && ctx.reportedOn(match.exec, params.shortfall_column ?? 'COM') - ctx.expectedOn(match.exec, column) === planned - performed;
-    if (paid) {
+    const paidOn = match.exec && !answer ? findShortfallPaid(ctx, match, planned - performed, column, params.shortfall_column ?? 'COM') : null;
+    if (paidOn) {
+      const where = paidOn === match.exec ? '' : `, ונרשם על ${describePairing(paidOn)}`;
       ctx.note(match.plan.from, `${describePairing(match.plan)} → ${describePairing(match.exec)}: הדוח השלים את ההפרש ` +
-        `${minToHhmm(planned - performed)} לפי "הגבוה מבין השתיים", ולכן לא נשאלת שאלה.`, rule);
+        `${minToHhmm(planned - performed)} לפי "הגבוה מבין השתיים"${where}. לכן לא נשאלת שאלה.`, rule);
     } else if (params.requires_user_answer && answer?.value !== 'replaced') {
       if (answer) continue;
       ctx.ask({
@@ -361,13 +408,25 @@ function higher_of_planned_performed(ctx, params, rule) {
       continue;
     }
 
-    const target = match.exec ?? match.plan;
+    const target = paidOn ?? match.exec ?? match.plan;
     ctx.expectPairing(target, column, planned - performed, rule,
       `המתוכנן (${describePairing(match.plan)}) גבוה מהמבוצע. ההפרש לפי "הגבוה מבין השתיים".`);
   }
 }
 
 /** ביטול בגלל מטוס חכור: השעות שהפסיד, כולל השלמה לסליפ קצר. */
+/**
+ * הסבב שעליו הדוח כבר רשם בדיוק את ההפרש: קודם הסבב המחליף, ואחר כך סבב ביצוע שנוגע
+ * בטווח של יום אחד מהסבב המתוכנן. "בדיוק" = מה שבדוח פחות מה שכבר צפוי עליו מחוקים אחרים.
+ */
+function findShortfallPaid(ctx, match, diff, key, column) {
+  const extra = (p) => ctx.reportedOn(p, column) - ctx.expectedOn(p, key);
+  if (extra(match.exec) === diff) return match.exec;
+  const from = addDays(match.plan.from, -1);
+  const to = addDays(match.plan.to, 1);
+  return ctx.execPairings.find((p) => p !== match.exec && p.dates.some((d) => from <= d && d <= to) && extra(p) === diff) ?? null;
+}
+
 function lost_hours_credit(ctx, params, rule) {
   for (const match of ctx.matches) {
     if (!match.plan) continue;
@@ -453,7 +512,7 @@ export const LOGIC = {
 export const KNOWN_PARAMS = {
   credit_from_scheduled: [],
   min_slip_credit: ['min_credit_hours'],
-  absence_day_credit: ['plan_codes', 'report_codes', 'plan_code_prefixes', 'report_code_prefixes', 'report_flag_column', 'credit_hours', 'tab_hours', 'requires_assigned_activity'],
+  absence_day_credit: ['plan_codes', 'report_codes', 'plan_code_prefixes', 'report_code_prefixes', 'report_flag_column', 'credit_hours', 'tab_hours', 'requires_assigned_activity', 'flight_day_takes_higher'],
   vacation_credit_balance: ['per_day_hours', 'days_full_rate', 'monthly_max_hours', 'yearly_cap_days', 'taper_table', 'taper_table_complete', 'taper_monthly_totals'],
   absence_month_cap: ['cap_hours'],
   late_landing_home: ['grace_minutes', 'step_minutes', 'hours_per_step'],

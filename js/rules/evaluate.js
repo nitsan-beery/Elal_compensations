@@ -8,7 +8,7 @@
 
 import { LOGIC, LOGIC_ORDER } from './logic.js';
 import { rulesInEffect, partitionRules, rulesByLogic, classifyCode } from './catalog.js';
-import { buildTimeline, buildPairings, matchPairings, describePairing } from '../model.js';
+import { buildTimeline, buildPairings, markCarryIn, matchPairings, describePairing } from '../model.js';
 import { hoursToMin } from '../time.js';
 
 /** עמודות הדוח שכל סוג ציפייה נבדק מולן. */
@@ -46,6 +46,7 @@ export function evaluate({ rulesData, plan = null, exec = null, answers = {} }) 
   if (!domicile) warnings.push('לא ניתן לקבוע את בסיס הבית מהקבצים. חוקים שתלויים בבסיס לא ייבדקו.');
 
   const planPairings = plan ? buildPairings(timeline, domicile, planLegsWithCredit).map(ftOnLastDay) : [];
+  if (exec) markCarryIn(timeline, domicile);
   const execPairings = exec ? buildPairings(timeline, domicile, (d) => d.exec?.legs) : [];
   const matches = mode === 'full'
     ? matchPairings(planPairings, execPairings)
@@ -77,9 +78,11 @@ export function evaluate({ rulesData, plan = null, exec = null, answers = {} }) 
 
   // פעילות קרקע במקום סבב: הזיכוי עליה בא מחוק הקוד שלה. קוד שאף חוק נתמך לא מכסה – לבדיקה ידנית.
   const covered = new Set(supported.flatMap((r) => [...(r.logic.params?.plan_codes ?? []), ...(r.logic.params?.report_codes ?? [])]));
+  const coveredPrefixes = supported.flatMap((r) => [...(r.logic.params?.plan_code_prefixes ?? []), ...(r.logic.params?.report_code_prefixes ?? [])]);
+  const isCovered = (c) => covered.has(c) || coveredPrefixes.some((p) => c.startsWith(p));
   for (const m of matches) {
     if (m.how !== 'replaced_by_ground') continue;
-    const uncovered = [...new Set(m.replacedBy.map((r) => r.code))].filter((c) => !covered.has(c));
+    const uncovered = [...new Set(m.replacedBy.map((r) => r.code))].filter((c) => !isCovered(c));
     if (!uncovered.length) continue;
     out.reviews.push({ ruleId: null, ruleTitle: null,
       message: `${describePairing(m.plan)} הוחלף בפעילות קרקע (${uncovered.join(', ')}). ` +
@@ -173,7 +176,7 @@ function makeContext({ out, timeline, domicile, codes, answers, plan, exec, supp
       let unknown = false;
       for (const code of day?.codes ?? []) {
         if (activityCodes.has(code)) return true;
-        if (leave.has(code) || isIgnoredPlanCode(code, codes)) continue;
+        if (isLeaveCode(code, leave, codes) || isIgnoredPlanCode(code, codes)) continue;
         unknown = true;
       }
       if (!unknown) return false;
@@ -311,7 +314,7 @@ function explainByActivity(matches, timeline, codes) {
       for (const code of execCodesOf(day)) found.push({ date: day.date, code });
     }
     if (!found.length) continue;
-    const kinds = new Set(found.map((f) => (reportLeave.has(f.code) ? 'leave' : ground.has(f.code) ? 'ground' : 'other')));
+    const kinds = new Set(found.map((f) => (isLeaveCode(f.code, reportLeave, codes) ? 'leave' : ground.has(f.code) ? 'ground' : 'other')));
     if (kinds.has('other')) continue; // קוד לא מוכר: לא מסיקים ממנו, והשאלה תישאל
     m.how = kinds.has('ground') ? 'replaced_by_ground' : 'replaced_by_leave';
     m.replacedBy = found;
@@ -368,6 +371,9 @@ function execCodesOf(day) {
   const hasReturnLeg = (day.exec.legs ?? []).some((l) => l.org && l.org === l.dst);
   return details.split(/[,\s]+/).filter((t) => t && !/^[A-Z]{3}-[A-Z]{3}$/.test(t) && !(hasReturnLeg && t === 'LEG'));
 }
+
+/** קוד היעדרות: ברשימה, או מתחיל בקידומת היעדרות (SCK_F, 21/06/2026). */
+const isLeaveCode = (code, list, codes) => list.has(code) || (codes.leave_prefixes ?? []).some((p) => code.startsWith(p));
 
 function isIgnoredPlanCode(code, codes) {
   return (codes.ignored_plan_notes ?? []).some((n) => code === n || code.startsWith(n));
