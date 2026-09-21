@@ -591,6 +591,26 @@ function training_cancelled_flight(ctx, params, rule) {
   }
 }
 
+/**
+ * הפעלה כאיש צוות פעיל (2018 ס' 27.1): רגל שתוכננה כ-DH ובדוח הביצוע אותה טיסה, באותו יום,
+ * רשומה כרגל פעילה ולא כ-DH (`report_dh_types`, בדוח DHO). הפיצוי נרשם על הסבב.
+ * רגל DH שלא נמצאה בדוח אינה הפעלה, ואין עליה פיצוי מהחוק הזה.
+ */
+function dh_activated(ctx, params, rule) {
+  if (!ctx.hasPlan || !ctx.hasExec) return;
+  const dhTypes = params.report_dh_types ?? [];
+  for (const day of ctx.timeline) {
+    for (const leg of (day.plan?.legs ?? []).filter((l) => l.dh)) {
+      const same = (l) => l.flight === leg.flight && l.date === day.date && l.org === leg.org;
+      const pairing = ctx.execPairings.find((p) => p.legs.some(same));
+      const flown = pairing?.legs.find(same);
+      if (!flown || dhTypes.includes(flown.type) || flown.dhd) continue;
+      ctx.expectPairing(pairing, params.report_column === 'S/C' ? 'sc' : 'com', H(params.hours), rule,
+        `${rule.title}: ${leg.flight} ${leg.org}→${leg.dst} ב-${dayOf(day.date)} תוכננה כ-DH ובוצעה כאיש צוות פעיל.`);
+    }
+  }
+}
+
 export const LOGIC = {
   credit_from_scheduled,
   min_slip_credit,
@@ -606,6 +626,7 @@ export const LOGIC = {
   cancelled_no_compensation,
   vacation_recall,
   training_cancelled_flight,
+  dh_activated,
   ...DUTY_LOGIC,
 };
 
@@ -629,6 +650,7 @@ export const KNOWN_PARAMS = {
   cancelled_no_compensation: ['requires_user_answer'],
   vacation_recall: ['plan_codes', 'plan_code_prefixes', 'report_codes', 'report_code_prefixes', 'hours', 'report_column'],
   training_cancelled_flight: ['plan_codes', 'plan_code_prefixes', 'moved_ok_prefixes'],
+  dh_activated: ['hours', 'report_column', 'report_dh_types'],
   ...DUTY_PARAMS,
 };
 
@@ -644,6 +666,7 @@ export const LOGIC_ORDER = [
   // מסמנים סבבים שקריאה מיוחדת צריכה להכיר: קריאה מחופשה, והדרכה שבוטלה.
   'vacation_recall',
   'training_cancelled_flight',
+  'dh_activated',
   'special_call',
   'lost_hours_credit',
   'min_slip_credit',
