@@ -677,5 +677,8 @@ export const LOGIC_ORDER = [
   'second_unplanned_activity',
   'base_rest_shortfall',
   'special_date_activity',
+  'white_flight',
+  'free_days_waived',
+  'consecutive_saturdays',
   'absence_month_cap',
 ];

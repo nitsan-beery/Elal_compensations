@@ -79,6 +79,7 @@ export function evaluate({ rulesData, plan = null, exec = null, answers = {} }) 
     unknownCodes: collectUnknownCodes(timeline, codes, supported),
     comparison: [],
     totals: [],
+    freeDays: null,
   };
 
   // פעילות קרקע במקום סבב: הזיכוי עליה בא מחוק הקוד שלה. קוד שאף חוק נתמך לא מכסה – לבדיקה ידנית.
@@ -149,6 +150,7 @@ function makeContext({ out, timeline, domicile, codes, answers, plan, exec, supp
     fleet,
     monthFirst: timeline[0].date,
     stationOffsets: plan?.stationOffsets ?? null,
+    planSummary: plan?.summary ?? null,
     hasExec: !!exec,
     hasPlan: !!plan,
     answer: (id) => answers[id] ?? null,
@@ -181,6 +183,10 @@ function makeContext({ out, timeline, domicile, codes, answers, plan, exec, supp
     },
     isAbsenceBy: (date, ruleId) => absenceBy.get(date)?.has(ruleId) ?? false,
     execCodes: (day) => execCodesOf(day),
+    /** ימים ללא פעילות בתכנון מול המינימום בהסכם, לסיכום החודשי. */
+    setFreeDays(v) { out.freeDays = v; },
+    /** קודים בתכנון שאינם היעדרות, הערה או DUM: פעילות, וגם קוד לא מוכר (לא מניחים שהוא יום פנוי). */
+    planActivityCodes: (day) => (day.plan?.codes ?? []).filter((c) => !isLeaveCode(c, leave, codes) && !isIgnoredPlanCode(c, codes)),
 
     /**
      * האם אצ"א היה מוצב לפעילות ביום. בלי קובץ תכנון – לפי תשובת המשתמש, או null.
@@ -512,7 +518,7 @@ function compare({ out, timeline, execPairings, domicile }) {
 }
 
 /**
- * סיכום חודשי מול שורת הסיכום בדוח. CRTOT = Credit + Rig, ‏COMTOT = COM + S/C.
+ * סיכום חודשי מול שורת הסיכום בדוח.
  * עמודת פיצוי שאינה בדוח פירושה שלא היה פיצוי כזה בחודש, והיא נקראת כ-0.
  */
 function compareTotals(out, exec) {
@@ -522,10 +528,8 @@ function compareTotals(out, exec) {
   const rows = [
     { column: 'Credit', expected: sum('Credit'), reported: t.Credit ?? null },
     { column: 'Rig', expected: sum('Rig'), reported: t.Rig ?? null },
-    { column: 'CRTOT', expected: sum('Credit') + sum('Rig'), reported: t.Credit != null ? t.Credit + (t.Rig ?? 0) : null },
     { column: 'COM', expected: sum('COM'), reported: t.COM ?? null },
     { column: 'S/C', expected: sum('S/C'), reported: t['S/C'] ?? null },
-    { column: 'COMTOT', expected: sum('COM') + sum('S/C'), reported: t.COM != null || t['S/C'] != null ? (t.COM ?? 0) + (t['S/C'] ?? 0) : null },
   ];
   return rows.map((r) => ({ ...r, ok: r.reported == null ? null : r.reported === r.expected }));
 }
@@ -535,10 +539,9 @@ function compareTotals(out, exec) {
  */
 function warnMissingColumns(out, exec) {
   const missing = (exec.missingColumns ?? []).filter((c) => OPTIONAL_COLUMNS.includes(c));
-  for (const [total, parts] of [['CRTOT', ['Rig']], ['COMTOT', ['COM', 'S/C']]]) {
-    const absent = parts.filter((c) => missing.includes(c));
-    if (!absent.length || out.totals.find((t) => t.column === total)?.ok !== false) continue;
-    out.warnings.push(`יש פער ב-${total}, ו${absent.length === 1 ? 'עמודת' : 'עמודות'} ${absent.join(' ו-')} לא ${absent.length === 1 ? 'מופיעה' : 'מופיעות'} בדוח. ` +
+  for (const column of missing) {
+    if (out.totals.find((t) => t.column === column)?.ok !== false) continue;
+    out.warnings.push(`יש פער ב-${column}, והעמודה לא מופיעה בדוח. ` +
       'בדרך כלל זה אומר שלא היה פיצוי כזה בחודש, אבל ייתכן שהעמודה נחתכה בהדפסה.');
   }
 }

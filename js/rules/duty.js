@@ -480,6 +480,166 @@ function special_date_activity(ctx, params, rule) {
   }
 }
 
+// ---------- ימים ללא פעילות ושבתות (2018 ס' 71, 42.1; 2024 ס' 33–34, 40) ----------
+
+/** טווחי הסבבים בזמן מוחלט. צד חתוך נמתח עד קצה הציר. */
+function spansOf(ctx, pairings, spanOf) {
+  return pairings.map((p) => {
+    const s = spanOf(p);
+    return { p, start: s.start ?? -Infinity, end: s.end ?? Infinity };
+  });
+}
+const overlapsDay = (sp, date) => sp.start < at(date, 1440) && sp.end > at(date, 0);
+
+/**
+ * ימים ללא פעילות בתכנון (2018 ס' 71.1–71.2): יממה קלנדרית בלי פעילות. חופשה, מחלה מתוכננת,
+ * DUM ו-X אינם פעילות. יום שיש בו רק Off block מ-`off_block_from` או רק On block בבסיס עד
+ * `on_block_until` (כולל) נחשב פנוי. המינימום לפי הקרדיט המתוכנן (Sum בסיכום התכנון) והצי
+ * (ס' 71.3, `min_free_days`). חסרים ימים – 2.5 ש' לכל יום מהיום השני (2024 ס' 33), אם
+ * הוויתור היה לבקשת החברה. ויתור בבקשות (2018 ס' 61) אינו מזכה, ולכן שואלים.
+ */
+function free_days_waived(ctx, params, rule) {
+  if (!ctx.hasPlan) return;
+  const table = params.min_free_days?.[ctx.fleet];
+  const credit = ctx.planSummary?.sum;
+  if (!table || credit == null) {
+    ctx.review(`${rule.title}: ${!table ? `אין ב-rules.json טבלת מינימום לצי ${ctx.fleet}` : 'לא נקרא הקרדיט המתוכנן (Sum) מסיכום התכנון'}, ולכן לא נבדק.`, rule);
+    return;
+  }
+  const due = [...table].sort((a, b) => b.min_credit_hours - a.min_credit_hours).find((r) => credit >= H(r.min_credit_hours))?.days;
+  if (due == null) return;
+  const offFrom = parseClock(params.off_block_from);
+  const onUntil = parseClock(params.on_block_until);
+  const spans = spansOf(ctx, ctx.planPairings, (p) => planSpan(p, ctx.domicile, ctx.monthFirst));
+  const free = ctx.timeline.filter((day) => {
+    if (ctx.planActivityCodes(day).length) return false;
+    const d0 = at(day.date, 0);
+    return !spans.some((sp) => overlapsDay(sp, day.date) &&
+      !(sp.start >= d0 + offFrom && sp.end >= d0 + 1440) && !(sp.start < d0 && sp.end <= d0 + onUntil));
+  }).map((d) => d.date);
+
+  ctx.setFreeDays({ free: free.length, due, dates: free });
+  const missing = due - free.length;
+  if (missing <= 0) return;
+  const paidDays = missing - (params.paid_from_day - 1);
+  const what = `בתכנון ${free.length} ימים ללא פעילות, והמינימום לקרדיט מתוכנן ${minToHhmm(credit)} הוא ${due}`;
+  if (paidDays <= 0) {
+    ctx.note(ctx.monthFirst, `${what}. חסר יום אחד, והפיצוי מתחיל מהיום השני.`, rule);
+    return;
+  }
+  const id = `free_days:${ctx.monthFirst.slice(0, 7)}`;
+  const a = ctx.answer(id);
+  if (!a) {
+    ctx.ask({
+      id,
+      date: ctx.monthFirst,
+      title: `ימים ללא פעילות: חסרים ${missing}. האם הוויתור היה לבקשת החברה?`,
+      body: `${what}. הימים הפנויים: ${free.map(ddmm).join(', ')}.`,
+      options: [
+        { value: 'company', label: 'לבקשת החברה ובהסכמתי', hint: minToHhmm(paidDays * H(params.hours)) },
+        { value: 'own', label: 'ויתרתי בבקשות שלי', hint: 'אין פיצוי' },
+      ],
+      ruleId: rule.id,
+    });
+  } else if (a.value === 'company') {
+    ctx.expect(ctx.monthFirst, keyFor(params.report_column), paidDays * H(params.hours), rule,
+      `${what}: ${missing} ימים חסרים, פיצוי על ${paidDays} (מהיום השני)`);
+  }
+}
+
+/**
+ * שתי שבתות ברצף (2024 ס' 34): פעילות בשתי שבתות עוקבות. שבת עם פעילות = סבב שחופף לשבת
+ * (כולל יציאה לפני שבת וחזרה בשבת או אחריה) או קוד פעילות בשבת. לפי הביצוע כשיש; סבב
+ * מתוכנן שבוטל ביוזמת החברה נחשב ביצוע (ס' 40). בלי שאלת הסכמה (החלטת בעל המוצר, 21/09/2026).
+ * שלוש שבתות ברצף הן שני זוגות.
+ */
+function consecutive_saturdays(ctx, params, rule) {
+  const key = keyFor(params.report_column);
+  const planSpans = ctx.hasPlan ? spansOf(ctx, ctx.planPairings, (p) => planSpan(p, ctx.domicile, ctx.monthFirst)) : [];
+  const execSpans = ctx.hasExec ? spansOf(ctx, ctx.execPairings, (p) => execSpan(p, ctx.domicile, false)) : [];
+  const dayOf = (date) => ctx.timeline.find((d) => d.date === date);
+  const active = (date) => {
+    const day = dayOf(date);
+    if (!ctx.hasExec) {
+      const sp = planSpans.find((s) => overlapsDay(s, date));
+      return sp ? { pairing: sp.p } : ctx.planActivityCodes(day).length ? { date } : null;
+    }
+    const sp = execSpans.find((s) => overlapsDay(s, date));
+    if (sp) return { pairing: sp.p };
+    if (ctx.activityCodes(day).length) return { date };
+    const cancelled = planSpans.find((s) => overlapsDay(s, date) && companyCause(ctx, s.p) === true);
+    return cancelled ? { date, cancelled: cancelled.p } : null;
+  };
+
+  const saturdays = ctx.timeline.filter((d) => new Date(d.date).getUTCDay() === 6).map((d) => d.date);
+  for (let i = 1; i < saturdays.length; i++) {
+    const [s1, s2] = [saturdays[i - 1], saturdays[i]];
+    const [a1, a2] = [active(s1), active(s2)];
+    if (!a1 || !a2) continue;
+    const why = `${rule.title}: פעילות בשבתות ${ddmm(s1)} ו-${ddmm(s2)}${a2.cancelled ? ' (בשבת השנייה סבב שבוטל ביוזמת החברה)' : ''}`;
+    if (a2.pairing) ctx.expectPairing(a2.pairing, key, H(params.hours), rule, why);
+    else ctx.expect(s2, key, H(params.hours), rule, why);
+  }
+}
+
+// ---------- טיסה לבנה (2018 הגדרות, ס' 27.4) ----------
+
+/**
+ * טיסה לבנה: יוצאת מהבסיס, בצוות מוגבר, ההתייצבות המתוכננת (STD פחות `report_minutes_before_std`,
+ * 90 דק' בצי רחב גוף, 2018 ס' 52.2) אחרי `report_after` ועד `report_until`, ובלוק מקובע ארוך
+ * מ-`min_block_hours`. הרכב הצוות אינו בקבצים, ולכן שואלים: 3 טייסים ומעלה נחשבים צוות מוגבר,
+ * גם כשאחד מ-4 עוד לא מוגדר קברניט או קצין ראשון (החלטת בעל המוצר, 21/09/2026).
+ */
+function white_flight(ctx, params, rule) {
+  const report = params.report_minutes_before_std ?? 0;
+  const key = keyFor(params.report_column);
+  const from = parseClock(params.report_after);
+  const to = parseClock(params.report_until);
+  const inWindow = (c) => (from < to ? c > from && c <= to : c > from || c <= to);
+  // בתכנון אין משך לרגל: STA − STD, כששעת נחיתה עם ! מומרת לשעון הבסיס לפי airports.js.
+  const planBlock = (l) => {
+    if (!l.arr) return null;
+    const off = l.arr.foreign ? stationOffset(l.dst, l.date) : 0;
+    return off == null ? null : mod(l.arr.min - off - l.dep.min, 1440);
+  };
+  const pairings = ctx.hasExec ? ctx.execPairings : ctx.planPairings;
+
+  for (const p of pairings) {
+    for (const l of p.legs) {
+      const dh = ctx.hasExec ? l.dhd || l.type === 'DHO' : l.dh;
+      const std = ctx.hasExec ? l.std : l.dep && !l.dep.foreign ? l.dep.min : null;
+      if (dh || l.org !== ctx.domicile || std == null) continue;
+      const reportAt = at(l.date, std) - report;
+      if (!inWindow(clockOf(reportAt))) continue;
+      const block = ctx.hasExec ? l.skdDur : planBlock(l);
+      if (block == null) {
+        ctx.review(`${rule.title}: אין משך מתוכנן ל-${l.flight} ${l.org}→${l.dst} ב-${ddmm(l.date)} (השדה אינו בטבלת אזורי הזמן), ולכן לא נבדק אם היא ארוכה מ-${params.min_block_hours} שעות.`, rule);
+        continue;
+      }
+      if (block <= H(params.min_block_hours)) continue;
+
+      const what = `${l.flight} ${l.org}→${l.dst} ב-${ddmm(l.date)}, התייצבות ${hhmm(reportAt)}, בלוק ${minToHhmm(block)}`;
+      const id = `white:${l.date}:${l.flight}`;
+      const a = ctx.answer(id);
+      if (!a) {
+        ctx.ask({
+          id,
+          date: l.date,
+          title: `טיסה לבנה: האם ב-${l.flight} ב-${ddmm(l.date)} היו 3 טייסים או יותר?`,
+          body: `${what}. זו טיסה לבנה אם הצוות מוגבר. גם 4 טייסים, כשאחד מהם עוד לא מוגדר קברניט או קצין ראשון, נחשבים.`,
+          options: [
+            { value: 'yes', label: 'כן, 3 טייסים או יותר', hint: minToHhmm(H(params.hours)) },
+            { value: 'no', label: 'לא', hint: 'אין פיצוי' },
+          ],
+          ruleId: rule.id,
+        });
+      } else if (a.value === 'yes') {
+        ctx.expectPairing(p, key, H(params.hours), rule, `${rule.title}: ${what} (צוות מוגבר לפי תשובתך)`);
+      }
+    }
+  }
+}
+
 /**
  * קיבוץ סבבי הביצוע ל-FDP: סבבים עוקבים שאין ביניהם מנוחה חוקית, לפי STD/STA. סבב חתוך,
  * או סבב שחסרים לו זמנים, עומד לבד.
@@ -504,6 +664,9 @@ export const DUTY_LOGIC = {
   base_rest_shortfall,
   night_landings,
   special_date_activity,
+  white_flight,
+  free_days_waived,
+  consecutive_saturdays,
 };
 
 export const DUTY_PARAMS = {
@@ -513,4 +676,7 @@ export const DUTY_PARAMS = {
     'short_stay_max_hours', 'short_stay_factor', 'long_stay_share', 'long_stay_min_hours', 'long_stay_max_hours'],
   night_landings: ['fleet', 'window_from', 'window_to', 'min_planned_count', 'paid_from_count', 'hours', 'report_column', 'base_landings_only'],
   special_date_activity: ['occasions', 'flight_activity_only', 'hours', 'report_column', 'report_minutes_before_std'],
+  free_days_waived: ['hours', 'report_column', 'paid_from_day', 'off_block_from', 'on_block_until', 'min_free_days'],
+  consecutive_saturdays: ['hours', 'report_column'],
+  white_flight: ['hours', 'report_column', 'report_minutes_before_std', 'report_after', 'report_until', 'min_block_hours'],
 };

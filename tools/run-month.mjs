@@ -30,6 +30,7 @@ for (const row of r.comparison) {
 }
 
 console.log('\n== סיכומים ==');
+if (r.freeDays) console.log(`${r.freeDays.free >= r.freeDays.due ? '✓' : '✗'} ימים פנויים ${r.freeDays.free} מתוך ${r.freeDays.due}`);
 for (const t of r.totals) console.log(`${t.ok == null ? '?' : t.ok ? '✓' : '✗'} ${t.column.padEnd(7)} צפוי ${minToHhmm(t.expected)}  בדוח ${minToHhmm(t.reported)}`);
 
 if (r.questions.length) {

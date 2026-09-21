@@ -225,7 +225,7 @@ function renderResults() {
   parts.push(renderHead(res));
   parts.push(renderAlerts(res));
   parts.push(renderQuestions(res));
-  if (res.mode !== 'plan') parts.push(renderTotals(res));
+  parts.push(renderTotals(res));
   parts.push(renderComparison(res));
   parts.push(renderExpectations(res));
   parts.push(renderChanges(res));
@@ -301,11 +301,12 @@ const gapClass = (diff) => (diff > 0 ? 'gain' : 'bad');
 const signed = (min) => (min > 0 ? '+' : '') + minToHhmm(min);
 
 function renderTotals(res) {
-  if (!res.totals.length) return '';
+  const fd = res.freeDays;
+  if (!res.totals.length && !fd) return '';
   // כל עוד יש שאלות פתוחות, פער בסיכום אינו ממצא: הצפוי תלוי בתשובות.
   const pending = res.questions.length > 0;
   return `<div class="card">
-    <h2>סיכום חודשי מול הדוח</h2>
+    <h2>${res.totals.length ? 'סיכום חודשי מול הדוח' : 'סיכום חודשי'}</h2>
     <div class="totals">${res.totals.map((t) => {
       const gap = `פער <span class="num">${signed(t.reported - t.expected)}</span>`;
       const status = t.ok === true ? '✓' : t.ok === false ? (pending ? `ממתין · ${gap}` : `✗ ${gap}`) : '';
@@ -315,7 +316,12 @@ function renderTotals(res) {
         <div class="val num">${minToHhmm(t.expected)}</div>
         <div class="rep">בדוח <span class="num">${minToHhmm(t.reported)}</span> ${status}</div>
       </div>`;
-    }).join('')}
+    }).join('')}${fd ? `
+      <div class="total ${fd.free >= fd.due ? 'ok' : 'bad'}">
+        <div class="label" style="direction:rtl">ימים פנויים</div>
+        <div class="val"><span class="num">${fd.free}</span> מתוך <span class="num">${fd.due}</span></div>
+        <div class="rep">בתכנון, מול המינימום בהסכם</div>
+      </div>` : ''}
     </div>
   </div>`;
 }
