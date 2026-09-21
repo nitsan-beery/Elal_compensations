@@ -2,6 +2,12 @@
 samples/
 *.pdf
 
+# הגדרות מקומיות של Claude Code
+.claude/
+
+# הסכמי העבודה: מקור לחוקים, לא מתפרסמים
+הסכמי עבודה/
+
 # מערכת
 .DS_Store
 Thumbs.db
