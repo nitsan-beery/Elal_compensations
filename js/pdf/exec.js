@@ -65,10 +65,7 @@ export async function parseExec(data) {
   const present = dayCols ? Object.keys(dayCols) : [];
   const missing = REQUIRED_COLUMNS.filter((c) => !present.includes(c));
   if (!dayCols) throw new Error('לא נמצאה טבלת הימים בדוח הביצוע.');
-  const missingRequired = missing.filter((c) => !OPTIONAL_COLUMNS.includes(c));
-  if (missingRequired.length) {
-    warnings.push(`עמודות חסרות בדוח: ${missingRequired.join(', ')}. ייתכן שהן נחתכו בהדפסה. חוקים שתלויים בהן לא ייבדקו.`);
-  }
+  // האזהרה על עמודות חסרות נבנית ב-evaluate, לפי missingColumns, כדי שגם חודש שנשמר לפני שינוי בכלל יוצג נכון.
   if (header.status && !/closed/i.test(header.status)) {
     warnings.push(`סטטוס החודש הוא "${header.status}" ולא Closed. הנתונים אינם סופיים.`);
   }

@@ -35,7 +35,12 @@ export function evaluate({ rulesData, plan = null, exec = null, answers = {} }) 
   if (!plan && !exec) throw new Error('לא הועלה אף קובץ.');
   const period = (exec ?? plan).period;
   const mode = plan && exec ? 'full' : plan ? 'plan' : 'exec';
-  const warnings = [...(plan?.warnings ?? []), ...(exec?.warnings ?? [])];
+  // חודש שנשמר בגרסה קודמת מחזיק אזהרת עמודות חסרות מהחילוץ; היא נבנית מחדש כאן.
+  const warnings = [...(plan?.warnings ?? []), ...(exec?.warnings ?? []).filter((w) => !w.startsWith(MISSING_COLUMNS_PREFIX))];
+  const missingRequired = (exec?.missingColumns ?? []).filter((c) => !OPTIONAL_COLUMNS.includes(c));
+  if (missingRequired.length) {
+    warnings.push(`${MISSING_COLUMNS_PREFIX}: ${missingRequired.join(', ')}. ייתכן שהן נחתכו בהדפסה. חוקים שתלויים בהן לא ייבדקו.`);
+  }
   checkSameMonthAndEmployee(plan, exec, warnings);
 
   const inEffect = rulesInEffect(rulesData, period.year, period.month);
@@ -551,6 +556,8 @@ function warnMissingColumns(out, exec) {
       'בדרך כלל זה אומר שלא היה פיצוי כזה בחודש, אבל ייתכן שהעמודה נחתכה בהדפסה.');
   }
 }
+
+const MISSING_COLUMNS_PREFIX = 'עמודות חסרות בדוח';
 
 function checkSameMonthAndEmployee(plan, exec, warnings) {
   if (!plan || !exec) return;
