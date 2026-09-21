@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "rules_version": "2026-09-21.2",
+  "rules_version": "2026-09-21.3",
   "updated": "2026-09-21",
   "source": "טבלת פיצויי אצ\"א אל על (Artifact), על בסיס ההסכם הישן (פרק כ\"ה), הסכם 2018, הסכם אצ\"א 2024 והסכם 2026",
   "precedence": "הסכם מאוחר גובר על מוקדם. סעיף שלא בוטל ולא שונה נשאר בתוקף. פיצויי 2018, 2024 ו‑2026 באים בנוסף לפיצויים מהסכמים אחרים.",
@@ -292,14 +292,14 @@
     {
       "id": "ground_training_credit",
       "category": "base",
-      "title": "אימון קרקע בבית (HOME_RGT)",
-      "when": "יום אימון קרקע מהבית.",
+      "title": "אימון קרקע (HOME_RGT, INV_C)",
+      "when": "יום אימון קרקע: מהבית (HOME_RGT), או פעילות קרקע INV_C.",
       "amount": {
         "unit": "credit_hours",
         "value": 3.75,
         "text": "3:45 ש' קרדיט"
       },
-      "source": "אומת מול יולי 2026",
+      "source": "אומת מול יולי 2026 (HOME_) ואוגוסט 2026 (INV_C)",
       "status": "ok",
       "valid_from": "2024-01-01",
       "valid_to": null,
@@ -311,14 +311,15 @@
             "HOME_RGT"
           ],
           "report_codes": [
-            "HOME_"
+            "HOME_",
+            "INV_C"
           ],
           "report_flag_column": "CORS",
           "credit_hours": 3.75,
           "tab_hours": 11
         }
       },
-      "note": "בדוח מופיע גם 1.00 ב‑MEAL. הערך לא אומת מול מקור בהסכם."
+      "note": "בדוח מופיע גם 1.00 ב‑MEAL. הערך לא אומת מול מקור בהסכם. INV_C נוסף לפי החלטת בעל המוצר (21/09/2026): ב‑24/08/2026 נרשם בדיוק כמו HOME_ (Credit 03:45, TAB 11:00, CORS 1, MEAL 1). הקוד המלא של INV_C בתכנון עוד לא נראה, ולכן הוא ב‑report_codes בלבד."
     },
     {
       "id": "sim_day_credit",

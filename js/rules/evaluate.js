@@ -75,10 +75,14 @@ export function evaluate({ rulesData, plan = null, exec = null, answers = {} }) 
     planCheck: null,
   };
 
+  // פעילות קרקע במקום סבב: הזיכוי עליה בא מחוק הקוד שלה. קוד שאף חוק נתמך לא מכסה – לבדיקה ידנית.
+  const covered = new Set(supported.flatMap((r) => [...(r.logic.params?.plan_codes ?? []), ...(r.logic.params?.report_codes ?? [])]));
   for (const m of matches) {
     if (m.how !== 'replaced_by_ground') continue;
+    const uncovered = [...new Set(m.replacedBy.map((r) => r.code))].filter((c) => !covered.has(c));
+    if (!uncovered.length) continue;
     out.reviews.push({ ruleId: null, ruleTitle: null,
-      message: `${describePairing(m.plan)} הוחלף בפעילות קרקע (${m.replacedBy.map((r) => r.code).join(', ')}). ` +
+      message: `${describePairing(m.plan)} הוחלף בפעילות קרקע (${uncovered.join(', ')}). ` +
         'אין חוק נתמך שקובע מה מגיע במקרה הזה. דורש בדיקה ידנית.' });
   }
 
