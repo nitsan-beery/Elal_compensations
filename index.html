@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>פיצויי אצ"א</title>
+  <meta name="description" content="בדיקת קרדיט, RIG ופיצויים מול לוח התכנון ודוח הביצוע. הכול מחושב על המכשיר.">
+  <meta name="theme-color" content="#0b3a6e">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="פיצויי אצ״א">
+  <link rel="stylesheet" href="css/app.css">
+  <script type="module" src="js/app.js"></script>
+</head>
+<body>
+  <header class="topbar">
+    <h1>פיצויי אצ"א</h1>
+    <nav class="tabs" role="tablist">
+      <button role="tab" data-view="check" aria-selected="true">בדיקה</button>
+      <button role="tab" data-view="history" aria-selected="false">היסטוריה</button>
+      <button role="tab" data-view="rules" aria-selected="false">חוקים</button>
+    </nav>
+  </header>
+
+  <main>
+    <div id="banner" class="banner" hidden></div>
+
+    <section id="view-check" class="view">
+      <div class="uploads no-print">
+        <label class="drop" data-kind="plan">
+          <input type="file" accept="application/pdf,.pdf" hidden>
+          <span class="drop-title">קובץ תכנון</span>
+          <span class="drop-sub">Individual duty plan</span>
+          <span class="drop-state">לא נבחר קובץ</span>
+        </label>
+        <label class="drop" data-kind="exec">
+          <input type="file" accept="application/pdf,.pdf" hidden>
+          <span class="drop-title">קובץ ביצוע</span>
+          <span class="drop-sub">Rainmaker – CrewPayDetails</span>
+          <span class="drop-state">לא נבחר קובץ</span>
+        </label>
+      </div>
+      <p class="hint no-print">אפשר להעלות אחד מהקבצים או את שניהם. הקבצים נקראים על המכשיר ולא נשלחים לשום מקום.</p>
+      <div id="results"></div>
+    </section>
+
+    <section id="view-history" class="view" hidden></section>
+    <section id="view-rules" class="view" hidden></section>
+  </main>
+</body>
+</html>
