@@ -31,7 +31,6 @@ for (const row of r.comparison) {
 
 console.log('\n== סיכומים ==');
 for (const t of r.totals) console.log(`${t.ok == null ? '?' : t.ok ? '✓' : '✗'} ${t.column.padEnd(7)} צפוי ${minToHhmm(t.expected)}  בדוח ${minToHhmm(t.reported)}`);
-if (r.planCheck) console.log(`${r.planCheck.ok ? '✓' : '✗'} Fict. flight time בתכנון: צפוי ${minToHhmm(r.planCheck.expected)}  בקובץ ${minToHhmm(r.planCheck.reported)}`);
 
 if (r.questions.length) {
   console.log('\n== שאלות למשתמש ==');

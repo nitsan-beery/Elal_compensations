@@ -79,7 +79,6 @@ export function evaluate({ rulesData, plan = null, exec = null, answers = {} }) 
     unknownCodes: collectUnknownCodes(timeline, codes, supported),
     comparison: [],
     totals: [],
-    planCheck: null,
   };
 
   // פעילות קרקע במקום סבב: הזיכוי עליה בא מחוק הקוד שלה. קוד שאף חוק נתמך לא מכסה – לבדיקה ידנית.
@@ -118,7 +117,6 @@ export function evaluate({ rulesData, plan = null, exec = null, answers = {} }) 
     out.totals = compareTotals(out, exec);
     warnMissingColumns(out, exec);
   }
-  if (plan) out.planCheck = checkPlanFictTime(plan, mode === 'plan' ? out : evaluate({ rulesData, plan }));
   return out;
 }
 
@@ -530,18 +528,6 @@ function compareTotals(out, exec) {
     { column: 'COMTOT', expected: sum('COM') + sum('S/C'), reported: t.COM != null || t['S/C'] != null ? (t.COM ?? 0) + (t['S/C'] ?? 0) : null },
   ];
   return rows.map((r) => ({ ...r, ok: r.reported == null ? null : r.reported === r.expected }));
-}
-
-/**
- * Fict. flight time בסיכום התכנון = סך הזיכויים שאינם טיסה, ועוד רגלי DH (אומת בינואר
- * 2026: DH 04:10 נכלל). משווים לסך זיכויי ההיעדרות בהרצה על התכנון לבד (`alone`).
- */
-function checkPlanFictTime(plan, alone) {
-  if (plan.summary?.fictFlightTime == null) return null;
-  const deadheads = Object.values(plan.days).flatMap((d) => d.legs).filter((l) => l.dh).reduce((s, l) => s + (l.dur ?? 0), 0);
-  const expected = deadheads + alone.expectations.filter((e) => e.key === 'absence').reduce((s, e) => s + e.min, 0);
-  const reported = plan.summary.fictFlightTime;
-  return { expected, reported, ok: expected === reported };
 }
 
 /**

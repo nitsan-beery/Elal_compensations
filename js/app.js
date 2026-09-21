@@ -262,10 +262,6 @@ function renderAlerts(res) {
   if (res.reviews.length) {
     out.push(`<div class="notice bad"><strong>לבדיקה ידנית</strong><ul>${res.reviews.map((v) => `<li>${esc(v.message)}${v.ruleTitle ? ` <span class="tag">${esc(v.ruleTitle)}</span>` : ''}</li>`).join('')}</ul></div>`);
   }
-  if (res.planCheck) {
-    const pc = res.planCheck;
-    out.push(`<div class="notice ${pc.ok ? 'ok' : 'bad'}">Fict. flight time בתכנון: צפוי <span class="num">${minToHhmm(pc.expected)}</span>, בקובץ <span class="num">${minToHhmm(pc.reported)}</span> ${pc.ok ? '✓' : '✗'}</div>`);
-  }
   return out.length ? `<div class="card">${out.join('')}</div>` : '';
 }
 
