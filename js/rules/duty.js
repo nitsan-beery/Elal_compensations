@@ -287,7 +287,11 @@ function base_rest_shortfall(ctx, params, rule) {
  * כשתוכננו לפחות `min_planned_count` כאלה בחודש, מגיע פיצוי על כל טיסה כזאת שבוצעה, החל
  * מה-`paid_from_count`. ביטול או שינוי הצבה ביוזמת החברה נחשב ביצוע (ס' 40).
  * `base_landings_only`: רק נחיתות בבסיס. אחרת גם נחיתה בחו"ל, אחרי המרה לשעון ישראל.
+ * `counted_crews`: הרכבי הצוות שנספרים (single = 2 טייסים, augmented = 3, double = 4). נשאל על כל טיסה.
  */
+const CREW_LABEL = { single: 'בודד', augmented: 'מוגבר', double: 'כפול' };
+const CREW_PILOTS = { single: 2, augmented: 3, double: 4 };
+
 function night_landings(ctx, params, rule) {
   if (!ctx.hasPlan) {
     ctx.note(ctx.monthFirst, `${rule.title}: החוק נקבע לפי התכנון, ובלי קובץ תכנון הוא לא נבדק.`, rule);
@@ -320,12 +324,33 @@ function night_landings(ctx, params, rule) {
         `לא ניתן לדעת אם היא נחיתת לילה, וזה משנה את ${rule.title}. דורש בדיקה ידנית.`, rule);
     }
   }
-  if (night.length < params.min_planned_count) {
-    if (night.length) {
-      ctx.note(night[0].leg.date, `${rule.title}: ${night.length} טיסות עם נחיתה בין ${params.window_from} ל-${params.window_to} בתכנון. ` +
-        `פיצוי רק כשמתוכננות ${params.min_planned_count} לפחות.`, rule);
+  if (night.length < params.min_planned_count) return;
+
+  // נספרות רק טיסות בהרכב צוות מ-`counted_crews` (2024 ס' 39–40: בודד או מוגבר). ההרכב אינו בקבצים, ולכן
+  // שואלים על כל טיסה, רק כל עוד התשובות עוד יכולות להביא למינימום.
+  if (params.counted_crews) {
+    const counted = params.counted_crews;
+    const crewOf = (n) => ctx.answer(`night_crew:${n.leg.date}:${n.leg.flight}`)?.value;
+    const kept = night.filter((n) => counted.includes(crewOf(n)));
+    const open = night.filter((n) => crewOf(n) == null);
+    if (kept.length + open.length < params.min_planned_count) return;
+    if (open.length) {
+      for (const n of open) {
+        ctx.ask({
+          id: `night_crew:${n.leg.date}:${n.leg.flight}`,
+          date: n.leg.date,
+          title: `נחיתת לילה: באיזה צוות מתוכננת ${n.leg.flight} ב-${ddmm(n.leg.date)} (נחיתה ${minToHhmm(n.clock)} שעון ישראל)?`,
+          body: `בתכנון ${night.length} טיסות עם נחיתה בין ${params.window_from} ל-${params.window_to}. לפיצוי נספרות רק טיסות בצוות ` +
+            `${counted.map((c) => CREW_LABEL[c] ?? c).join(' או ')}, מ-${params.min_planned_count} טיסות כאלה בחודש.`,
+          options: Object.entries(CREW_LABEL).map(([value, label]) => ({
+            value, label: `${label} (${CREW_PILOTS[value]} טייסים)`, hint: counted.includes(value) ? 'נספרת' : 'לא נספרת',
+          })),
+          ruleId: rule.id,
+        });
+      }
+      return;
     }
-    return;
+    night.splice(0, night.length, ...kept);
   }
 
   // מה נחשב ביצוע: הטיסה בדוח, או ביטול ושינוי הצבה ביוזמת החברה.
@@ -695,7 +720,7 @@ export const DUTY_PARAMS = {
   second_unplanned_activity: ['legal_rest_hours', 'report_minutes_before_std', 'hours', 'report_column', 'sim_report_codes', 'sim_plan_codes'],
   base_rest_shortfall: ['answer_value', 'hours', 'report_column', 'report_minutes_before_std', 'rest_buffer_minutes', 'legal_rest_hours',
     'short_stay_max_hours', 'short_stay_factor', 'long_stay_share', 'long_stay_min_hours', 'long_stay_max_hours'],
-  night_landings: ['fleet', 'window_from', 'window_to', 'min_planned_count', 'paid_from_count', 'hours', 'report_column', 'base_landings_only'],
+  night_landings: ['fleet', 'window_from', 'window_to', 'min_planned_count', 'paid_from_count', 'hours', 'report_column', 'base_landings_only', 'counted_crews'],
   special_date_activity: ['occasions', 'flight_activity_only', 'hours', 'report_column', 'report_minutes_before_std'],
   free_days_waived: ['hours', 'report_column', 'paid_from_day', 'off_block_from', 'on_block_until', 'min_free_days'],
   consecutive_saturdays: ['hours', 'report_column'],
