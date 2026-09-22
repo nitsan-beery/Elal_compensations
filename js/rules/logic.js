@@ -330,11 +330,14 @@ function special_call(ctx, params, rule) {
   const column = params.report_column ?? 'S/C';
   for (const match of ctx.matches) {
     if (!match.exec || ctx.pairingHandledBy(match.exec, 'stay_extension')) continue;
+    // הופעל מכוננות (לפי תשובתו): אין קריאה מיוחדת, גם כשהדוח רשם S/C.
+    if (ctx.pairingHandledBy(match.exec, 'standby_activated')) continue;
     const reported = ctx.reportedOn(match.exec, column);
     const answer = ctx.answerFor(match);
 
     const training = ctx.pairingHandledBy(match.exec, 'training_cancelled');
-    if (reported > 0 || answer?.value === 'special_call' || training) {
+    const bid = ctx.pairingHandledBy(match.exec, 'standby_bid');
+    if (reported > 0 || answer?.value === 'special_call' || training || bid) {
       ctx.markPairing(match.exec, 'special_call');
       const stay = awayFromBase(match.exec, ctx.domicile, ctx.timeline.at(-1).date);
       if (stay.error) {
@@ -348,7 +351,9 @@ function special_call(ctx, params, rule) {
       continue;
     }
     // טיסה לא מתוכננת בלי S/C: לא מנחשים, שואלים.
-    if (match.how === 'unplanned' && params.ask_user_if_no_sc && !answer && !ctx.pairingHandledBy(match.exec, 'vacation_recall')) {
+    // טיסה בסוף כוננות: השאלה עליה היא של סיום כוננות למכרז.
+    if (match.how === 'unplanned' && params.ask_user_if_no_sc && !answer && !ctx.pairingHandledBy(match.exec, 'vacation_recall') &&
+      !ctx.pairingHandledBy(match.exec, 'standby_bid_pending')) {
       ctx.ask({
         id: `unplanned:${match.exec.id}`,
         date: match.exec.from,
@@ -490,7 +495,6 @@ function higher_of_planned_performed(ctx, params, rule) {
   }
 }
 
-/** השעות שהפסיד (מטוס חכור, חניך), לפי התשובה `answer_value`. כולל השלמה לסליפ קצר. */
 /**
  * הסבב שעליו הדוח כבר רשם בדיוק את ההפרש: קודם הסבב המחליף, ואחר כך סבב ביצוע שנוגע
  * בטווח של יום אחד מהסבב המתוכנן. "בדיוק" = מה שבדוח פחות מה שכבר צפוי עליו מחוקים אחרים.
@@ -503,11 +507,16 @@ function findShortfallPaid(ctx, match, diff, key, column) {
   return ctx.execPairings.find((p) => p !== match.exec && p.dates.some((d) => from <= d && d <= to) && extra(p) === diff) ?? null;
 }
 
+/** השעות שהפסיד (מטוס חכור, חניך, 787 שהוחלף ב-777), לפי התשובה `answer_value`. כולל השלמה לסליפ קצר. */
 function lost_hours_credit(ctx, params, rule) {
   for (const match of ctx.matches) {
     if (!match.plan) continue;
     const answer = ctx.answerFor(match);
     if (answer?.value !== params.answer_value) continue;
+    if (!lostHoursApplies(ctx, match.plan, params)) {
+      ctx.review(`${describePairing(match.plan)}: התשובה "${params.answer_label}" אינה מתאימה לצי או לסוג המטוס בתכנון. דורש בדיקה ידנית.`, rule);
+      continue;
+    }
 
     const lost = lostHours(ctx, match.plan, params);
     if (lost == null) { ctx.review(`${describePairing(match.plan)}: אין שעות מתוכננות בקובץ, לא ניתן לחשב את השעות שהפסיד.`, rule); continue; }
@@ -520,6 +529,20 @@ function lost_hours_credit(ctx, params, rule) {
   }
 }
 
+/** סוג המטוס כמשפחה: B789 → B787, ‏B738 → B737. */
+const acFamily = (ac) => ac?.replace(/^(B7[0-9])[0-9]$/, '$17') ?? null;
+
+/**
+ * האם התשובה אפשרית על הסבב: `fleets` – רק כשהצי של הקבצים ברשימה; `plan_aircraft` – רק
+ * כשרגל מתוכננת בסבב (לא DH) על אחד מסוגי המטוס (החלפת 787 ב-777, 2026 ס' 23.4).
+ */
+function lostHoursApplies(ctx, planPairing, params) {
+  if (params.fleets?.length && !params.fleets.includes(ctx.fleet)) return false;
+  if (params.plan_aircraft?.length &&
+      !planPairing.legs.some((l) => !l.dh && params.plan_aircraft.includes(acFamily(l.ac)))) return false;
+  return true;
+}
+
 /** השעות שהפסיד על סבב מתוכנן: הקרדיט המתוכנן, כולל השלמה לסליפ קצר. */
 function lostHours(ctx, planPairing, params) {
   const planned = ctx.plannedCredit(planPairing);
@@ -530,7 +553,7 @@ function lostHours(ctx, planPairing, params) {
 
 /** תשובות "השעות שהפסיד" לפי החוקים שבתוקף בחודש (מטוס חכור, הורדה בגלל חניך). */
 function lostHoursOptions(ctx, planPairing, extra) {
-  return ctx.rulesWithLogic('lost_hours_credit').map((r) => {
+  return ctx.rulesWithLogic('lost_hours_credit').filter((r) => lostHoursApplies(ctx, planPairing, r.logic.params ?? {})).map((r) => {
     const p = r.logic.params ?? {};
     const lost = lostHours(ctx, planPairing, p);
     const amount = lost == null ? 'השעות שהפסיד' : `השעות שהפסיד (${minToHhmm(lost)})`;
@@ -675,6 +698,153 @@ function dh_activated(ctx, params, rule) {
   }
 }
 
+/**
+ * סיום כוננות לטובת מכרז (2024 ס' 50): החברה רשאית לאשר לכונן לסיים כוננות ביומיים האחרונים
+ * של רצף הכוננות בגלל זכייה במכרז. אז מגיעים לו קרדיט הטיסה, וגם קריאה מיוחדת על ימי הכוננות
+ * שבהם טס ועל הימים הפנויים שאחריה.
+ *
+ * רצף כוננות = ימים עוקבים בתכנון עם קוד כוננות. טיסה שיוצאת ב-`last_days` הימים האחרונים שלו
+ * יכולה להיות זכייה במכרז או הפעלה של הכוננות, והסיבה אינה בקבצים, ולכן שואלים. זכייה במכרז –
+ * הסבב מסומן, והקריאה המיוחדת מחושבת בחוק הקריאה המיוחדת. הפעלה – אין פיצוי. עד התשובה חוק
+ * הקריאה המיוחדת לא שואל על הסבב שאלה משלו.
+ */
+function standby_end_for_bid(ctx, params, rule) {
+  if (!ctx.hasPlan || !ctx.hasExec) return;
+  const lastDays = params.last_days ?? 2;
+  const runs = standbyRuns(ctx, params);
+  const monthEnd = ctx.timeline.at(-1).date;
+  const sc = ctx.rulesWithLogic('special_call')[0];
+
+  for (const run of runs) {
+    const tail = run.slice(-lastDays);
+    for (const match of ctx.matches) {
+      if (match.how !== 'unplanned' || !tail.includes(match.exec.from)) continue;
+      const pairing = match.exec;
+      const id = `standby_bid:${pairing.id}`;
+      const answer = ctx.answer(id);
+      const range = run.length === 1 ? dayOf(run[0]) : `${dayOf(run[0])}–${dayOf(run.at(-1))}`;
+      if (!answer) {
+        ctx.markPairing(pairing, 'standby_bid_pending');
+        ctx.ask({
+          id,
+          date: pairing.from,
+          title: `טיסה ביומיים האחרונים של כוננות: ${describePairing(pairing)}`,
+          body: `בתכנון כוננות ב-${range}, והטיסה יצאה ב-${dayOf(pairing.from)}. ` +
+            (run.at(-1) === monthEnd ? 'הכוננות מגיעה לסוף החודש, וייתכן שהיא נמשכת בחודש הבא. ' : '') +
+            'אם החברה אישרה לך לסיים את הכוננות בגלל זכייה במכרז, מגיעה קריאה מיוחדת על ימי הטיסה. אם הכוננות הופעלה, מגיע רק קרדיט הטיסה. מה קרה?',
+          options: [
+            { value: 'standby_bid', label: 'סיום כוננות בגלל זכייה במכרז', hint: bidHint(pairing, ctx, sc) },
+            { value: 'standby_activated', label: 'הפעלת הכוננות', hint: 'קרדיט הטיסה, בלי קריאה מיוחדת' },
+            { value: 'other', label: 'סיבה אחרת', needsText: true },
+          ],
+          ruleId: rule.id,
+        });
+        continue;
+      }
+      if (answer.value === 'standby_bid') {
+        ctx.markPairing(pairing, 'standby_bid');
+        ctx.note(pairing.from, `${describePairing(pairing)}: סיום כוננות (${range}) בגלל זכייה במכרז. קרדיט הטיסה וקריאה מיוחדת על ימי הטיסה.`, rule);
+      } else if (answer.value === 'standby_activated') {
+        // הקרדיט על ימי ההפעלה נבדק בחוק ההפעלה מכוננות.
+        ctx.markPairing(pairing, 'standby_activated');
+      } else {
+        ctx.markPairing(pairing, 'standby_bid_pending');
+        ctx.review(`${describePairing(pairing)}, ביומיים האחרונים של הכוננות (${range}): ${answer.text || 'סיבה אחרת'}. דורש בדיקה ידנית.`, rule);
+      }
+    }
+  }
+}
+
+/** רצפי כוננות בתכנון: ימים עוקבים עם קוד כוננות (`plan_codes` / `plan_code_prefixes`). */
+function standbyRuns(ctx, params) {
+  const runs = [];
+  for (const day of ctx.timeline) {
+    if (!(day.plan?.codes ?? []).some((c) => codeIn(c, params.plan_codes, params.plan_code_prefixes))) continue;
+    const run = runs.at(-1);
+    if (run && run.at(-1) === addDays(day.date, -1)) run.push(day.date);
+    else runs.push([day.date]);
+  }
+  return runs;
+}
+
+/**
+ * הפעלה מכוננות. טיסה שיוצאת ביום כוננות בתכנון היא הפעלה של הכוננות, ולא קריאה מיוחדת (ישן כ"ה
+ * ס' 12.ב: קריאה מיוחדת היא ביממה שבה לא היה משובץ לטיסה או לכוננות), ולא שואלים עליה. היומיים
+ * האחרונים של הרצף הם של חוק סיום הכוננות למכרז, ומגיעים לכאן רק אחרי התשובה "הפעלת הכוננות".
+ *
+ * - הקרדיט על ימי הכוננות שבהם טס: הגבוה מבין קרדיט הטיסה לבין ערך ימי הכוננות האלה (2018 ס' 98.1–98.3,
+ *   98.5). ערך יום הכוננות לפי חוק זיכוי היום של הקוד (הקוד בדוח הוא 5 התווים הראשונים של הקוד בתכנון).
+ *   כשקוד הכוננות רשום גם בדוח ביום הטיסה, חוק זיכוי היום כבר בודק את זה.
+ * - החזרה אחרי סוף הכוננות: החברה רשאית להפעיל רק כשהחזרה מתוכננת בתוך הכוננות (2018 ס' 88). בדיקה ידנית.
+ * - טיסה מתוכננת ביום כוננות, שלא במסגרת הכוננות: מגיעים גם קרדיט הטיסה וגם זיכוי הכוננות (ישן כ"ה
+ *   ס' 11.י). הדוח עוד לא הראה איך זה נרשם, ולכן בדיקה ידנית.
+ */
+function standby_activation(ctx, params, rule) {
+  if (!ctx.hasPlan || !ctx.hasExec) return;
+  const pending = ['standby_bid', 'standby_bid_pending'];
+  for (const run of standbyRuns(ctx, params)) {
+    const range = run.length === 1 ? dayOf(run[0]) : `${dayOf(run[0])}–${dayOf(run.at(-1))}`;
+    const planCode = ctx.timeline.find((d) => d.date === run[0]).plan.codes.find((c) => codeIn(c, params.plan_codes, params.plan_code_prefixes));
+    const value = standbyDayRule(ctx, planCode);
+
+    for (const date of run) {
+      const day = ctx.timeline.find((d) => d.date === date);
+      if (day.plan?.legs?.length) {
+        ctx.review(`${dayOf(date)}: בתכנון גם כוננות (${planCode}) וגם טיסה. על טיסה שלא במסגרת הכוננות מגיעים גם קרדיט הטיסה ` +
+          `וגם זיכוי הכוננות${value ? ` (${minToHhmm(value.min)})` : ''} (ישן כ"ה ס' 11.י). דורש בדיקה ידנית.`, rule);
+      }
+    }
+
+    for (const match of ctx.matches) {
+      if (match.how !== 'unplanned' || !run.includes(match.exec.from)) continue;
+      const pairing = match.exec;
+      if (pending.some((t) => ctx.pairingHandledBy(pairing, t))) continue;
+      ctx.markPairing(pairing, 'standby_activated');
+      const flown = run.filter((d) => pairing.from <= d && d <= pairing.to);
+      const beyond = pairing.to > run.at(-1);
+      ctx.note(pairing.from, `${describePairing(pairing)}: הפעלה מהכוננות (${range}). קרדיט הטיסה, בלי קריאה מיוחדת.`, rule);
+      if (beyond) {
+        ctx.review(`${describePairing(pairing)}: הופעלת מהכוננות (${range}), והחזרה אחרי סוף הכוננות. החברה רשאית להפעיל ` +
+          'כונן רק כשהחזרה מתוכננת להסתיים בתוך הכוננות (2018 ס\' 88). דורש בדיקה ידנית.', rule);
+      }
+
+      // הכוננות רשומה בדוח בימי הטיסה: חוק זיכוי היום כבר משווה בין הטיסה לכוננות.
+      if (value && flown.some((d) => ctx.execCodes(ctx.timeline.find((x) => x.date === d)).some((c) => codeIn(c, value.rule.logic.params.report_codes, value.rule.logic.params.report_code_prefixes)))) continue;
+      const credit = sumLegs(pairing);
+      const what = `${flown.length === 1 ? 'יום הכוננות שבו' : `${flown.length} ימי הכוננות שבהם`} טסת (${flown.map(dayOf).join(', ')})`;
+      if (!value) {
+        ctx.review(`${describePairing(pairing)}: על ${what} מגיע הגבוה מבין קרדיט הטיסה לבין ערך ימי הכוננות (2018 ס' 98). ` +
+          `אין חוק שקובע את ערך הכוננות לקוד ${planCode}. דורש בדיקה ידנית.`, rule);
+      } else if (credit == null || credit < value.min * flown.length) {
+        ctx.review(`${describePairing(pairing)}: על ${what} מגיע הגבוה מבין קרדיט הטיסה (${credit == null ? 'לא ידוע' : minToHhmm(credit)}) ` +
+          `לבין ${flown.length} × ${minToHhmm(value.min)} (${value.rule.title}; 2018 ס' 98). הכוננות גבוהה יותר, ועוד לא ראינו איך זה נרשם בדוח. דורש בדיקה ידנית.`, rule);
+      } else {
+        ctx.note(pairing.from, `${describePairing(pairing)}: קרדיט הטיסה (${minToHhmm(credit)}) גבוה מערך ${what} (${flown.length} × ${minToHhmm(value.min)}), ולכן אין תוספת (2018 ס' 98).`, rule);
+      }
+    }
+  }
+}
+
+/** חוק זיכוי היום של קוד כוננות בתכנון, וערך היום שלו. בדוח הקוד מקוצר ל-5 תווים (SBY_S). */
+function standbyDayRule(ctx, planCode) {
+  if (!planCode) return null;
+  const rule = ctx.rulesWithLogic('absence_day_credit').find((r) => {
+    const p = r.logic.params ?? {};
+    return codeIn(planCode, p.plan_codes, p.plan_code_prefixes) || codeIn(planCode.slice(0, 5), p.report_codes, p.report_code_prefixes);
+  });
+  return rule ? { rule, min: H(rule.logic.params.credit_hours) } : null;
+}
+
+/** כמה קריאה מיוחדת מגיעה על הסבב, לרמז בתשובה "זכייה במכרז". */
+function bidHint(pairing, ctx, sc) {
+  if (!sc) return 'קריאה מיוחדת על ימי הטיסה';
+  const p = sc.logic.params ?? {};
+  const stay = awayFromBase(pairing, ctx.domicile, ctx.timeline.at(-1).date);
+  if (stay.error) return `קריאה מיוחדת על ימי הטיסה, ב-${p.report_column ?? 'S/C'}`;
+  const n = countSpecialCallDays(stay, p).counted.length;
+  return `קריאה מיוחדת: ${n === 1 ? 'יממה אחת' : `${n} יממות`}, ${minToHhmm(n * H(p.hours))} ב-${p.report_column ?? 'S/C'}`;
+}
+
 export const LOGIC = {
   credit_from_scheduled,
   min_slip_credit,
@@ -691,6 +861,8 @@ export const LOGIC = {
   vacation_recall,
   training_cancelled_flight,
   dh_activated,
+  standby_end_for_bid,
+  standby_activation,
   ...DUTY_LOGIC,
 };
 
@@ -709,12 +881,14 @@ export const KNOWN_PARAMS = {
   long_flight_day: ['over_flight_hours', 'hours'],
   special_call: ['hours', 'report_column', 'second_day_min_gap_hours', 'second_day_min_hours', 'ask_user_if_no_sc'],
   higher_of_planned_performed: ['requires_user_answer', 'excluded_when_special_call', 'excluded_when_voluntary_swap', 'shortfall_column'],
-  lost_hours_credit: ['requires_user_answer', 'credit_column', 'include_min_slip_credit', 'answer_value', 'answer_label'],
+  lost_hours_credit: ['requires_user_answer', 'credit_column', 'include_min_slip_credit', 'answer_value', 'answer_label', 'fleets', 'plan_aircraft'],
   voluntary_swap: ['requires_user_answer'],
   cancelled_no_compensation: ['requires_user_answer'],
   vacation_recall: ['plan_codes', 'plan_code_prefixes', 'report_codes', 'report_code_prefixes', 'hours', 'report_column'],
   training_cancelled_flight: ['plan_codes', 'plan_code_prefixes', 'moved_ok_prefixes'],
   dh_activated: ['hours', 'report_column', 'report_dh_types'],
+  standby_end_for_bid: ['requires_user_answer', 'plan_codes', 'plan_code_prefixes', 'last_days'],
+  standby_activation: ['plan_codes', 'plan_code_prefixes'],
   ...DUTY_PARAMS,
 };
 
@@ -727,10 +901,13 @@ export const LOGIC_ORDER = [
   'long_flight_day',
   'cancelled_no_compensation',
   'voluntary_swap',
-  // מסמנים סבבים שקריאה מיוחדת צריכה להכיר: קריאה מחופשה, והדרכה שבוטלה.
+  // מסמנים סבבים שקריאה מיוחדת צריכה להכיר: קריאה מחופשה, הדרכה שבוטלה, וסיום כוננות למכרז.
   'vacation_recall',
   'training_cancelled_flight',
   'dh_activated',
+  'standby_end_for_bid',
+  // אחרי סיום כוננות למכרז: ההפעלה נבדקת רק על מה שלא נשאל שם, או שנענה "הפעלת הכוננות".
+  'standby_activation',
   // לפני הקריאה המיוחדת: סבב שהשהייה בו הוארכה אינו נספר כולו כקריאה מיוחדת.
   'stay_extension',
   'special_call',

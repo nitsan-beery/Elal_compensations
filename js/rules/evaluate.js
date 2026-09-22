@@ -461,6 +461,7 @@ const CANCELLED_OUTCOME = {
   cancelled: 'בוטל ללא פיצוי',
   wet_lease: 'הועבר למטוס חכור',
   trainee: 'הורדה בגלל חניך',
+  swap_777: 'הועבר ל-777 (לא כשיר MFF)',
   replaced: 'הוחלף בטיסה אחרת', // תשובה שנשמרה לפני שהאפשרות הוסרה
 };
 
@@ -472,8 +473,10 @@ const CANCELLED_OUTCOME = {
  */
 function attachLinkCandidates(questions, matches, ctx) {
   const cancelled = matches.filter((m) => m.how === 'cancelled').map((m) => ({ id: m.plan.id, label: describePairing(m.plan) }));
-  // פעילות שזוהתה כקריאה מיוחדת (S/C בדוח) אינה החלפה.
-  const unplanned = matches.filter((m) => m.how === 'unplanned' && !ctx.pairingHandledBy(m.exec, 'special_call')).map((m) => ({ id: m.exec.id, label: describePairing(m.exec) }));
+  // פעילות שזוהתה כקריאה מיוחדת (S/C בדוח), או טיסה בסוף כוננות, אינה החלפה.
+  const notSwap = ['special_call', 'standby_bid_pending', 'standby_bid', 'standby_activated'];
+  const unplanned = matches.filter((m) => m.how === 'unplanned' && !notSwap.some((t) => ctx.pairingHandledBy(m.exec, t)))
+    .map((m) => ({ id: m.exec.id, label: describePairing(m.exec) }));
   const otherMonth = { id: null, label: 'טיסה בחודש אחר' };
   const gaveAway = { id: GAVE_AWAY, label: GAVE_AWAY_LABEL };
   for (const q of questions) {
