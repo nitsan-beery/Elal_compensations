@@ -23,13 +23,18 @@ const COM_KEYS = new Set(['com', 'sc']); // S/C נספר יחד עם COM בסי�
 // ימים שזוכו על פעילות שאינה טיסה, לפי החוק שזיכה אותם (ובאימון קרקע – לפי הקוד).
 const isHomeRgt = (e) => e.code?.startsWith('HOME_');
 const DAY_KINDS = [
-  { one: 'יום מחלה אחד', many: 'ימי מחלה', test: (e) => e.ruleId === 'planned_sick_credit' || e.ruleId === 'sick_credit' },
-  { one: 'יום פעילות קרקעית אחד', many: 'ימי פעילות קרקעית', test: (e) => e.ruleId === 'ground_training_credit' && !isHomeRgt(e) },
-  { one: 'יום סימולטור אחד', many: 'ימי סימולטור', test: (e) => e.ruleId === 'sim_day_credit' },
-  { one: 'יום HOME RGT אחד', many: 'ימי HOME RGT', test: (e) => e.ruleId === 'ground_training_credit' && isHomeRgt(e) },
   { one: 'יום חופשה אחד', many: 'ימי חופשה', test: (e) => e.ruleId === 'vacation_base_credit' },
+  { one: 'יום מחלה אחד', many: 'ימי מחלה', test: (e) => e.ruleId === 'planned_sick_credit' || e.ruleId === 'sick_credit' },
+  { one: 'יום סימולטור אחד', many: 'ימי סימולטור', test: (e) => e.ruleId === 'sim_day_credit' },
+  { one: 'יום פעילות קרקעית אחד', many: 'ימי פעילות קרקעית', test: (e) => e.ruleId === 'ground_training_credit' && !isHomeRgt(e) },
+  { one: 'יום HOME RGT אחד', many: 'ימי HOME RGT', test: (e) => e.ruleId === 'ground_training_credit' && isHomeRgt(e) },
   { one: 'יום כוננות אחד', many: 'ימי כוננות', test: (e) => e.ruleId === 'short_call_standby_credit' },
 ];
+/** כמה ימים זוכו על פעילות שאינה טיסה, לפי סוג ("<span>3</span> ימי חופשה"). */
+const dayCounts = (expectations) => DAY_KINDS.map((k) => {
+  const n = new Set(expectations.filter((e) => e.key === 'absence' && k.test(e)).map((e) => e.date)).size;
+  return n ? (n === 1 ? k.one : `<span class="num">${n}</span> ${k.many}`) : null;
+}).filter(Boolean);
 // תוויות לתשובות שכבר ניתנו. ערך שאינו כאן מוצג כמות שהוא.
 const ANSWER_LABEL = {
   special_call: 'קריאה מיוחדת', voluntary_swap: 'החלפה מרצוני', replaced: 'החברה החליפה את הטיסה',
@@ -341,6 +346,7 @@ function renderTotals(res) {
   if (!res.totals.length && !fd) return '';
   // כל עוד יש שאלות פתוחות, פער בסיכום אינו ממצא: הצפוי תלוי בתשובות.
   const pending = res.questions.length > 0;
+  const days = res.totals.length ? dayCounts(res.expectations) : [];
   return `<div class="card">
     <h2>${res.totals.length ? 'סיכום חודשי מול הדוח' : 'סיכום חודשי'}</h2>
     <div class="totals">${res.totals.map((t) => {
@@ -359,6 +365,7 @@ function renderTotals(res) {
         <div class="rep">מינימום <span class="num">${fd.due}</span>${fd.free >= fd.due ? ' ✓' : ''}</div>
       </div>` : ''}
     </div>
+    ${days.length ? `<p class="small">${days.join(' · ')}</p>` : ''}
   </div>`;
 }
 
@@ -403,29 +410,24 @@ function renderComparison(res) {
   </div>`;
 }
 
+// בתכנון לבד בלבד. עם דוח ביצוע ספירת הימים מוצגת בסיכום החודשי מול הדוח.
 function renderExpectations(res) {
-  if (!res.expectations.length) return '';
+  if (!res.expectations.length || res.mode !== 'plan') return '';
   const rows = [...res.expectations].sort((a, b) => a.date.localeCompare(b.date));
   const sumKeys = (keys) => rows.filter((e) => keys.has(e.key)).reduce((s, e) => s + e.min, 0);
   // שורה שנייה: Rig, ואחריו כמה ימים זוכו על פעילות שאינה טיסה, לפי סוג.
   const rig = sumKeys(new Set(['rig']));
   const second = [
     ...(rig ? [`Rig: <span class="num">${minToHhmm(rig)}</span>`] : []),
-    ...DAY_KINDS.map((k) => {
-      const n = new Set(rows.filter((e) => e.key === 'absence' && k.test(e)).map((e) => e.date)).size;
-      return n ? `${n === 1 ? k.one : `<span class="num">${n}</span> ${k.many}`}` : null;
-    }).filter(Boolean),
+    ...dayCounts(rows),
   ];
-  const planOnly = res.mode === 'plan';
-  const open = planOnly ? 'open' : '';
-  // בתכנון לבד הקרדיט של כל טיסה הוא רק רעש: הסך הכול בשורה העליונה, ובטבלה רק הפיצויים.
-  // עם דוח ביצוע אין טבלה: הפירוט לפי יום נמצא בטבלת ההשוואה מול הדוח.
-  const shown = planOnly ? rows.filter((e) => !CREDIT_KEYS.has(e.key)) : [];
-  return `<details class="card" ${open}>
-    <summary><h2 style="display:inline">${planOnly ? 'קרדיט ופיצויים צפויים' : 'סיכום'}</h2></summary>
+  // הקרדיט של כל טיסה הוא רק רעש: הסך הכול בשורה העליונה, ובטבלה רק הפיצויים.
+  const shown = rows.filter((e) => !CREDIT_KEYS.has(e.key));
+  return `<details class="card" open>
+    <summary><h2 style="display:inline">קרדיט ופיצויים צפויים</h2></summary>
     <p class="small">סה"כ קרדיט: <span class="num">${minToHhmm(sumKeys(CREDIT_KEYS))}</span> · סה"כ COM: <span class="num">${minToHhmm(sumKeys(COM_KEYS))}</span></p>
     ${second.length ? `<p class="small">${second.join(' · ')}</p>` : ''}
-    ${!planOnly ? '' : !shown.length ? '<p class="small muted">אין פיצויים צפויים לפי התכנון.</p>' : `<div class="table-wrap"><table>
+    ${!shown.length ? '<p class="small muted">אין פיצויים צפויים לפי התכנון.</p>' : `<div class="table-wrap"><table>
       <thead><tr><th>תאריך</th><th>חוק</th><th>סוג</th><th>צפוי</th><th>הסבר</th></tr></thead>
       <tbody>${shown.map((e) => `<tr>
         <td class="num">${e.dates.length > 1 ? `${ddmm(e.dates[0])}–${ddmm(e.dates.at(-1))}` : ddmm(e.date)}</td>
