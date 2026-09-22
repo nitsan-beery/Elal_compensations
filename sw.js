@@ -1,9 +1,9 @@
 // Service worker: האפליקציה עובדת גם בלי רשת.
 //
-// רשת קודם, ואם אין רשת – מהמטמון. כך עדכון בקוד או ב-rules.json מגיע מיד כשיש חיבור,
+// רשת קודם (בלי מטמון ה-HTTP של הדפדפן), ואם אין רשת – מהמטמון. כך עדכון בקוד או ב-rules.json מגיע מיד כשיש חיבור,
 // ובלי חיבור האפליקציה נפתחת מהעותק האחרון. בכל עדכון של רשימת הקבצים מעלים את CACHE.
 
-const CACHE = 'elal-compensations-v4';
+const CACHE = 'elal-compensations-v5';
 const SHELL = [
   './',
   'index.html',
@@ -50,8 +50,10 @@ self.addEventListener('fetch', (event) => {
   const url = new URL(req.url);
   url.search = '';
   if (req.method !== 'GET' || !SHELL_URLS.has(url.href)) return;
+  // GitHub Pages שולח max-age=600, כך שבלי no-cache הדפדפן מגיש עותק ישן עד עשר דקות אחרי
+  // עדכון. no-cache שואל את השרת בכל טעינה (ETag), ומקבל 304 קצר כשלא השתנה דבר.
   event.respondWith(
-    fetch(req)
+    fetch(req.url, { cache: 'no-cache', credentials: 'same-origin' })
       .then((res) => {
         if (res.ok) {
           const copy = res.clone();
