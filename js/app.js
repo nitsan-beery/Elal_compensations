@@ -717,18 +717,12 @@ async function exportRulesJson() {
   download('rules.json', text, 'application/json');
 }
 
-/**
- * כל החוקים כגיליון Excel. כשהמסך מסונן (חיפוש, קטגוריה או "רק בתוקף"), נוספת עמודה "מוצג במסך",
- * והמסנן של Excel מוגדר עליה מראש: רואים את מה שנבחר, ואפשר לנקות את המסנן ולראות הכול.
- */
+/** כל החוקים כגיליון Excel, בלי קשר לחיפוש ולסינון שבמסך. */
 function exportRulesXlsx() {
-  const { rules: shown, reasonOf, today } = filteredRules();
+  const { reasonOf, today } = filteredRules();
   const rules = state.rulesData.rules;
-  const shownIds = new Set(shown.map((r) => r.id));
-  const filtered = shown.length < rules.length;
   const STATUS = { ok: '', cancelled: 'בוטל', changed: 'שונה' };
-  const header = ['שם', 'קטגוריה', 'מתי', 'כמה', 'מקור', 'בתוקף מ-', 'בתוקף עד', 'סטטוס', 'נתמך', 'הערה', 'למה לא נתמך', 'מזהה', 'לוגיקה',
-    ...(filtered ? ['מוצג במסך'] : [])];
+  const header = ['שם', 'קטגוריה', 'מתי', 'כמה', 'מקור', 'בתוקף מ-', 'בתוקף עד', 'סטטוס', 'נתמך', 'הערה', 'למה לא נתמך', 'מזהה', 'לוגיקה'];
   const rows = rules.map((r) => [
     r.title,
     CATEGORY_LABEL[r.category] ?? r.category,
@@ -743,12 +737,7 @@ function exportRulesXlsx() {
     reasonOf.get(r.id),
     r.id,
     r.logic?.id,
-    ...(filtered ? [shownIds.has(r.id) ? 'כן' : 'לא'] : []),
   ]);
-  const blob = xlsxBlob(header, rows, {
-    sheet: 'חוקים',
-    widths: [30, 10, 50, 30, 25, 11, 11, 10, 7, 40, 40, 28, 24, 11],
-    filter: filtered ? { col: header.length - 1, value: 'כן' } : null,
-  });
+  const blob = xlsxBlob(header, rows, { sheet: 'חוקים', widths: [30, 10, 50, 30, 25, 11, 11, 10, 7, 40, 40, 28, 24] });
   download(`rules-${state.rulesData.rules_version}.xlsx`, blob);
 }

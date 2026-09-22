@@ -12,15 +12,12 @@ const colName = (i) => (i >= 26 ? colName(Math.floor(i / 26) - 1) : '') + String
 /**
  * @param {string[]} header
  * @param {Array<Array<string|number|null>>} rows
- * @param {{ sheet?: string, widths?: number[], filter?: { col: number, value: string } | null }} [opt]
- *   `filter` – מסנן מוגדר מראש על עמודה אחת: שורות עם ערך אחר מוסתרות, ואפשר לנקות אותו ב-Excel.
+ * @param {{ sheet?: string, widths?: number[] }} [opt]
  * @returns {Blob}
  */
-export function xlsxBlob(header, rows, { sheet = 'Sheet1', widths = [], filter = null } = {}) {
+export function xlsxBlob(header, rows, { sheet = 'Sheet1', widths = [] } = {}) {
   const cell = (v, r, c, s) => `<c r="${colName(c)}${r}" t="inlineStr" s="${s}"><is><t xml:space="preserve">${xml(v)}</t></is></c>`;
-  const row = (vals, r, s, hidden = false) => `<row r="${r}"${hidden ? ' hidden="1"' : ''}>${vals.map((v, c) => cell(v, r, c, s)).join('')}</row>`;
-  const hide = (vals) => !!filter && String(vals[filter.col] ?? '') !== filter.value;
-  const criteria = filter ? `<filterColumn colId="${filter.col}"><filters><filter val="${xml(filter.value)}"/></filters></filterColumn>` : '';
+  const row = (vals, r, s) => `<row r="${r}">${vals.map((v, c) => cell(v, r, c, s)).join('')}</row>`;
   const cols = widths.length ? `<cols>${widths.map((w, i) => `<col min="${i + 1}" max="${i + 1}" width="${w}" customWidth="1"/>`).join('')}</cols>` : '';
   const last = `${colName(header.length - 1)}${rows.length + 1}`;
 
@@ -36,7 +33,7 @@ export function xlsxBlob(header, rows, { sheet = 'Sheet1', widths = [], filter =
     'xl/styles.xml': `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><fonts count="2"><font><sz val="11"/><name val="Arial"/></font><font><b/><sz val="11"/><name val="Arial"/></font></fonts><fills count="3"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FFE8EEF5"/></patternFill></fill></fills><borders count="1"><border/></borders><cellStyleXfs count="1"><xf/></cellStyleXfs><cellXfs count="2"><xf fontId="0" fillId="0" applyAlignment="1"><alignment vertical="top" wrapText="1" readingOrder="2"/></xf><xf fontId="1" fillId="2" applyFont="1" applyFill="1" applyAlignment="1"><alignment vertical="top" wrapText="1" readingOrder="2"/></xf></cellXfs></styleSheet>`,
     'xl/worksheets/sheet1.xml': `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetViews><sheetView rightToLeft="1" workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews>${cols}<sheetData>${row(header, 1, 1)}${rows.map((r, i) => row(r, i + 2, 0, hide(r))).join('')}</sheetData><autoFilter ref="A1:${last}">${criteria}</autoFilter></worksheet>`,
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetViews><sheetView rightToLeft="1" workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews>${cols}<sheetData>${row(header, 1, 1)}${rows.map((r, i) => row(r, i + 2, 0)).join('')}</sheetData><autoFilter ref="A1:${last}"/></worksheet>`,
   };
   return new Blob([zip(files)], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
 }
