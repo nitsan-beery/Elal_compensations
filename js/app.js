@@ -458,7 +458,7 @@ function renderAnswered() {
     <summary><h2 style="display:inline">תשובות שנשמרו <span class="count">${answers.length}</span></h2></summary>
     <ul class="list">${answers.map(([id, a]) => `<li class="row">
       <span>${esc(describeQuestionId(id))}: <strong>${esc(ANSWER_LABEL[a.value] ?? a.value)}</strong>
-        ${a.link !== undefined ? `<span class="small muted">(${a.link ? `עם ${esc(describePairingId(a.link))}` : 'בחודש אחר או בלי חלופה'})</span>` : ''}
+        ${a.link !== undefined ? `<span class="small muted">(${a.link ? `עם ${esc(describePairingId(a.link))}` : 'בחודש אחר'})</span>` : ''}
         ${a.text ? `<span class="small muted">– ${esc(a.text)}</span>` : ''}</span>
       <span class="spacer"></span>
       <button class="btn no-print" data-unanswer="${esc(id)}">שנה</button>
