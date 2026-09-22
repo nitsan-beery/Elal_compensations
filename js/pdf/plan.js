@@ -139,16 +139,17 @@ function parseDayRow(c, day, rawCodes, warnings, date) {
     if (val) day.info[m[1]] = hhmmToMin(val.s.slice(0, -1));
   }
 
-  // רגל DH מתחילה ב-"DH/LY", שיושב שמאלה מעמודת duty ונופל לעמודה H.
+  // רגל DH מתחילה ב-"DH/LY", או בקוד של חברה אחרת ("DH/LX 1487" PRG→ZRH ב-28/01/2025),
+  // שיושב שמאלה מעמודת duty ונופל לעמודה H.
   for (const it of c.h || []) {
-    if (it.s !== 'DH/LY') continue;
+    if (!isDhMark(it.s)) continue;
     const leg = readLeg(c, it, warnings, date);
     if (leg) day.legs.push({ ...leg, dh: true });
   }
 
   for (const it of c.duty || []) {
     const s = it.s;
-    if (s === 'LY' || s === 'DH/LY') {
+    if (s === 'LY' || isDhMark(s)) {
       const leg = readLeg(c, it, warnings, date);
       if (leg) day.legs.push(s === 'LY' ? leg : { ...leg, dh: true });
     } else if (s === 'PICKUP') {
@@ -166,16 +167,18 @@ function parseDayRow(c, day, rawCodes, warnings, date) {
   }
 }
 
+const isDhMark = (s) => /^DH\/[A-Z0-9]{2}$/.test(s);
+
 /** רגל טיסה: מספר, מוצא, יעד, שעות ומטוס, כולם באותה שורת y. */
 function readLeg(c, lyItem, warnings, date) {
   const num = near(c.flt, lyItem.y);
   if (!num) {
-    warnings.push(`${date}: נמצא "LY" בלי מספר טיסה. השורה דולגה.`);
+    warnings.push(`${date}: נמצא "${lyItem.s}" בלי מספר טיסה. השורה דולגה.`);
     return null;
   }
   const timed = readTimedRow(c, lyItem);
   return {
-    flight: 'LY' + num.s,
+    flight: (lyItem.s === 'LY' ? 'LY' : lyItem.s.slice(3)) + num.s,
     org: timed.org,
     dst: near(c.dst, lyItem.y)?.s ?? timed.dst ?? null,
     dep: timed.dep,

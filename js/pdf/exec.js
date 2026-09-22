@@ -186,9 +186,11 @@ function parseValue(raw) {
   return { kind: 'text', raw };
 }
 
+// LEG – רגל פעילה; DHO – DH בטיסת אל על; DHX – DH בחברה אחרת, בלי מספר טיסה (Flt 0;
+// PRG→ZRH ב-28/01/2025, ‏01:20 ב-DH וב-Credit).
 const isLegRow = (row, cols) => {
   const first = row[0];
-  return /^(LEG|DHO)$/.test(first.s) && Math.abs(centerX(first) - (cols.Details ?? centerX(first))) <= MAX_SNAP * 2;
+  return /^(LEG|DHO|DHX)$/.test(first.s) && Math.abs(centerX(first) - (cols.Details ?? centerX(first))) <= MAX_SNAP * 2;
 };
 
 const isSimRow = (row, cols) => {
@@ -200,7 +202,7 @@ function readLegRow(row, cols) {
   const c = cellsOf(row, cols);
   return {
     type: c.Details ?? null,
-    flight: c.Flt ? 'LY' + c.Flt : null,
+    flight: c.Flt && c.Flt !== '0' ? 'LY' + c.Flt : null,
     seq: c.Seq ?? null,
     dhd: c.DHD ?? null,
     dd: c.DD ?? null, // חסר משמעות, נשמר לתצוגה בלבד

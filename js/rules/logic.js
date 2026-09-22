@@ -84,10 +84,13 @@ function credit_from_scheduled(ctx, params, rule) {
  * אחרי (או לפני) היום הרשום היא המריאה, ו-`before` – כמה ממנה חל לפני חצות של יום
  * ההמראה, או null אם היא לא חוצה חצות. השעות בדוח מקומיות, ולכן ההפרש של שדה המוצא
  * נלמד מהנחיתה בבסיס, או לפי אזור הזמן של השדה.
+ *
+ * הדוח רושם רגל ביום ה-STD בשעון הבסיס, גם כשבשעון המקומי זה עוד היום הקודם (LY398
+ * ב-24/01/2025: ‏STD 23:05 במדריד = 00:05 ב-24/01, ‏ATD 00:35 → 24/01, לא 25/01).
  */
 function splitAtMidnight(leg, domicile) {
   const dur = leg.actDur ?? leg.skdDur;
-  let local = leg.atd ?? leg.std; // ההמראה בשעון המקומי, ביחס ליום הרשום
+  let local = leg.atd ?? leg.std; // ההמראה בשעון המקומי, ביחס ליום ה-STD המקומי
   if (local == null || dur == null) return { error: `לא ניתן לדעת מתי המריאה ${leg.flight}.` };
   if (leg.atd != null && leg.std != null) {
     if (leg.atd - leg.std < -720) local += 1440; // עיכוב אל מעבר לחצות
@@ -100,7 +103,9 @@ function splitAtMidnight(leg, domicile) {
     off = mod(local - depBase + 720, 1440) - 720;
   } else off = stationOffset(leg.org, leg.date, domicile);
   if (off == null) return { error: `לא ניתן לדעת מתי המריאה ${leg.flight} בשעון הבסיס.` };
-  const dep = local - off;
+  // ה-STD בשעון הבסיס נופל ביום הרשום; מזיזים את השעון המקומי כך שיתאים לו.
+  const std = leg.std ?? local;
+  const dep = local - off - (std - off - mod(std - off, 1440));
   const shift = Math.floor(dep / 1440);
   const clock = dep - shift * 1440;
   return { shift, before: clock + dur <= 1440 ? null : 1440 - clock };
@@ -204,9 +209,10 @@ function absence_day_credit(ctx, params, rule) {
       }
     }
     ctx.expect(day.date, 'absence', credit, rule, rule.title, { code: matchedCode(day, params, ctx) });
-    // יום בתוך סבב, בלי טיסה משלו (SIM_BER ב-18/11/2025, באמצע סבב BER): ה-TAB הוא של השהייה בחו"ל,
-    // וסימון העמודה נרשם ביום תחילת הסבב.
-    const away = !day.exec?.legs?.length && !day.plan?.legs?.length
+    // יום בתוך סבב, בלי טיסה פעילה משלו (SIM_BER ב-18/11/2025, באמצע סבב BER; SIM_PRG ב-28/01/2025,
+    // עם DH ‏PRG→ZRH): ה-TAB הוא של השהייה בחו"ל, וסימון העמודה נרשם ביום תחילת הסבב.
+    const active = (legs, dh) => (legs ?? []).some((l) => !dh(l));
+    const away = !active(day.exec?.legs, (l) => l.dhd || l.type === 'DHO' || l.type === 'DHX') && !active(day.plan?.legs, (l) => l.dh)
       ? ctx.execPairings.find((p) => p.from < day.date && day.date < p.to) : null;
     if (params.report_flag_column) {
       const flagDate = away && params.away_flag_on_pairing_start ? away.from : day.date;

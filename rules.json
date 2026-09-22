@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "rules_version": "2026-09-22.18",
+  "rules_version": "2026-09-22.20",
   "updated": "2026-09-22",
   "source": "טבלת פיצויי אצ\"א אל על (Artifact), על בסיס ההסכם הישן (פרק כ\"ה), הסכם 2018, הסכם אצ\"א 2024 והסכם 2026",
   "precedence": "הסכם מאוחר גובר על מוקדם. סעיף שלא בוטל ולא שונה נשאר בתוקף. פיצויי 2018, 2024 ו‑2026 באים בנוסף לפיצויים מהסכמים אחרים.",
@@ -25,6 +25,7 @@
       "FSC_PLND",
       "SCK_PLAN",
       "HOME_RGT",
+      "RGT",
       "SIM_SHO",
       "CPT_BAS",
       "CRM_CRS",
@@ -71,6 +72,7 @@
       "INV",
       "INV_C",
       "HOME_RGT",
+      "RGT",
       "CPT_BAS",
       "CRM_CRS",
       "UNF_B",
@@ -329,8 +331,8 @@
     {
       "id": "ground_training_credit",
       "category": "plan",
-      "title": "אימון קרקע (HOME_RGT, INV_C, CPT_BAS, CRM_CRS)",
-      "when": "יום אימון קרקע: מהבית (HOME_RGT), פעילות קרקע INV_C, CPT_BAS או CRM_CRS.",
+      "title": "אימון קרקע (HOME_RGT, RGT, INV_C, CPT_BAS, CRM_CRS)",
+      "when": "יום אימון קרקע: מהבית (HOME_RGT), ‏RGT, פעילות קרקע INV_C, CPT_BAS או CRM_CRS.",
       "amount": {
         "unit": "credit_hours",
         "value": 3.75,
@@ -346,11 +348,13 @@
         "params": {
           "plan_codes": [
             "HOME_RGT",
+            "RGT",
             "CPT_BAS",
             "CRM_CRS"
           ],
           "report_codes": [
             "HOME_",
+            "RGT",
             "INV_C",
             "CPT_B",
             "CRM_C"
@@ -360,7 +364,7 @@
           "tab_hours": 11
         }
       },
-      "note": "בדוח מופיע גם 1.00 ב‑MEAL. הערך לא אומת מול מקור בהסכם. INV_C נוסף לפי החלטת בעל המוצר (21/09/2026): ב‑24/08/2026 נרשם בדיוק כמו HOME_ (Credit 03:45, TAB 11:00, CORS 1, MEAL 1). הקוד המלא של INV_C בתכנון עוד לא נראה, ולכן הוא ב‑report_codes בלבד. CPT_BAS ו‑CRM_CRS נוספו ביוני 2026: בדוח Credit 03:45, TAB 11:00, CORS 1, MEAL 1, ובתכנון הם נספרים ב‑Fict. flight time (18:45 = 5 × 03:45)."
+      "note": "בדוח מופיע גם 1.00 ב‑MEAL. הערך לא אומת מול מקור בהסכם. INV_C נוסף לפי החלטת בעל המוצר (21/09/2026): ב‑24/08/2026 נרשם בדיוק כמו HOME_ (Credit 03:45, TAB 11:00, CORS 1, MEAL 1). הקוד המלא של INV_C בתכנון עוד לא נראה, ולכן הוא ב‑report_codes בלבד. CPT_BAS ו‑CRM_CRS נוספו ביוני 2026: בדוח Credit 03:45, TAB 11:00, CORS 1, MEAL 1, ובתכנון הם נספרים ב‑Fict. flight time (18:45 = 5 × 03:45). RGT (אותו קוד בתכנון ובדוח) הוא פעילות קרקע כמו HOME_RGT (החלטת בעל המוצר, 22/09/2026); פברואר 2025, 02–05/02."
     },
     {
       "id": "short_call_standby_credit",
@@ -787,6 +791,9 @@
           ],
           "sim_plan_codes": [
             "SIM_SHO"
+          ],
+          "sim_plan_code_prefixes": [
+            "SIM_"
           ]
         }
       },

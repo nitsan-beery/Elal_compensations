@@ -699,7 +699,10 @@ function checkMissingData(plan, exec, warnings) {
     const incomplete = [];
     for (const d of Object.values(exec.days ?? {})) {
       for (const l of d.legs ?? []) {
-        const gaps = Object.entries(EXEC_LEG_FIELDS).filter(([c, f]) => l[f] == null && exec.legColumns?.includes(c)).map(([c]) => c);
+        // DHX היא DH בחברה אחרת, ואין לה מספר טיסה של אל על (Flt 0).
+        const gaps = Object.entries(EXEC_LEG_FIELDS)
+          .filter(([c, f]) => l[f] == null && exec.legColumns?.includes(c) && !(c === 'Flt' && l.type === 'DHX'))
+          .map(([c]) => c);
         if (gaps.length) incomplete.push(`${dm(d.date)} ${l.flight ?? ''} (${gaps.join(', ')})`.replace('  ', ' '));
       }
     }

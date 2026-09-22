@@ -141,8 +141,10 @@ function second_unplanned_activity(ctx, params, rule) {
   const report = params.report_minutes_before_std ?? 0;
   const simReport = params.sim_report_codes ?? [];
   const simPlan = params.sim_plan_codes ?? [];
+  const simPlanPrefixes = params.sim_plan_code_prefixes ?? [];
   const isSimDay = (day) => ctx.execCodes(day).some((c) => simReport.includes(c));
-  const simPlanned = (day) => (day.plan?.codes ?? []).some((c) => simPlan.includes(c));
+  // SIM_PRG ב-28/01/2025: סימולטור בחו"ל שתוכנן באמצע סבב.
+  const simPlanned = (day) => (day.plan?.codes ?? []).some((c) => simPlan.includes(c) || simPlanPrefixes.some((x) => c.startsWith(x)));
   const key = keyFor(params.report_column);
 
   const askRest = (id, date, title) => ctx.ask({
@@ -1013,7 +1015,7 @@ export const DUTY_LOGIC = {
 
 export const DUTY_PARAMS = {
   same_fdp_rounds: ['legal_rest_hours', 'report_minutes_before_std', 'hours', 'report_column'],
-  second_unplanned_activity: ['legal_rest_hours', 'report_minutes_before_std', 'hours', 'report_column', 'sim_report_codes', 'sim_plan_codes'],
+  second_unplanned_activity: ['legal_rest_hours', 'report_minutes_before_std', 'hours', 'report_column', 'sim_report_codes', 'sim_plan_codes', 'sim_plan_code_prefixes'],
   base_rest_shortfall: ['answer_value', 'hours', 'report_column', 'report_minutes_before_std', 'rest_buffer_minutes', 'legal_rest_hours',
     'short_stay_max_hours', 'short_stay_factor', 'long_stay_share', 'long_stay_min_hours', 'long_stay_max_hours'],
   night_landings: ['fleet', 'window_from', 'window_to', 'min_planned_count', 'paid_from_count', 'hours', 'report_column', 'base_landings_only', 'counted_crews'],
