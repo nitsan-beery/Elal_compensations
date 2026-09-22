@@ -1009,5 +1009,6 @@ export const LOGIC_ORDER = [
   'white_flight',
   'free_days_waived',
   'consecutive_saturdays',
+  'consecutive_night_rounds',
   'absence_month_cap',
 ];

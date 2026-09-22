@@ -286,9 +286,14 @@ function makeContext({ out, timeline, domicile, codes, answers, plan, exec, supp
         .reduce((s, date) => s + (dayOf(timeline, date)?.exec?.values?.[column]?.min ?? 0), 0);
     },
 
-    /** מה שכבר צפוי על סבב בסוג מסוים (למשל השלמה לסליפ קצר ב-Rig). */
-    expectedOn: (pairing, key) => out.expectations
-      .filter((e) => e.pairingId === pairing.id && e.key === key).reduce((s, e) => s + e.min, 0),
+    /** מה שכבר צפוי על סבב בסוג מסוים (למשל השלמה לסליפ קצר ב-Rig), בלי החוקים שב-`except`. */
+    expectedOn: (pairing, key, except = []) => out.expectations
+      .filter((e) => e.pairingId === pairing.id && e.key === key && !except.includes(e.ruleId)).reduce((s, e) => s + e.min, 0),
+
+    /** עמודה בדוח ביום אחד, ומה שכבר צפוי באותו יום. */
+    reportedOnDate: (date, column) => dayOf(timeline, date)?.exec?.values?.[column]?.min ?? 0,
+    expectedOnDate: (date, key) => out.expectations
+      .filter((e) => e.date === date && e.key === key).reduce((s, e) => s + e.min, 0),
 
     capAbsenceTotal(capMin, rule) {
       const total = out.expectations.filter((e) => e.key === 'absence').reduce((s, e) => s + e.min, 0);

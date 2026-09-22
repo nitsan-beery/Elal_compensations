@@ -252,8 +252,13 @@ function base_rest_shortfall(ctx, params, rule) {
     const performed = ctx.hasExec ? performedAsPlanned(ctx, p2) && performedAsPlanned(ctx, p1) : null;
     if (ctx.hasExec && !performed) continue; // לא בוצע כמתוכנן: אין פיצוי על ויתור או על תכנון שגוי
 
+    // הדוח כבר מזכה (מעבר למה שחוקים אחרים מסבירים): לא שואלים, והפיצוי נרשם כוויתור לבקשת החברה.
+    const target = ctx.hasExec ? performedAsPlanned(ctx, p2) : p2;
+    const own = ctx.rulesWithLogic('base_rest_shortfall').map((r) => r.id);
+    const paid = ctx.hasExec &&
+      ctx.reportedOn(target, params.report_column) - ctx.expectedOn(target, keyFor(params.report_column), own) >= H(params.hours);
     const id = `base_rest:${p2.id}`;
-    const a = ctx.answer(id);
+    const a = ctx.answer(id) ?? (paid ? { value: 'company_request' } : null);
     if (!a) {
       ctx.ask({
         id,
@@ -275,7 +280,6 @@ function base_rest_shortfall(ctx, params, rule) {
       continue;
     }
     if (a.value !== params.answer_value) continue;
-    const target = ctx.hasExec ? performedAsPlanned(ctx, p2) : p2;
     ctx.expectPairing(target, keyFor(params.report_column), H(params.hours), rule, what);
   }
 }
@@ -584,7 +588,11 @@ function free_days_waived(ctx, params, rule) {
     return;
   }
   const id = `free_days:${ctx.monthFirst.slice(0, 7)}`;
-  const a = ctx.answer(id);
+  const key = keyFor(params.report_column);
+  // הדוח כבר מזכה ביום הראשון בחודש: לא שואלים.
+  const paid = ctx.hasExec &&
+    ctx.reportedOnDate(ctx.monthFirst, params.report_column) - ctx.expectedOnDate(ctx.monthFirst, key) >= paidDays * H(params.hours);
+  const a = ctx.answer(id) ?? (paid ? { value: 'company' } : null);
   if (!a) {
     ctx.ask({
       id,
@@ -598,7 +606,7 @@ function free_days_waived(ctx, params, rule) {
       ruleId: rule.id,
     });
   } else if (a.value === 'company') {
-    ctx.expect(ctx.monthFirst, keyFor(params.report_column), paidDays * H(params.hours), rule,
+    ctx.expect(ctx.monthFirst, key, paidDays * H(params.hours), rule,
       `${what}: ${missing} ימים חסרים, פיצוי על ${paidDays} (מהיום השני)`);
   }
 }
@@ -635,6 +643,110 @@ function consecutive_saturdays(ctx, params, rule) {
     const why = `${rule.title}: פעילות בשבתות ${ddmm(s1)} ו-${ddmm(s2)}${a2.cancelled ? ' (בשבת השנייה סבב שבוטל ביוזמת החברה)' : ''}`;
     if (a2.pairing) ctx.expectPairing(a2.pairing, key, H(params.hours), rule, why);
     else ctx.expect(s2, key, H(params.hours), rule, why);
+  }
+}
+
+// ---------- יותר משתי טיסות סבב לילה עוקבות (2024 ס' 37, 40) ----------
+
+/**
+ * טיסת סבב לילה: טיסת סבב שה-FDP שלה (מההתייצבות ועד On block בבסיס) חופף לחלון
+ * `window_from`–`window_to` בשעון ישראל (02:00–05:00, לסעיף הזה בלבד; החלטת בעל המוצר,
+ * 22/09/2026). רצף = לילות בתאריכים עוקבים, בלי יום פנוי ביניהם. רצף של יותר מ-
+ * `more_than` לילות מזכה `hours` פעם אחת, על הלילה ה-(`more_than`+1).
+ *
+ * לפי התכנון. עם דוח ביצוע, לילה מתוכנן נספר אם בוצעה בו טיסת סבב לילה (גם אחרת, כמו
+ * זכייה במכרז על טיסה דומה) או שהסבב בוטל ביוזמת החברה (ס' 40). ההסכמה מונחת; שואלים
+ * אם התכנון היה לבקשת החברה רק כשהדוח לא מזכה. רצף מהחודש הקודם אינו נראה ואינו נשאל.
+ */
+function consecutive_night_rounds(ctx, params, rule) {
+  if (!ctx.hasPlan) return;
+  const report = params.report_minutes_before_std ?? 0;
+  const legal = H(params.legal_rest_hours);
+  const from = parseClock(params.window_from);
+  const to = parseClock(params.window_to);
+  const key = keyFor(params.report_column);
+  const nightsOf = (s) => {
+    if (s.start == null || s.end == null || !isTurnaround(s, legal)) return [];
+    const d0 = dateOf(s.start - report);
+    return [d0, addDays(d0, 1)].filter((d) => s.start - report < at(d, to) && s.end > at(d, from));
+  };
+
+  const planned = new Map(); // לילה → סבב מתוכנן
+  for (const p of planPairingsSorted(ctx)) {
+    for (const d of nightsOf(planSpan(p, ctx.domicile, ctx.monthFirst))) if (!planned.has(d)) planned.set(d, p);
+  }
+  const performed = new Map(); // לילה → סבב ביצוע
+  if (ctx.hasExec) {
+    for (const e of ctx.execPairings) {
+      for (const d of nightsOf(execSpan(e, ctx.domicile, true))) if (!performed.has(d)) performed.set(d, e);
+    }
+  }
+  // done / company / no / unknown
+  const statusOf = (d) => {
+    if (!ctx.hasExec || performed.has(d)) return 'done';
+    const cause = companyCause(ctx, planned.get(d));
+    return cause === true ? 'company' : cause === false ? 'no' : 'unknown';
+  };
+
+  const nights = [...planned.keys()].sort();
+  const runs = [];
+  for (const d of nights) {
+    const last = runs.at(-1);
+    if (last && addDays(last.at(-1), 1) === d) last.push(d);
+    else runs.push([d]);
+  }
+
+  for (const run of runs) {
+    if (run.length <= params.more_than) continue;
+    const list = run.map(ddmm).join(', ');
+    const statuses = run.map(statusOf);
+    const what = `${rule.title}: ${run.length} טיסות סבב לילה מתוכננות בלילות ${list}`;
+    const counted = run.filter((d, i) => statuses[i] === 'done' || statuses[i] === 'company');
+    const open = run.filter((d, i) => statuses[i] === 'unknown');
+    if (counted.length < run.length) {
+      if (counted.length + open.length <= params.more_than) {
+        ctx.note(run[0], `${what}, אבל רק ${counted.length} מהן בוצעו או בוטלו ביוזמת החברה, ולכן אין פיצוי.`, rule);
+      } else if (open.length) {
+        ctx.review(`${what}. לא ידוע אם ${open.map((d) => describePairing(planned.get(d))).join(', ')} בוטלה ביוזמת החברה, ` +
+          'וזה קובע אם הרצף נחשב בוצע (2024 ס\' 40). דורש בדיקה ידנית.', rule);
+      } else {
+        ctx.review(`${what}, אבל לא כל הרצף בוצע (בוצעו או בוטלו ביוזמת החברה: ${counted.map(ddmm).join(', ')}). דורש בדיקה ידנית.`, rule);
+      }
+      continue;
+    }
+
+    const payNight = run[params.more_than];
+    // כשהדוח כבר מזכה על אחד הלילות ברצף, הצפוי נרשם שם.
+    const paid = ctx.hasExec ? run.map((d) => performed.get(d)).find((p) =>
+      p && ctx.reportedOn(p, params.report_column) - ctx.expectedOn(p, key) >= H(params.hours)) : null;
+    const target = paid ?? (ctx.hasExec ? performed.get(payNight) : planned.get(payNight));
+    const why = `${what}${statuses.includes('company') ? ' (חלקן בוטלו ביוזמת החברה)' : ''}`;
+    if (ctx.hasExec) {
+      if (!paid) {
+        const id = `night_rounds:${run[0]}`;
+        const a = ctx.answer(id);
+        if (!a) {
+          ctx.ask({
+            id,
+            date: target ? target.from : payNight,
+            title: `${run.length} טיסות סבב לילה עוקבות (${list}): האם התכנון היה לבקשת החברה?`,
+            body: `${what}. על יותר משתי טיסות כאלה ברצף מגיע פיצוי, והדוח לא מזכה אותו. הפיצוי רק כשהרצף תוכנן לבקשת החברה.`,
+            options: [
+              { value: 'company', label: 'לבקשת החברה', hint: minToHhmm(H(params.hours)) },
+              { value: 'mine', label: 'לבקשתי (בקשות או מכרז)', hint: 'אין פיצוי' },
+            ],
+            ruleId: rule.id,
+          });
+          continue;
+        }
+        if (a.value !== 'company') {
+          ctx.note(run[0], `${what}. לבקשתך, לפי תשובתך: אין פיצוי.`, rule);
+          continue;
+        }
+      }
+    }
+    if (target) ctx.expectPairing(target, key, H(params.hours), rule, why);
+    else ctx.expect(payNight, key, H(params.hours), rule, `${why} (הסבב בלילה ${ddmm(payNight)} בוטל ביוזמת החברה)`);
   }
 }
 
@@ -779,6 +891,7 @@ export const DUTY_LOGIC = {
   white_flight,
   free_days_waived,
   consecutive_saturdays,
+  consecutive_night_rounds,
   stay_extension,
 };
 
@@ -791,6 +904,7 @@ export const DUTY_PARAMS = {
   special_date_activity: ['occasions', 'flight_activity_only', 'hours', 'report_column', 'report_minutes_before_std'],
   free_days_waived: ['hours', 'report_column', 'paid_from_day', 'off_block_from', 'on_block_until', 'min_free_days'],
   consecutive_saturdays: ['hours', 'report_column'],
+  consecutive_night_rounds: ['hours', 'report_column', 'more_than', 'window_from', 'window_to', 'legal_rest_hours', 'report_minutes_before_std'],
   white_flight: ['hours', 'report_column', 'report_minutes_before_std', 'report_after', 'report_until', 'min_block_hours'],
   stay_extension: ['over_hours', 'capped_days', 'hours', 'report_column'],
 };
