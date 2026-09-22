@@ -423,7 +423,7 @@ function showSwaps(out, answers) {
   for (const [id, a] of Object.entries(answers)) {
     if (a?.value !== 'voluntary_swap') continue;
     if (id.startsWith('unplanned:') && !linkOf.get(id.slice(10))) linkOf.set(id.slice(10), a.link ?? null);
-    if (id.startsWith('cancelled:') && a.link) linkOf.set(a.link, id.slice(10));
+    if (id.startsWith('cancelled:') && a.link && a.link !== GAVE_AWAY) linkOf.set(a.link, id.slice(10));
   }
   const drop = new Set();
   for (const c of out.changes) {
@@ -442,11 +442,15 @@ function showSwaps(out, answers) {
     const a = answers[`cancelled:${c.planId}`];
     if (!a) continue;
     const linked = a.link && out.changes.find((x) => x.execId === a.link)?.exec;
-    c.exec = a.value === 'voluntary_swap' ? `החלפה מרצוני – ${linked ?? 'טיסה בחודש אחר'}`
+    c.exec = a.value === 'voluntary_swap' ? (a.link === GAVE_AWAY ? GAVE_AWAY_LABEL : `החלפה מרצוני – ${linked ?? 'טיסה בחודש אחר'}`)
       : a.value === 'other' ? `סיבה אחרת${a.text ? `: ${a.text}` : ''}`
       : CANCELLED_OUTCOME[a.value] ?? a.value;
   }
 }
+
+/** קישור של החלפה מרצון על סבב שלא בוצע: הטיסה נמסרה בלי לקבל טיסה אחרת במקומה. */
+const GAVE_AWAY = 'none';
+const GAVE_AWAY_LABEL = 'מסירת הטיסה ללא חלופה';
 
 /** מה קרה לסבב שלא בוצע, לפי התשובה לשאלה עליו. */
 const CANCELLED_OUTCOME = {
@@ -458,16 +462,19 @@ const CANCELLED_OUTCOME = {
 /**
  * לשאלה שמבקשת לקשר החלפה מרצון לסבב בצד השני: על פעילות לא מתוכננת – הסבבים
  * המתוכננים שלא בוצעו; על סבב שלא בוצע – הפעילויות הלא מתוכננות. תמיד אפשר גם
- * "טיסה בחודש אחר", כי ההחלפה יכולה להיות עם טיסה שאינה בקבצים של החודש.
+ * "טיסה בחודש אחר", כי ההחלפה יכולה להיות עם טיסה שאינה בקבצים של החודש, ועל סבב
+ * שלא בוצע גם "מסירת הטיסה ללא חלופה".
  */
 function attachLinkCandidates(questions, matches, ctx) {
   const cancelled = matches.filter((m) => m.how === 'cancelled').map((m) => ({ id: m.plan.id, label: describePairing(m.plan) }));
   // פעילות שזוהתה כקריאה מיוחדת (S/C בדוח) אינה החלפה.
   const unplanned = matches.filter((m) => m.how === 'unplanned' && !ctx.pairingHandledBy(m.exec, 'special_call')).map((m) => ({ id: m.exec.id, label: describePairing(m.exec) }));
   const otherMonth = { id: null, label: 'טיסה בחודש אחר' };
+  const gaveAway = { id: GAVE_AWAY, label: GAVE_AWAY_LABEL };
   for (const q of questions) {
-    const pool = q.id.startsWith('unplanned:') ? cancelled : q.id.startsWith('cancelled:') ? unplanned : [];
-    for (const o of q.options ?? []) if (o.needsLink) o.linkCandidates = [...pool, otherMonth];
+    const onCancelled = q.id.startsWith('cancelled:');
+    const pool = q.id.startsWith('unplanned:') ? cancelled : onCancelled ? unplanned : [];
+    for (const o of q.options ?? []) if (o.needsLink) o.linkCandidates = [...pool, otherMonth, ...(onCancelled ? [gaveAway] : [])];
   }
 }
 

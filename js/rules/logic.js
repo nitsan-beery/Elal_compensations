@@ -512,8 +512,9 @@ function voluntary_swap(ctx, params, rule) {
     if (answer?.value !== 'voluntary_swap') continue;
     const target = match.exec ?? match.plan;
     ctx.markPairing(target, 'voluntary_swap');
-    ctx.note((match.plan ?? match.exec).from,
-      'החלפה מרצון: רק הקרדיט של הטיסה שבוצעה, כולל השלמה לסליפ קצר. אין פיצוי נוסף.', rule);
+    ctx.note((match.plan ?? match.exec).from, answer.link === 'none'
+      ? `${describePairing(match.plan)}: הטיסה נמסרה ללא חלופה. אין עליה קרדיט ואין פיצוי.`
+      : 'החלפה מרצון: רק הקרדיט של הטיסה שבוצעה, כולל השלמה לסליפ קצר. אין פיצוי נוסף.', rule);
   }
 }
 
