@@ -140,6 +140,7 @@ table { width: 100%; border-collapse: collapse; font-size: .92rem; }
 th, td { padding: .4rem .5rem; border-bottom: 1px solid var(--line); text-align: right; vertical-align: top; }
 th { font-weight: 600; color: var(--muted); font-size: .82rem; white-space: nowrap; }
 td.col { direction: ltr; text-align: right; white-space: nowrap; }
+td.col .reason { display: block; direction: rtl; white-space: normal; font-size: .85em; color: var(--muted); }
 tr.bad td { background: var(--bad-bg); }
 tr.gain td { background: var(--ok-bg); }
 tr.pending td { background: var(--pending-bg); }

@@ -141,7 +141,8 @@ function expectMinSlip(ctx, group, min, params, rule) {
   const note = group.length === 1
     ? `השלמה ל-${params.min_credit_hours} שעות`
     : `השלמה ל-${group.length} × ${params.min_credit_hours} שעות על ${group.length} סבבים באותו FDP (${group.map(describePairing).join(', ')})`;
-  ctx.expectPairing(group.at(-1), 'rig', min * group.length - credit, rule, note);
+  ctx.expectPairing(group.at(-1), 'rig', min * group.length - credit, rule, note,
+    { reason: `השלמה ל-${params.min_credit_hours} שעות` });
 }
 
 // ---------- ימי היעדרות וזיכוי ----------

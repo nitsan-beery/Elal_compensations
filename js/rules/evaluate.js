@@ -133,7 +133,7 @@ function makeContext({ out, timeline, domicile, codes, answers, plan, exec, supp
   const askedIds = new Set();
   const noteKeys = new Set();
   const reviewKeys = new Set();
-  const ruleRef = (rule) => ({ ruleId: rule.id, ruleTitle: rule.title });
+  const ruleRef = (rule) => ({ ruleId: rule.id, ruleTitle: rule.title, ...(rule.short_title && { shortTitle: rule.short_title }) });
   const linkedSwap = (prefix, pairingId) => {
     const hit = Object.entries(answers).find(([id, a]) =>
       id.startsWith(prefix) && a.value === 'voluntary_swap' && a.link === pairingId);
@@ -170,10 +170,10 @@ function makeContext({ out, timeline, domicile, codes, answers, plan, exec, supp
       if (!min) return;
       out.expectations.push({ date, dates: [date], key, min, note, ...ruleRef(rule), ...extra });
     },
-    expectPairing(pairing, key, min, rule, note) {
+    expectPairing(pairing, key, min, rule, note, extra) {
       if (!min) return;
       out.expectations.push({ date: pairing.from, dates: [...pairing.dates], pairingId: pairing.id,
-        pairing: describePairing(pairing), key, min, note, ...ruleRef(rule) });
+        pairing: describePairing(pairing), key, min, note, ...ruleRef(rule), ...extra });
     },
     /** ציפייה של סבב שנרשמת ביום מסוים (הקרדיט של כל יממה בסבב). */
     expectPairingDay(pairing, date, key, min, rule, note) {

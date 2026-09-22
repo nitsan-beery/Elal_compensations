@@ -166,7 +166,7 @@ async function handleFile(file, expected) {
     if (kind === 'exec' && !record.plan) {
       state.notices.push({ kind: 'warn', text: 'אין קובץ תכנון לחודש הזה, ולכן אין השוואה לתכנון. אפשר להעלות אותו עכשיו.' });
     } else if (kind === 'exec' && prev?.key !== key && record.plan) {
-      state.notices.push({ kind: 'info', text: `קובץ התכנון של ${monthName(record.period)} נטען מההיסטוריה.` });
+      state.notices.push({ kind: 'info', text: `קובץ התכנון של ${monthName(record.period)} נטען מהחודשים השמורים.` });
     }
     record[kind] = parsed;
     record[`${kind}File`] = file.name;
@@ -189,7 +189,7 @@ function renderUploadState() {
     const loaded = !!r?.[kind];
     zone.classList.toggle('loaded', loaded);
     $('.drop-state', zone).textContent = loaded
-      ? `${r[`${kind}File`] ?? 'נטען מההיסטוריה'} · ${monthName(r.period)}`
+      ? `${r[`${kind}File`] ?? 'נטען מהחודשים השמורים'} · ${monthName(r.period)}`
       : 'לא נבחר קובץ. לחץ או גרור לכאן';
   }
 }
@@ -233,6 +233,13 @@ function shownComparison(res) {
   return [...main, ...orphans].sort((a, b) => at(a).localeCompare(at(b)) || order(a) - order(b));
 }
 const isGap = (c) => c.ok === false || c.marks.length > 0;
+
+/** הסיבה לפיצוי שאינו קרדיט (Rig, ‏COM, ‏S/C), ליד שם העמודה: `reason` כשיש, אחרת `short_title` של החוק, אחרת שמו. */
+function reasonOf(c) {
+  if (!COMP_COLUMNS.has(c.column)) return '';
+  const reasons = [...new Set(c.items.map((e) => e.reason ?? e.shortTitle ?? e.ruleTitle).filter(Boolean))];
+  return reasons.length ? `<span class="reason">${esc(reasons.join(' · '))}</span>` : '';
+}
 
 function summarize(res) {
   return {
@@ -348,7 +355,7 @@ function renderTotals(res) {
   const pending = res.questions.length > 0;
   const days = res.totals.length ? dayCounts(res.expectations) : [];
   return `<div class="card">
-    <h2>${res.totals.length ? 'סיכום חודשי מול הדוח' : 'סיכום חודשי'}</h2>
+    <h2>${res.totals.length ? 'סיכום' : 'סיכום חודשי'}</h2>
     <div class="totals">${res.totals.map((t) => {
       const gap = `פער <span class="num">${signed(t.reported - t.expected)}</span>`;
       const status = t.ok === true ? '✓' : t.ok === false ? (pending ? `ממתין · ${gap}` : `✗ ${gap}`) : '';
@@ -401,7 +408,7 @@ function renderComparison(res) {
           ...c.marks.map((m) => `${esc(m.column)}: צפוי <span class="num">${hm(m.expected, m.unit)}</span>, בדוח <span class="num">${hm(m.reported, m.unit)}</span>`),
         ].join('<br>');
         return `<tr class="${cls}">
-          <td>${esc(c.label)}</td><td class="col">${esc(c.column)}</td>
+          <td>${esc(c.label)}</td><td class="col">${esc(c.column)}${reasonOf(c)}</td>
           <td class="num">${hm(c.expected, c.unit)}</td><td class="num">${hm(c.reported, c.unit)}</td>
           <td class="num">${c.ok ? '' : (c.diff > 0 ? '+' : '') + hm(c.diff, c.unit)}</td><td>${status}</td></tr>
           ${why ? `<tr class="detail"><td colspan="6">${why}</td></tr>` : ''}`;
@@ -558,7 +565,7 @@ async function renderHistory() {
     </div>
     <div class="card">
       <h2>גיבוי ושחזור</h2>
-      <p class="small muted">קובץ הגיבוי מכיל את הנתונים שחולצו מהקבצים ואת התשובות שלך, כולל שמות ומספרי סבבים. שמור אותו במקום פרטי. אפשר להעביר איתו את ההיסטוריה בין ה‑iPad למחשב.</p>
+      <p class="small muted">קובץ הגיבוי מכיל את הנתונים שחולצו מהקבצים ואת התשובות שלך, כולל שמות ומספרי סבבים. שמור אותו במקום פרטי. אפשר להעביר איתו את החודשים השמורים בין ה‑iPad למחשב.</p>
       <div class="row">
         <button class="btn" data-action="backup" ${months.length ? '' : 'disabled'}>הורד גיבוי</button>
         <label class="btn">שחזר מקובץ<input type="file" accept="application/json,.json" hidden data-action="restore"></label>
@@ -568,7 +575,7 @@ async function renderHistory() {
   for (const b of root.querySelectorAll('[data-open]')) b.addEventListener('click', () => openMonth(b.dataset.open));
   for (const b of root.querySelectorAll('[data-delete]')) {
     b.addEventListener('click', async () => {
-      if (!confirm('למחוק את החודש מההיסטוריה? התשובות שנתת עליו יימחקו.')) return;
+      if (!confirm('למחוק את החודש מהחודשים השמורים? התשובות שנתת עליו יימחקו.')) return;
       await store.deleteMonth(b.dataset.delete);
       if (state.record?.key === b.dataset.delete) { state.record = null; state.result = null; state.notices = []; renderUploadState(); renderResults(); }
       renderHistory();
