@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "rules_version": "2026-09-22.4",
+  "rules_version": "2026-09-22.5",
   "updated": "2026-09-22",
   "source": "טבלת פיצויי אצ\"א אל על (Artifact), על בסיס ההסכם הישן (פרק כ\"ה), הסכם 2018, הסכם אצ\"א 2024 והסכם 2026",
   "precedence": "הסכם מאוחר גובר על מוקדם. סעיף שלא בוטל ולא שונה נשאר בתוקף. פיצויי 2018, 2024 ו‑2026 באים בנוסף לפיצויים מהסכמים אחרים.",
@@ -99,7 +99,7 @@
       },
       "source": "הגדרת עבודה",
       "status": "ok",
-      "valid_from": "2024-01-01",
+      "valid_from": null,
       "valid_to": null,
       "logic": {
         "id": "credit_from_scheduled",
@@ -119,7 +119,7 @@
       },
       "source": "2018 ס' 27.2",
       "status": "ok",
-      "valid_from": "2018-01-01",
+      "valid_from": "2018-11-01",
       "valid_to": null,
       "logic": {
         "id": "min_slip_credit",
@@ -167,7 +167,7 @@
       },
       "source": "ישן, כ\"ה ס' 13.א–ב; 2024 ס' 61",
       "status": "ok",
-      "valid_from": "2024-01-01",
+      "valid_from": "1998-01-01",
       "valid_to": null,
       "logic": {
         "id": "absence_day_credit",
@@ -252,7 +252,7 @@
       },
       "source": "הגדרת בעל המוצר; טרם מופיע בטבלת החוקים. קידומת SCK: החלטת בעל המוצר, 21/09/2026",
       "status": "ok",
-      "valid_from": "2024-01-01",
+      "valid_from": null,
       "valid_to": null,
       "logic": {
         "id": "absence_day_credit",
@@ -293,7 +293,7 @@
       },
       "source": "ישן, כ\"ה ס' 15.א–ב; 2018 ס' 101; אומת מול דוחות יולי ואוגוסט 2026",
       "status": "ok",
-      "valid_from": "2024-01-01",
+      "valid_from": "2018-11-01",
       "valid_to": null,
       "logic": {
         "id": "absence_day_credit",
@@ -322,7 +322,7 @@
       },
       "source": "2024 ס' 56 (ימי הדרכה קרקעיים: 3.75 ש' ליום). אומת מול יולי 2026 (HOME_), אוגוסט 2026 (INV_C) ויוני 2026 (CPT_B, CRM_C)",
       "status": "ok",
-      "valid_from": "2024-01-01",
+      "valid_from": "2024-06-01",
       "valid_to": null,
       "logic": {
         "id": "absence_day_credit",
@@ -389,7 +389,7 @@
       },
       "source": "2024 ס' 56",
       "status": "ok",
-      "valid_from": "2024-01-01",
+      "valid_from": "2024-06-01",
       "valid_to": null,
       "logic": {
         "id": "absence_day_credit",
@@ -452,7 +452,7 @@
       },
       "source": "ישן, כ\"ה ס' 12.יב, לפי פרשנות בעל המוצר (21/09/2026): הלוך‑חזור מעל 12 שעות טיסה מתוכננות, והנחיתה ביעד היא נחיתת הביניים.",
       "status": "ok",
-      "valid_from": "2024-01-01",
+      "valid_from": "1998-01-01",
       "valid_to": null,
       "logic": {
         "id": "long_flight_day",
@@ -476,7 +476,7 @@
       },
       "source": "ישן, כ\"ה ס' 12.א–ג, 12.יא; הגדרת \"זמן שהייה מחוץ לבסיס\" בס' 1.יא",
       "status": "ok",
-      "valid_from": "2000-01-01",
+      "valid_from": "1998-01-01",
       "valid_to": null,
       "logic": {
         "id": "special_call",
@@ -504,7 +504,7 @@
       },
       "source": "2018 ס' 127, 91.1",
       "status": "ok",
-      "valid_from": "2018-01-01",
+      "valid_from": "2018-11-01",
       "valid_to": null,
       "logic": {
         "id": "higher_of_planned_performed",
@@ -532,7 +532,7 @@
       "source": "2026 ס' 22.4",
       "status": "ok",
       "valid_from": "2026-01-01",
-      "valid_to": null,
+      "valid_to": "2029-12-31",
       "logic": {
         "id": "lost_hours_credit",
         "supported": true,
@@ -557,7 +557,7 @@
       },
       "source": "ישן, כ\"ה ס' 12.ב–ג (החרגת החלפות לבקשת אצ\"א); הבהרת בעל המוצר",
       "status": "ok",
-      "valid_from": "2024-01-01",
+      "valid_from": "1998-01-01",
       "valid_to": null,
       "logic": {
         "id": "voluntary_swap",
@@ -580,7 +580,7 @@
       },
       "source": "הבהרת בעל המוצר",
       "status": "ok",
-      "valid_from": "2024-01-01",
+      "valid_from": null,
       "valid_to": null,
       "logic": {
         "id": "cancelled_no_compensation",
@@ -603,7 +603,7 @@
       },
       "source": "ישן, כ\"ה ס' 10.ב",
       "status": "ok",
-      "valid_from": "2024-01-01",
+      "valid_from": "1998-01-01",
       "valid_to": null,
       "logic": {
         "id": null,
@@ -626,7 +626,7 @@
       },
       "source": "ישן, כ\"ה ס' 13.ג",
       "status": "ok",
-      "valid_from": "2024-01-01",
+      "valid_from": "1998-01-01",
       "valid_to": null,
       "logic": {
         "id": "vacation_recall",
@@ -657,7 +657,7 @@
       },
       "source": "ישן, כ\"ה ס' 17.ג",
       "status": "ok",
-      "valid_from": "2024-01-01",
+      "valid_from": "1998-01-01",
       "valid_to": null,
       "logic": {
         "id": "training_cancelled_flight",
@@ -693,7 +693,7 @@
       },
       "source": "2018 ס' 27.1",
       "status": "ok",
-      "valid_from": "2024-01-01",
+      "valid_from": "2018-11-01",
       "valid_to": null,
       "logic": {
         "id": "dh_activated",
@@ -913,7 +913,7 @@
       },
       "source": "2026 ס' 23.4",
       "status": "ok",
-      "valid_from": "2024-01-01",
+      "valid_from": "2026-01-01",
       "valid_to": null,
       "logic": {
         "id": null,
@@ -936,8 +936,8 @@
       },
       "source": "2026 ס' 24.4",
       "status": "ok",
-      "valid_from": "2024-01-01",
-      "valid_to": null,
+      "valid_from": "2026-01-01",
+      "valid_to": "2029-12-31",
       "logic": {
         "id": null,
         "supported": false,
@@ -959,8 +959,8 @@
       },
       "source": "2026 ס' 24.4",
       "status": "ok",
-      "valid_from": "2024-01-01",
-      "valid_to": null,
+      "valid_from": "2026-01-01",
+      "valid_to": "2029-12-31",
       "logic": {
         "id": null,
         "supported": false,
@@ -982,7 +982,7 @@
       },
       "source": "2018 ס' 23, 27.5",
       "status": "ok",
-      "valid_from": "2024-01-01",
+      "valid_from": "2018-11-01",
       "valid_to": null,
       "logic": {
         "id": null,
@@ -1003,7 +1003,7 @@
       },
       "source": "2018 ס' 27.4",
       "status": "ok",
-      "valid_from": "2024-01-01",
+      "valid_from": "2018-11-01",
       "valid_to": null,
       "logic": {
         "id": "white_flight",
@@ -1031,7 +1031,7 @@
       },
       "source": "ישן, פרק כ\"ו/1 ס' 17.ב",
       "status": "ok",
-      "valid_from": "2024-01-01",
+      "valid_from": "1998-01-01",
       "valid_to": null,
       "logic": {
         "id": null,
@@ -1054,7 +1054,7 @@
       },
       "source": "ישן, כ\"ה ס' 12.טו",
       "status": "ok",
-      "valid_from": "2024-01-01",
+      "valid_from": "1998-01-01",
       "valid_to": null,
       "logic": {
         "id": "base_rest_shortfall",
@@ -1087,7 +1087,7 @@
       },
       "source": "2018 ס' 27.3",
       "status": "ok",
-      "valid_from": "2024-01-01",
+      "valid_from": "2018-11-01",
       "valid_to": null,
       "logic": {
         "id": null,
@@ -1108,7 +1108,7 @@
       },
       "source": "2018 ס' 58.2",
       "status": "ok",
-      "valid_from": "2024-01-01",
+      "valid_from": "2018-11-01",
       "valid_to": null,
       "logic": {
         "id": null,
@@ -1131,8 +1131,8 @@
       },
       "source": "2026 ס' 24.1–24.3",
       "status": "ok",
-      "valid_from": "2024-01-01",
-      "valid_to": null,
+      "valid_from": "2026-01-01",
+      "valid_to": "2029-12-31",
       "logic": {
         "id": null,
         "supported": false,
@@ -1366,7 +1366,7 @@
       },
       "source": "2026 ס' 21.2",
       "status": "ok",
-      "valid_from": "2024-01-01",
+      "valid_from": "2026-01-01",
       "valid_to": null,
       "logic": {
         "id": null,
@@ -1389,8 +1389,8 @@
       },
       "source": "ישן, כ\"ה ס' 6",
       "status": "cancelled",
-      "valid_from": "2024-01-01",
-      "valid_to": null,
+      "valid_from": "1998-01-01",
+      "valid_to": "2018-10-31",
       "logic": {
         "id": null,
         "supported": false,
@@ -1410,8 +1410,8 @@
       },
       "source": "ישן, כ\"ה ס' 12.יב",
       "status": "cancelled",
-      "valid_from": "2024-01-01",
-      "valid_to": null,
+      "valid_from": "1998-01-01",
+      "valid_to": "2018-10-31",
       "logic": {
         "id": null,
         "supported": false,
@@ -1432,8 +1432,8 @@
       },
       "source": "ישן, כ\"ה ס' 12.יג",
       "status": "cancelled",
-      "valid_from": "2024-01-01",
-      "valid_to": null,
+      "valid_from": "1998-01-01",
+      "valid_to": "2018-10-31",
       "logic": {
         "id": null,
         "supported": false,
@@ -1453,8 +1453,8 @@
       },
       "source": "ישן, כ\"ה ס' 10.ג",
       "status": "cancelled",
-      "valid_from": "2024-01-01",
-      "valid_to": null,
+      "valid_from": "1998-01-01",
+      "valid_to": "2018-10-31",
       "logic": {
         "id": null,
         "supported": false,
@@ -1474,8 +1474,8 @@
       },
       "source": "ישן, כ\"ה ס' 11.ט",
       "status": "cancelled",
-      "valid_from": "2024-01-01",
-      "valid_to": null,
+      "valid_from": "1998-01-01",
+      "valid_to": "2018-10-31",
       "logic": {
         "id": null,
         "supported": false,
@@ -1495,8 +1495,8 @@
       },
       "source": "2018 ס' 25.4",
       "status": "cancelled",
-      "valid_from": "2024-01-01",
-      "valid_to": null,
+      "valid_from": "1998-01-01",
+      "valid_to": "2018-10-31",
       "logic": {
         "id": null,
         "supported": false,
@@ -1516,8 +1516,8 @@
       },
       "source": "ישן, כ\"ה ס' 12.ח",
       "status": "cancelled",
-      "valid_from": "2024-01-01",
-      "valid_to": null,
+      "valid_from": "1998-01-01",
+      "valid_to": "2018-10-31",
       "logic": {
         "id": null,
         "supported": false,
@@ -1537,8 +1537,8 @@
       },
       "source": "ישן, כ\"ה ס' 12.ט",
       "status": "cancelled",
-      "valid_from": "2024-01-01",
-      "valid_to": null,
+      "valid_from": "1998-01-01",
+      "valid_to": "2018-10-31",
       "logic": {
         "id": null,
         "supported": false,
@@ -1558,8 +1558,8 @@
       },
       "source": "ישן, כ\"ה ס' 12.יד",
       "status": "cancelled",
-      "valid_from": "2024-01-01",
-      "valid_to": null,
+      "valid_from": "1998-01-01",
+      "valid_to": "2018-10-31",
       "logic": {
         "id": null,
         "supported": false,
@@ -1579,7 +1579,7 @@
       },
       "source": "ישן, כ\"ה ס' 24",
       "status": "cancelled",
-      "valid_from": "2024-01-01",
+      "valid_from": "1998-01-01",
       "valid_to": null,
       "logic": {
         "id": null,
@@ -1600,8 +1600,8 @@
       },
       "source": "2018 ס' 25.11",
       "status": "cancelled",
-      "valid_from": "2024-01-01",
-      "valid_to": null,
+      "valid_from": "1998-01-01",
+      "valid_to": "2018-10-31",
       "logic": {
         "id": null,
         "supported": false,
@@ -1622,7 +1622,7 @@
       "source": "2024 ס' 18",
       "status": "ok",
       "valid_from": "2024-01-01",
-      "valid_to": null,
+      "valid_to": "2026-06-30",
       "logic": {
         "id": null,
         "supported": false,
@@ -1644,8 +1644,8 @@
       },
       "source": "2026 ס' 18.1.7",
       "status": "ok",
-      "valid_from": "2024-01-01",
-      "valid_to": null,
+      "valid_from": "2026-01-01",
+      "valid_to": "2029-12-31",
       "logic": {
         "id": null,
         "supported": false,
@@ -1667,8 +1667,8 @@
       },
       "source": "2026 ס' 18.1.8",
       "status": "ok",
-      "valid_from": "2024-01-01",
-      "valid_to": null,
+      "valid_from": "2026-01-01",
+      "valid_to": "2029-12-31",
       "logic": {
         "id": null,
         "supported": false,
@@ -1691,7 +1691,7 @@
       "source": "2024 ס' 17",
       "status": "ok",
       "valid_from": "2024-01-01",
-      "valid_to": null,
+      "valid_to": "2026-06-30",
       "logic": {
         "id": null,
         "supported": false,
@@ -1713,7 +1713,7 @@
       },
       "source": "ישן, פרק כ\"ו/1 ס' 18.א",
       "status": "ok",
-      "valid_from": "2024-01-01",
+      "valid_from": "1998-01-01",
       "valid_to": null,
       "logic": {
         "id": null,
@@ -1736,7 +1736,7 @@
       },
       "source": "2018 ס' 182.5.2",
       "status": "ok",
-      "valid_from": "2024-01-01",
+      "valid_from": "2018-11-01",
       "valid_to": null,
       "logic": {
         "id": null,
@@ -1759,7 +1759,7 @@
       },
       "source": "2018 ס' 182.5.3",
       "status": "ok",
-      "valid_from": "2024-01-01",
+      "valid_from": "2018-11-01",
       "valid_to": null,
       "logic": {
         "id": null,
@@ -1782,7 +1782,7 @@
       },
       "source": "2018 ס' 182.5.5",
       "status": "ok",
-      "valid_from": "2024-01-01",
+      "valid_from": "2018-11-01",
       "valid_to": null,
       "logic": {
         "id": null,
