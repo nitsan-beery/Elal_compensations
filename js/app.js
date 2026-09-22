@@ -634,7 +634,7 @@ function renderRules() {
           <label class="small"><input type="checkbox"> רק חוקים שבתוקף ונתמכים</label>
           <span class="spacer"></span>
           <button class="btn" data-action="export-json">ייצוא rules.json</button>
-          <button class="btn" data-action="export-xlsx">ייצוא כל ${data.rules.length} החוקים ל-Excel</button>
+          <button class="btn" data-action="export-xlsx">ייצוא ל-Excel</button>
         </div>
         <div class="small muted" data-role="count"></div>
       </div>
@@ -739,6 +739,5 @@ function exportRulesXlsx() {
     r.logic?.id,
   ]);
   const blob = xlsxBlob(header, rows, { sheet: 'חוקים', widths: [30, 10, 50, 30, 25, 11, 11, 10, 7, 40, 40, 28, 24] });
-  const stamp = new Date().toLocaleString('sv').slice(0, 16).replace(/[-: ]/g, '');
-  download(`rules-all-${rules.length}-${stamp}.xlsx`, blob);
+  download(`rules-${state.rulesData.rules_version}.xlsx`, blob);
 }
