@@ -317,10 +317,9 @@ function renderTotals(res) {
         <div class="rep">בדוח <span class="num">${minToHhmm(t.reported)}</span> ${status}</div>
       </div>`;
     }).join('')}${fd ? `
-      <div class="total ${fd.free >= fd.due ? 'ok' : 'bad'}">
-        <div class="label" style="direction:rtl">ימים פנויים</div>
-        <div class="val"><span class="num">${fd.free}</span> מתוך <span class="num">${fd.due}</span></div>
-        <div class="rep">בתכנון, מול המינימום בהסכם</div>
+      <div class="total free ${fd.free >= fd.due ? 'ok' : 'bad'}">
+        <div class="val"><span class="num">${fd.free}</span> ימים פנויים בתכנון</div>
+        <div class="rep">מול מינימום <span class="num">${fd.due}</span> בהסכם</div>
       </div>` : ''}
     </div>
   </div>`;
