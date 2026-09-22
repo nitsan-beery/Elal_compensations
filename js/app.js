@@ -31,7 +31,7 @@ const state = {
   rulesSource: null,
   record: null, // רשומת החודש הפתוח
   result: null,
-  filter: 'all',
+  filter: 'comp',
   notices: [],
 };
 
@@ -194,11 +194,34 @@ async function runAndSave() {
   renderResults();
 }
 
+/** שורות ההשוואה שמוצגות. FLT+DH חוזר על הקרדיט של אותן טיסות, ולכן לא מוצג ולא נספר. */
+/** עמודות הפיצויים בדוח. השאר הן קרדיט ועמודות סימון. */
+const COMP_COLUMNS = new Set(['Rig', 'COM', 'S/C']);
+const MAIN_COLUMNS = ['Credit', 'Rig', 'COM', 'S/C'];
+
+/**
+ * שורות הטבלה: לכל יום (או סבב) שורת Credit, ושורות Rig, ‏COM ו-S/C כשיש בהן ערך.
+ * FLT+DH, ‏TAB ועמודות הסימון (VAC, SICK...) אינן מוצגות כשורות. פער באחת מהן נרשם
+ * על שורת ה-Credit של אותו יום (`marks`), כדי שלא ייעלם. אם אין שורת Credit, היא מוצגת.
+ */
+function shownComparison(res) {
+  const main = res.comparison.filter((c) => MAIN_COLUMNS.includes(c.column)).map((c) => ({ ...c, marks: [] }));
+  const orphans = [];
+  for (const c of res.comparison) {
+    if (MAIN_COLUMNS.includes(c.column) || c.ok !== false) continue;
+    const host = main.find((m) => m.column === 'Credit' && m.dates.includes(c.dates[0]));
+    if (host) host.marks.push(c); else orphans.push({ ...c, marks: [] });
+  }
+  const order = (c) => (MAIN_COLUMNS.includes(c.column) ? MAIN_COLUMNS.indexOf(c.column) : MAIN_COLUMNS.length);
+  return [...main, ...orphans].sort((a, b) => a.dates[0].localeCompare(b.dates[0]) || order(a) - order(b));
+}
+const isGap = (c) => c.ok === false || c.marks.length > 0;
+
 function summarize(res) {
   return {
     mode: res.mode,
     questions: res.questions.length,
-    gaps: res.comparison.filter((c) => c.ok === false).length
+    gaps: shownComparison(res).filter(isGap).length
       + (res.questions.length ? 0 : res.totals.filter((t) => t.ok === false).length),
     reviews: res.reviews.length,
     unknownCodes: res.unknownCodes.length,
@@ -210,7 +233,7 @@ async function openMonth(key, { quiet = false } = {}) {
   if (!record) return;
   state.record = record;
   state.notices = [];
-  state.filter = 'all';
+  state.filter = 'comp';
   if (!quiet) showView('check');
   await runAndSave();
 }
@@ -328,29 +351,41 @@ function renderTotals(res) {
 }
 
 function renderComparison(res) {
-  if (!res.comparison.length) return '';
-  const counts = {
-    all: res.comparison.length,
-    bad: res.comparison.filter((c) => c.ok === false).length,
-    pending: res.comparison.filter((c) => c.pending).length,
+  const all = shownComparison(res);
+  if (!all.length) return '';
+  const FILTERS = {
+    comp: (c) => COMP_COLUMNS.has(c.column),
+    all: () => true,
+    bad: isGap,
+    pending: (c) => c.pending,
   };
-  const rows = res.comparison.filter((c) => state.filter === 'all' || (state.filter === 'bad' ? c.ok === false : c.pending));
+  const counts = {
+    comp: all.filter(FILTERS.comp).length,
+    all: all.length,
+    bad: all.filter(isGap).length,
+    pending: all.filter((c) => c.pending).length,
+  };
+  const rows = all.filter(FILTERS[state.filter] ?? FILTERS.all);
   const chip = (id, label) => `<button class="chip" data-filter="${id}" aria-pressed="${state.filter === id}">${label} (${counts[id]})</button>`;
   return `<div class="card">
-    <h2>השוואה מול מה שזוכה</h2>
-    <div class="filters">${chip('all', 'הכול')}${chip('bad', 'פערים')}${chip('pending', 'ממתין לתשובה')}</div>
+    <h2>פירוט</h2>
+    <div class="filters">${chip('comp', 'רק פיצויים')}${chip('all', 'הכול')}${chip('bad', 'פערים')}${chip('pending', 'ממתין לתשובה')}</div>
     <div class="table-wrap"><table>
       <thead><tr><th>ימים</th><th>עמודה</th><th>צפוי</th><th>בדוח</th><th>פער</th><th></th></tr></thead>
       <tbody>${rows.map((c) => {
-        const cls = c.ok === false ? gapClass(c.diff) : c.pending ? 'pending' : '';
-        const status = c.pending ? '<span class="status pending">ממתין</span>' : c.ok ? '<span class="status ok">✓</span>' : `<span class="status ${gapClass(c.diff)}">✗</span>`;
-        const why = c.items.filter((e) => e.ruleTitle || e.note)
-          .map((e) => `${esc(e.ruleTitle ?? '')}${e.note ? `: ${esc(e.note)}` : ''}${e.min != null && c.unit !== 'count' ? ` <span class="num">${minToHhmm(e.min)}</span>` : ''}`).join('<br>');
+        const gap = c.ok === false ? gapClass(c.diff) : c.marks.length ? 'bad' : '';
+        const cls = gap || (c.pending ? 'pending' : '');
+        const status = gap ? `<span class="status ${gap}">✗</span>` : c.pending ? '<span class="status pending">ממתין</span>' : '<span class="status ok">✓</span>';
+        const why = [
+          ...(c.ok !== true ? c.items.filter((e) => e.ruleTitle || e.note)
+            .map((e) => `${esc(e.ruleTitle ?? '')}${e.note ? `: ${esc(e.note)}` : ''}${e.min != null && c.unit !== 'count' ? ` <span class="num">${minToHhmm(e.min)}</span>` : ''}`) : []),
+          ...c.marks.map((m) => `${esc(m.column)}: צפוי <span class="num">${hm(m.expected, m.unit)}</span>, בדוח <span class="num">${hm(m.reported, m.unit)}</span>`),
+        ].join('<br>');
         return `<tr class="${cls}">
           <td>${esc(c.label)}</td><td class="col">${esc(c.column)}</td>
           <td class="num">${hm(c.expected, c.unit)}</td><td class="num">${hm(c.reported, c.unit)}</td>
           <td class="num">${c.ok ? '' : (c.diff > 0 ? '+' : '') + hm(c.diff, c.unit)}</td><td>${status}</td></tr>
-          ${c.ok !== true && why ? `<tr class="detail"><td colspan="6">${why}</td></tr>` : ''}`;
+          ${why ? `<tr class="detail"><td colspan="6">${why}</td></tr>` : ''}`;
       }).join('') || '<tr><td colspan="6" class="muted">אין שורות בסינון הזה.</td></tr>'}</tbody>
     </table></div>
   </div>`;
