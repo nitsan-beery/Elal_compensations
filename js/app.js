@@ -612,7 +612,7 @@ function download(name, content, type) {
 
 // ---------- מסך החוקים ----------
 
-const rulesUi = { q: '', category: '', onlyActive: false };
+const rulesUi = { q: '', category: '', showCancelled: false };
 
 function renderRules() {
   const root = $('#view-rules');
@@ -633,7 +633,7 @@ function renderRules() {
             ${Object.entries(CATEGORY_LABEL).map(([k, v]) => `<option value="${k}">${v}</option>`).join('')}
             <option value="unsupported">לא נתמך</option>
           </select>
-          <label class="small"><input type="checkbox"> רק חוקים שבתוקף ונתמכים</label>
+          <label class="small"><input type="checkbox"> הצג חוקים מבוטלים</label>
           <span class="spacer"></span>
           <button class="btn" data-action="export-json">ייצוא rules.json</button>
           <button class="btn" data-action="export-xlsx">ייצוא ל-Excel</button>
@@ -644,54 +644,70 @@ function renderRules() {
     root.dataset.built = '1';
     $('input[type="search"]', root).addEventListener('input', (e) => { rulesUi.q = e.target.value; renderRuleList(); });
     $('select', root).addEventListener('change', (e) => { rulesUi.category = e.target.value; renderRuleList(); });
-    $('input[type="checkbox"]', root).addEventListener('change', (e) => { rulesUi.onlyActive = e.target.checked; renderRuleList(); });
+    $('input[type="checkbox"]', root).addEventListener('change', (e) => { rulesUi.showCancelled = e.target.checked; syncCancelledOption(root); renderRuleList(); });
     $('[data-action="export-json"]', root).addEventListener('click', exportRulesJson);
     $('[data-action="export-xlsx"]', root).addEventListener('click', exportRulesXlsx);
   }
   renderRuleList();
 }
 
+/**
+ * אפשרות הסינון "מבוטל" קיימת רק כשהתיבה מסומנת. כשמורידים את הסימון בזמן שהיא
+ * נבחרה, הסינון חוזר לכל הקטגוריות.
+ */
+function syncCancelledOption(root) {
+  const select = $('select', root);
+  const option = $('option[value="cancelled"]', select);
+  if (rulesUi.showCancelled) {
+    if (!option) select.add(new Option('מבוטל', 'cancelled'));
+    return;
+  }
+  option?.remove();
+  if (rulesUi.category === 'cancelled') { rulesUi.category = ''; select.value = ''; }
+}
+
 /** החוקים לפי החיפוש והסינון שבמסך, והסיבה לכל חוק שאינו נתמך. */
 function filteredRules() {
   const data = state.rulesData;
-  const today = new Date().toISOString().slice(0, 10);
   const { unsupported } = partitionRules(data.rules);
   const reasonOf = new Map(unsupported.map((u) => [u.rule.id, u.reason]));
   const q = rulesUi.q.trim().toLowerCase();
 
   const rules = data.rules.filter((r) => {
-    const expired = !!(r.valid_to && r.valid_to < today);
-    const active = r.status !== 'cancelled' && !expired && !reasonOf.has(r.id);
-    if (rulesUi.onlyActive && !active) return false;
-    if (rulesUi.category === 'unsupported') { if (!reasonOf.has(r.id)) return false; }
+    // חוק שבוטל היה בתוקף עד שבוטל; `valid_from`/`valid_to` משמשים לחישוב חודשי עבר
+    // ולא לתצוגה. למשתמש מוצג רק "בוטל", וכברירת מחדל הוא מוסתר.
+    const isCancelled = r.status === 'cancelled';
+    if (isCancelled && !rulesUi.showCancelled) return false;
+    if (rulesUi.category === 'cancelled') { if (!isCancelled) return false; }
+    else if (rulesUi.category === 'unsupported') { if (!reasonOf.has(r.id)) return false; }
     else if (rulesUi.category && r.category !== rulesUi.category) return false;
     if (!q) return true;
     return [r.id, r.title, r.when, r.amount?.text, r.source, r.note, r.logic?.id].some((s) => String(s ?? '').toLowerCase().includes(q));
   });
-  return { rules, reasonOf, today };
+  return { rules, reasonOf };
 }
 
 const dmy = (iso) => (iso ? iso.split('-').reverse().join('/') : null);
+/** סוף התוקף. חוק שבוטל בלי `valid_to` הוא חוק שמועד הביטול שלו אינו ידוע. */
+const validTo = (r) => dmy(r.valid_to) ?? (r.status === 'cancelled' ? 'מועד לא ידוע' : 'היום');
 const amountText = (r) => r.amount?.text ?? (r.amount?.value != null ? `${r.amount.value}` : '—');
 
 function renderRuleList() {
   const root = $('#view-rules');
   const data = state.rulesData;
-  const { rules, reasonOf, today } = filteredRules();
+  const { rules, reasonOf } = filteredRules();
 
   $('[data-role="count"]', root).textContent = `מוצגים ${rules.length} מתוך ${data.rules.length} חוקים (מתוכם ${rules.filter((r) => reasonOf.has(r.id)).length} לא נתמכים)`;
   $('[data-role="list"]', root).innerHTML = rules.map((r) => {
-    const expired = !!(r.valid_to && r.valid_to < today);
     const reason = reasonOf.get(r.id);
     const tags = [
       `<span class="tag">${esc(CATEGORY_LABEL[r.category] ?? r.category)}</span>`,
       r.status === 'cancelled' ? '<span class="tag bad">בוטל</span>' : '',
       r.status === 'changed' ? '<span class="tag warn">שונה</span>' : '',
-      expired ? '<span class="tag bad">לא בתוקף</span>' : '',
       reason ? '<span class="tag warn">לא נתמך</span>' : '<span class="tag ok">נתמך</span>',
     ].join(' ');
-    const validity = `מ-${dmy(r.valid_from) ?? 'תמיד'} עד ${dmy(r.valid_to) ?? 'היום'}`;
-    return `<article class="rule ${r.status === 'cancelled' || expired ? 'inactive' : ''}">
+    const validity = `מ-${dmy(r.valid_from) ?? 'תמיד'} עד ${validTo(r)}`;
+    return `<article class="rule ${r.status === 'cancelled' ? 'inactive' : ''}">
       <div class="rule-head"><h3>${esc(r.title)}</h3>${tags}</div>
       <dl>
         <dt>מתי</dt><dd>${esc(r.when)}</dd>
@@ -721,7 +737,7 @@ async function exportRulesJson() {
 
 /** כל החוקים כגיליון Excel, בלי קשר לחיפוש ולסינון שבמסך. */
 function exportRulesXlsx() {
-  const { reasonOf, today } = filteredRules();
+  const { reasonOf } = filteredRules();
   const rules = state.rulesData.rules;
   const STATUS = { ok: '', cancelled: 'בוטל', changed: 'שונה' };
   const header = ['שם', 'קטגוריה', 'מתי', 'כמה', 'מקור', 'בתוקף מ-', 'בתוקף עד', 'סטטוס', 'נתמך', 'הערה', 'למה לא נתמך', 'מזהה', 'לוגיקה'];
@@ -732,8 +748,8 @@ function exportRulesXlsx() {
     amountText(r),
     r.source,
     dmy(r.valid_from) ?? 'תמיד',
-    dmy(r.valid_to) ?? 'היום',
-    [STATUS[r.status] ?? r.status, r.valid_to && r.valid_to < today ? 'לא בתוקף' : ''].filter(Boolean).join(', '),
+    validTo(r),
+    STATUS[r.status] ?? r.status,
     reasonOf.has(r.id) ? 'לא' : 'כן',
     r.note,
     reasonOf.get(r.id),
