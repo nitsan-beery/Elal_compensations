@@ -39,7 +39,7 @@ const dayCounts = (expectations) => DAY_KINDS.map((k) => {
 // תוויות לתשובות שכבר ניתנו. ערך שאינו כאן מוצג כמות שהוא.
 const ANSWER_LABEL = {
   special_call: 'קריאה מיוחדת', voluntary_swap: 'החלפה מרצוני', replaced: 'החברה החליפה את הטיסה',
-  wet_lease: 'מטוס חכור, בלי חלופה', cancelled: 'בוטלה ללא פיצוי', other: 'סיבה אחרת',
+  wet_lease: 'מטוס חכור', trainee: 'הורדה בגלל חניך', cancelled: 'בוטלה ללא פיצוי', other: 'סיבה אחרת',
   yes: 'כן, הייתי מוצב', no: 'לא הייתי מוצב',
 };
 

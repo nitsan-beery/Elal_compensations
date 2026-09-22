@@ -272,6 +272,9 @@ function makeContext({ out, timeline, domicile, codes, answers, plan, exec, supp
       return sumSkd(planPairing.legs) || null;
     },
 
+    /** החוקים שבתוקף ונתמכים עם לוגיקה מסוימת. */
+    rulesWithLogic: (logicId) => rulesByLogic(supported, logicId),
+
     minSlipMinutes() {
       const rule = rulesByLogic(supported, 'min_slip_credit')[0];
       return rule ? hoursToMin(rule.logic.params?.min_credit_hours) : null;
@@ -456,7 +459,8 @@ const GAVE_AWAY_LABEL = 'מסירת הטיסה ללא חלופה';
 /** מה קרה לסבב שלא בוצע, לפי התשובה לשאלה עליו. */
 const CANCELLED_OUTCOME = {
   cancelled: 'בוטל ללא פיצוי',
-  wet_lease: 'הועבר למטוס חכור, בלי חלופה',
+  wet_lease: 'הועבר למטוס חכור',
+  trainee: 'הורדה בגלל חניך',
   replaced: 'הוחלף בטיסה אחרת', // תשובה שנשמרה לפני שהאפשרות הוסרה
 };
 

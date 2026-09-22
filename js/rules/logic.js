@@ -425,8 +425,16 @@ const daysBetween = (a, b) => Math.round((Date.parse(b) - Date.parse(a)) / dayMs
 const addDays = (iso, n) => new Date(Date.parse(iso) + n * dayMs).toISOString().slice(0, 10);
 const dayOf = (iso) => iso.slice(8, 10) + '/' + iso.slice(5, 7);
 
-/** שינוי בתוכנית: תשלום לפי הגבוה מבין המתוכנן לבין שבוצע. */
+/**
+ * שינוי בתוכנית: תשלום לפי הגבוה מבין המתוכנן לבין שבוצע.
+ * סבב מתוכנן שבמקומו בוצע סבב אחר באותם ימים. שואלים כשהמבוצע קצר מהמתוכנן, וגם כשיש על
+ * הסבב שבוצע Rig שאף חוק אחר אינו מסביר. לא מניחים החלפה של החברה גם כשה-Rig בדוח שווה
+ * בדיוק להפרש (החלטת בעל המוצר, 22/09/2026): ה-Rig יכול להיות גם השעות שהפסיד בגלל מטוס
+ * חכור או חניך (`lost_hours_credit`).
+ */
 function higher_of_planned_performed(ctx, params, rule) {
+  const column = params.shortfall_column === 'Rig' ? 'rig' : 'com';
+  const reportColumn = params.shortfall_column ?? 'COM';
   for (const match of ctx.matches) {
     if (!match.plan) continue;
     const answer = ctx.answerFor(match);
@@ -434,33 +442,31 @@ function higher_of_planned_performed(ctx, params, rule) {
     // למחלה או לפעילות קרקע אינו החלפת טיסה.
     const candidate = (match.exec && match.how === 'dates') || answer?.value === 'replaced';
     if (!candidate) continue;
+    if (ctx.pairingHandledBy(match.plan, 'lost_hours_credit')) continue;
     if (params.excluded_when_special_call && ctx.pairingHandledBy(match.exec, 'special_call')) continue;
     if (params.excluded_when_voluntary_swap && answer?.value === 'voluntary_swap') continue;
 
     const performed = match.exec ? sumLegs(match.exec) : 0;
     const planned = ctx.plannedCredit(match.plan);
     if (planned == null || performed == null) continue;
-    if (planned <= performed) continue;
+    const diff = planned - performed;
+    const unexplained = match.exec ? ctx.reportedOn(match.exec, reportColumn) - ctx.expectedOn(match.exec, column) : 0;
+    if (diff <= 0 && unexplained <= 0) continue;
 
-    // יש הפרש לתשלום. החלפה לבקשת אצ"א אינה מזכה, והסיבה לא בקבצים: שואלים. אבל אם
-    // הדוח כבר השלים בדיוק את ההפרש, החברה עצמה קבעה שזו החלפה שלה (05/05/2026: TBS → BUD,
-    // Rig 00:06), ואין מה לשאול. לפעמים ההשלמה נרשמת על סבב סמוך ולא על המחליף עצמו
-    // (10/06/2026: LTN 11–12 → OTP 11, ה-Rig 05:10 נרשם על OTP של 10/06).
-    const column = params.shortfall_column === 'Rig' ? 'rig' : 'com';
-    const paidOn = match.exec && !answer ? findShortfallPaid(ctx, match, planned - performed, column, params.shortfall_column ?? 'COM') : null;
-    if (paidOn) {
-      const where = paidOn === match.exec ? '' : `, ונרשם על ${describePairing(paidOn)}`;
-      ctx.note(match.plan.from, `${describePairing(match.plan)} → ${describePairing(match.exec)}: הדוח השלים את ההפרש ` +
-        `${minToHhmm(planned - performed)} לפי "הגבוה מבין השתיים"${where}. לכן לא נשאלת שאלה.`, rule);
-    } else if (params.requires_user_answer && answer?.value !== 'replaced') {
-      if (answer) continue;
+    const what = `${describePairing(match.plan)} → ${describePairing(match.exec ?? match.plan)}`;
+    if (!answer && params.requires_user_answer) {
+      const facts = [
+        diff > 0 ? `המתוכנן ארוך מהמבוצע ב-${minToHhmm(diff)}.` : `המבוצע אינו קצר מהמתוכנן.`,
+        unexplained > 0 ? `בדוח ${reportColumn} ${minToHhmm(unexplained)} על ${describePairing(match.exec)}, שאף חוק אחר אינו מסביר.` : '',
+      ].filter(Boolean).join(' ');
       ctx.ask({
         id: `replaced:${match.plan.id}`,
         date: match.plan.from,
-        title: `סבב שהוחלף בסבב קצר יותר: ${describePairing(match.plan)} → ${describePairing(match.exec)}`,
-        body: `המתוכנן ארוך מהמבוצע ב-${minToHhmm(planned - performed)}. אם החברה החליפה את הטיסה, ההפרש מגיע לפי "הגבוה מבין השתיים". מה קרה?`,
+        title: diff > 0 ? `סבב שהוחלף בסבב קצר יותר: ${what}` : `${reportColumn} לא מוסבר על סבב שהחליף סבב מתוכנן: ${what}`,
+        body: `${facts} הסיבה אינה בקבצים, והיא קובעת מה מגיע. מה קרה?`,
         options: [
-          { value: 'replaced', label: 'החברה החליפה את הטיסה', hint: `ההפרש ${minToHhmm(planned - performed)} ב-Rig` },
+          { value: 'replaced', label: 'החברה החליפה את הטיסה', hint: diff > 0 ? `ההפרש ${minToHhmm(diff)} ב-${reportColumn}` : 'אין הפרש לתשלום' },
+          ...lostHoursOptions(ctx, match.plan, 'בנוסף לקרדיט של מה שבוצע'),
           { value: 'voluntary_swap', label: 'החלפה מרצוני', hint: 'רק הקרדיט של מה שבוצע' },
           { value: 'other', label: 'סיבה אחרת', needsText: true },
         ],
@@ -468,14 +474,23 @@ function higher_of_planned_performed(ctx, params, rule) {
       });
       continue;
     }
+    if (answer?.value === 'other') {
+      ctx.review(`${what}: ${answer.text || 'סיבה אחרת'}. דורש בדיקה ידנית.`, rule);
+      continue;
+    }
+    if (answer && answer.value !== 'replaced') continue;
+    if (diff <= 0) continue;
 
-    const target = paidOn ?? match.exec ?? match.plan;
-    ctx.expectPairing(target, column, planned - performed, rule,
-      `המתוכנן (${describePairing(match.plan)}) גבוה מהמבוצע. ההפרש לפי "הגבוה מבין השתיים".`);
+    // לפעמים ההשלמה נרשמת על סבב סמוך ולא על המחליף עצמו (10/06/2026: LTN 11–12 → OTP 11,
+    // ה-Rig 05:10 נרשם על OTP של 10/06).
+    const paidOn = match.exec ? findShortfallPaid(ctx, match, diff, column, reportColumn) : null;
+    const where = paidOn && paidOn !== match.exec ? `, ונרשם על ${describePairing(paidOn)}` : '';
+    ctx.expectPairing(paidOn ?? match.exec ?? match.plan, column, diff, rule,
+      `המתוכנן (${describePairing(match.plan)}) גבוה מהמבוצע. ההפרש לפי "הגבוה מבין השתיים"${where}.`);
   }
 }
 
-/** ביטול בגלל מטוס חכור: השעות שהפסיד, כולל השלמה לסליפ קצר. */
+/** השעות שהפסיד (מטוס חכור, חניך), לפי התשובה `answer_value`. כולל השלמה לסליפ קצר. */
 /**
  * הסבב שעליו הדוח כבר רשם בדיוק את ההפרש: קודם הסבב המחליף, ואחר כך סבב ביצוע שנוגע
  * בטווח של יום אחד מהסבב המתוכנן. "בדיוק" = מה שבדוח פחות מה שכבר צפוי עליו מחוקים אחרים.
@@ -492,18 +507,35 @@ function lost_hours_credit(ctx, params, rule) {
   for (const match of ctx.matches) {
     if (!match.plan) continue;
     const answer = ctx.answerFor(match);
-    if (answer?.value !== 'wet_lease') continue;
+    if (answer?.value !== params.answer_value) continue;
 
-    let lost = ctx.plannedCredit(match.plan);
+    const lost = lostHours(ctx, match.plan, params);
     if (lost == null) { ctx.review(`${describePairing(match.plan)}: אין שעות מתוכננות בקובץ, לא ניתן לחשב את השעות שהפסיד.`, rule); continue; }
-    if (params.include_min_slip_credit) {
-      const min = ctx.minSlipMinutes();
-      if (min && lost < min) lost = min;
-    }
-    ctx.expect(match.plan.from, params.credit_column === 'Rig' ? 'rig' : 'credit', lost, rule,
-      `${describePairing(match.plan)} בוטלה בגלל מטוס חכור`);
+    const key = params.credit_column === 'Rig' ? 'rig' : 'credit';
+    const note = `${describePairing(match.plan)}: ${params.answer_label}. השעות שהפסיד` +
+      (match.exec ? `, בנוסף לקרדיט של ${describePairing(match.exec)}.` : '.');
+    if (match.exec) ctx.expectPairing(match.exec, key, lost, rule, note);
+    else ctx.expect(match.plan.from, key, lost, rule, note);
     ctx.markPairing(match.plan, 'lost_hours_credit');
   }
+}
+
+/** השעות שהפסיד על סבב מתוכנן: הקרדיט המתוכנן, כולל השלמה לסליפ קצר. */
+function lostHours(ctx, planPairing, params) {
+  const planned = ctx.plannedCredit(planPairing);
+  if (planned == null) return null;
+  const min = params.include_min_slip_credit ? ctx.minSlipMinutes() : null;
+  return min && planned < min ? min : planned;
+}
+
+/** תשובות "השעות שהפסיד" לפי החוקים שבתוקף בחודש (מטוס חכור, הורדה בגלל חניך). */
+function lostHoursOptions(ctx, planPairing, extra) {
+  return ctx.rulesWithLogic('lost_hours_credit').map((r) => {
+    const p = r.logic.params ?? {};
+    const lost = lostHours(ctx, planPairing, p);
+    const amount = lost == null ? 'השעות שהפסיד' : `השעות שהפסיד (${minToHhmm(lost)})`;
+    return { value: p.answer_value, label: p.answer_label, hint: `${amount} ב-${p.credit_column ?? 'Credit'}${extra ? `, ${extra}` : ''}` };
+  });
 }
 
 /** החלפה מרצון: רק הקרדיט של הטיסה שבוצעה. אין קריאה מיוחדת ואין "הגבוה". */
@@ -531,7 +563,7 @@ function cancelled_no_compensation(ctx, params, rule) {
         title: `סבב מתוכנן שלא בוצע: ${describePairing(match.plan)}`,
         body: 'הסיבה אינה מופיעה בקבצים, והיא קובעת מה מגיע. מה קרה?',
         options: [
-          { value: 'wet_lease', label: 'הועברה למטוס חכור ולא נמצאה חלופה', hint: 'השעות שהפסיד, ב-Rig' },
+          ...lostHoursOptions(ctx, match.plan),
           { value: 'cancelled', label: 'בוטלה ללא פיצוי', hint: 'לא מגיע כלום' },
           { value: 'voluntary_swap', label: 'החלפה מרצוני', hint: 'רק הקרדיט של מה שבוצע', needsLink: true },
           { value: 'other', label: 'סיבה אחרת', needsText: true },
@@ -677,7 +709,7 @@ export const KNOWN_PARAMS = {
   long_flight_day: ['over_flight_hours', 'hours'],
   special_call: ['hours', 'report_column', 'second_day_min_gap_hours', 'second_day_min_hours', 'ask_user_if_no_sc'],
   higher_of_planned_performed: ['requires_user_answer', 'excluded_when_special_call', 'excluded_when_voluntary_swap', 'shortfall_column'],
-  lost_hours_credit: ['requires_user_answer', 'credit_column', 'include_min_slip_credit'],
+  lost_hours_credit: ['requires_user_answer', 'credit_column', 'include_min_slip_credit', 'answer_value', 'answer_label'],
   voluntary_swap: ['requires_user_answer'],
   cancelled_no_compensation: ['requires_user_answer'],
   vacation_recall: ['plan_codes', 'plan_code_prefixes', 'report_codes', 'report_code_prefixes', 'hours', 'report_column'],

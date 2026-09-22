@@ -445,7 +445,7 @@ function companyCause(ctx, planPairing) {
   if (m.how === 'replaced_by_ground') return true; // החברה הציבה אותו לפעילות קרקע
   const a = ctx.answerFor(m);
   if (a?.value === 'voluntary_swap') return false;
-  if (['replaced', 'wet_lease', 'cancelled'].includes(a?.value)) return true;
+  if (['replaced', 'wet_lease', 'trainee', 'cancelled'].includes(a?.value)) return true;
   return null;
 }
 
