@@ -50,6 +50,7 @@ export function evaluate({ rulesData, plan = null, exec = null, answers = {} }) 
   const timeline = buildTimeline(period, plan, exec);
   const domicile = exec?.domicile ?? guessDomicile(plan);
   if (!domicile) warnings.push('לא ניתן לקבוע את בסיס הבית מהקבצים. חוקים שתלויים בבסיס לא ייבדקו.');
+  const fleet = fleetOf(plan) ?? rulesData.crew?.fleet ?? null;
 
   const planPairings = plan ? buildPairings(timeline, domicile, planLegsWithCredit).map(ftOnLastDay) : [];
   if (exec) markCarryIn(timeline, domicile);
@@ -63,6 +64,7 @@ export function evaluate({ rulesData, plan = null, exec = null, answers = {} }) 
     period,
     mode,
     domicile,
+    fleet,
     rulesVersion: rulesData.rules_version,
     rules: {
       supported: supported.map((r) => r.id),
@@ -96,7 +98,7 @@ export function evaluate({ rulesData, plan = null, exec = null, answers = {} }) 
   }
 
   const ctx = makeContext({ out, timeline, domicile, codes, answers, plan, exec, supported, matches, planPairings,
-    period, fleet: rulesData.crew?.fleet ?? null,
+    period, fleet,
     // בלי דוח ביצוע, הסבבים המתוכננים משמשים לחישוב הקרדיט והרי"ג הצפויים.
     execPairings: exec ? execPairings : planPairings });
 
@@ -328,6 +330,22 @@ const sumSkd = (legs) => legs.reduce((acc, l) => (acc == null || l.skdDur == nul
 function guessDomicile(plan) {
   const count = {};
   for (const d of Object.values(plan?.days ?? {})) if (d.pickup?.org) count[d.pickup.org] = (count[d.pickup.org] ?? 0) + 1;
+  return Object.entries(count).sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
+}
+
+/**
+ * הצי לפי סוג המטוס ברגלי התכנון (עמודת A/C), בלי DH. סוגי משנה מאוחדים למשפחה
+ * (B738 → B737, ‏B789 → B787). בלי תכנון, או כשאין סוג מטוס, נלקח `crew.fleet` מ-rules.json.
+ */
+function fleetOf(plan) {
+  const count = {};
+  for (const d of Object.values(plan?.days ?? {})) {
+    for (const l of d.legs ?? []) {
+      if (l.dh || !l.ac) continue;
+      const fleet = l.ac.replace(/^(B7[0-9])[0-9]$/, '$17');
+      count[fleet] = (count[fleet] ?? 0) + 1;
+    }
+  }
   return Object.entries(count).sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
 }
 

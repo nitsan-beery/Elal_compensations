@@ -277,7 +277,7 @@ function renderHead(res) {
   return `<div class="card">
     <div class="result-head">
       <h2>${esc(monthName(res.period))}</h2>
-      <span class="meta">${esc(MODE_LABEL[res.mode])} · בסיס ${esc(res.domicile ?? '?')} · חוקים ${esc(res.rulesVersion)}</span>
+      <span class="meta">${esc(MODE_LABEL[res.mode])} · בסיס ${esc(res.domicile ?? '?')}${res.fleet ? ` · צי ${esc(res.fleet)}` : ''} · חוקים ${esc(res.rulesVersion)}</span>
       <span class="spacer"></span>
       <button class="btn no-print" data-action="print">ייצוא PDF</button>
     </div>
