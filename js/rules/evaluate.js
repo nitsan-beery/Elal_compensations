@@ -171,6 +171,12 @@ function makeContext({ out, timeline, domicile, codes, answers, plan, exec, supp
       out.expectations.push({ date: pairing.from, dates: [...pairing.dates], pairingId: pairing.id,
         pairing: describePairing(pairing), key, min, note, ...ruleRef(rule) });
     },
+    /** ציפייה של סבב שנרשמת ביום מסוים (הקרדיט של כל יממה בסבב). */
+    expectPairingDay(pairing, date, key, min, rule, note) {
+      if (!min) return;
+      out.expectations.push({ date, dates: [date], pairingId: pairing.id,
+        pairing: describePairing(pairing), key, min, note, ...ruleRef(rule) });
+    },
     expectFlag(date, column, count, rule) {
       out.flags.push({ date, column, count, ...ruleRef(rule) });
     },
@@ -460,10 +466,10 @@ function compare({ out, timeline, execPairings, domicile }) {
   const parent = new Map(timeline.map((d) => [d.date, d.date]));
   const find = (x) => (parent.get(x) === x ? x : (parent.set(x, find(parent.get(x))), parent.get(x)));
   const union = (a, b) => parent.set(find(b), find(a));
-  const pairingOf = new Map();
+  const pairingOf = new Map(); // date → הסבבים שנוגעים בו (כמה סבבים באותו יום, 25/11/2025)
   for (const p of execPairings) {
     const dates = reportDates(p, timeline, domicile);
-    for (const d of dates) { union(dates[0], d); pairingOf.set(d, p); }
+    for (const d of dates) { union(dates[0], d); pairingOf.set(d, [...(pairingOf.get(d) ?? []), p]); }
   }
   for (const e of out.expectations) for (const d of e.dates) if (parent.has(d)) union(e.dates[0], d);
 
@@ -475,26 +481,43 @@ function compare({ out, timeline, execPairings, domicile }) {
   }
 
   const rows = [];
-  for (const dates of groups.values()) {
-    dates.sort();
-    const inGroup = out.expectations.filter((e) => dates.includes(e.dates[0]));
-    const pairings = [...new Set(dates.map((d) => pairingOf.get(d)).filter(Boolean))];
+  const labelOf = (dates) => {
+    const pairings = [...new Set(dates.flatMap((d) => pairingOf.get(d) ?? []))];
     const codes = dates.flatMap((d) => execCodesOf(dayOf(timeline, d)));
-    const label = [
+    return [
       dates.length === 1 ? ddmm(dates[0]) : `${ddmm(dates[0])}–${ddmm(dates.at(-1))}`,
       pairings.map((p) => describePairing(p).replace(/^\S+\s/, '')).join(' + '),
       codes.join(' '),
     ].filter(Boolean).join(' · ');
+  };
+  for (const dates of groups.values()) {
+    dates.sort();
+    const inGroup = out.expectations.filter((e) => dates.includes(e.dates[0]));
+    // פער בקבוצה שיש עליה שאלה פתוחה אינו ממצא עדיין: הצפוי תלוי בתשובה.
+    const asked = out.questions.some((q) => dates.includes(q.date));
+    const push = (row) => {
+      const ok = row.reported === row.expected;
+      const pending = !ok && asked;
+      rows.push({ ...row, diff: row.reported - row.expected, ok: pending ? null : ok, pending });
+    };
 
+    // Credit: כל יממה קלנדרית בנפרד, כמו בדוח. ציפייה של כמה ימים (סבב) נרשמת ביום הראשון שלה.
+    for (const date of dates) {
+      const items = inGroup.filter((e) => KEY_COLUMNS[e.key]?.includes('Credit') && e.dates[0] === date);
+      const expected = items.reduce((s, e) => s + e.min, 0);
+      const reported = reportedValue(dayOf(timeline, date), 'Credit');
+      if (!expected && !reported) continue;
+      push({ dates: [date], at: date, label: labelOf([date]), column: 'Credit', expected, reported, items });
+    }
+
+    // שאר העמודות על הקבוצה כולה (הדוח רושם Rig של סבב ביום הראשון שלו), ומוצגות אחרי היום האחרון.
     for (const column of COMPARED_COLUMNS) {
+      if (column === 'Credit') continue;
       const items = inGroup.filter((e) => KEY_COLUMNS[e.key]?.includes(column));
       const expected = items.reduce((s, e) => s + e.min, 0);
       const reported = dates.reduce((s, d) => s + reportedValue(dayOf(timeline, d), column), 0);
       if (!expected && !reported) continue;
-      const ok = reported === expected;
-      // פער בקבוצה שיש עליה שאלה פתוחה אינו ממצא עדיין: הצפוי תלוי בתשובה.
-      const pending = !ok && out.questions.some((q) => dates.includes(q.date));
-      rows.push({ dates, label, column, expected, reported, diff: reported - expected, ok: pending ? null : ok, pending, items });
+      push({ dates, at: dates.at(-1), label: labelOf(dates), column, expected, reported, items });
     }
   }
 
@@ -514,7 +537,8 @@ function compare({ out, timeline, execPairings, domicile }) {
     rows.push({ dates: [t.date], label: ddmm(t.date), column: 'TAB', expected: t.min, reported,
       diff: reported - t.min, ok: reported === t.min, items: [t] });
   }
-  return rows.sort((a, b) => a.dates[0].localeCompare(b.dates[0]) || COMPARED_COLUMNS.indexOf(a.column) - COMPARED_COLUMNS.indexOf(b.column));
+  const at = (r) => r.at ?? r.dates[0];
+  return rows.sort((a, b) => at(a).localeCompare(at(b)) || COMPARED_COLUMNS.indexOf(a.column) - COMPARED_COLUMNS.indexOf(b.column));
 }
 
 /**

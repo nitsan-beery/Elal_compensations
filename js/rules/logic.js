@@ -6,76 +6,102 @@
 
 import { hoursToMin, minToHhmm } from '../time.js';
 import { describePairing } from '../model.js';
+import { stationOffset } from '../airports.js';
 import { DUTY_LOGIC, DUTY_PARAMS, execFdpGroups } from './duty.js';
 
 const H = (hours) => hoursToMin(hours) ?? 0;
 
 // ---------- קרדיט טיסה ----------
 
-/** קרדיט כל רגל = STA − STD. הדוח כבר נותן את זה ב-SkdDur, אחרי המרת אזורי זמן. */
+/**
+ * קרדיט כל רגל = STA − STD. הדוח כבר נותן את זה ב-SkdDur, אחרי המרת אזורי זמן.
+ *
+ * כל יממה קלנדרית מקבלת בדוח את הקרדיט שלה, לפי ההמראה בפועל בשעון הבסיס:
+ * - רגל שהמריאה אחרי חצות בשעון הבסיס שייכת כולה ליום שאחרי, גם כשהדוח רושם אותה ביום
+ *   הקודם (LY392 ב-03/05/2026: ‏ATD 23:51 בברצלונה = 00:51 → 04/05; ‏LY388 ב-01/06/2026
+ *   יצאה ב-00:08 במקום 22:55 → 02/06; ‏LY2368 ב-15/02/2026 → 16/02).
+ * - רגל שחוצה חצות מתפצלת: ליום ההמראה הזמן מההמראה בפועל עד חצות, וליום שאחריו השאר מתוך
+ *   SkdDur (LY336 ב-16/07/2026, ‏ATD 23:01 → 00:59 ו-03:46; ‏LY5110 ב-06/01/2026).
+ * - מה שאחרי סוף החודש שייך לחודש הבא (31/05/2026: LY387 → 04:22). רגל שיצאה בחודש הקודם
+ *   מזוכה ב-SkdDur פחות מה שזוכה שם (01/06/2026: ‎−00:07).
+ */
 function credit_from_scheduled(ctx, params, rule) {
   const monthEnd = ctx.timeline.at(-1).date;
   for (const pairing of ctx.execPairings) {
-    const credit = sumLegs(pairing);
-    if (credit == null) {
+    if (sumLegs(pairing) == null) {
       ctx.review(`${describePairing(pairing)}: חסרות שעות מתוכננות (SkdDur) בדוח, ולא ניתן לחשב קרדיט.`, rule);
       continue;
     }
-    const cut = pairing.cutAtEnd ? monthEndSplit(pairing, monthEnd, ctx.domicile) : null;
-    const carry = pairing.cutAtStart ? carriedIn(pairing, ctx.domicile) : null;
-    const error = cut?.error ?? carry?.error;
+    const days = new Map(); // date → {min, why[]}
+    const add = (date, min, why) => {
+      if (date > monthEnd) return;
+      const d = days.get(date) ?? { min: 0, why: [] };
+      d.min += min;
+      if (why) d.why.push(why);
+      days.set(date, d);
+    };
+    let error = null;
+    for (const leg of pairing.legs) {
+      const split = splitAtMidnight(leg, ctx.domicile);
+      if (leg.prevMonth) {
+        // הרגל רשומה ביום 1 אבל יצאה ביום האחרון של החודש הקודם.
+        if (split.error) { error = split.error; break; }
+        const prev = split.before ?? leg.skdDur; // נחתה לפני חצות: כולה זוכתה בחודש הקודם
+        add(leg.date, leg.skdDur - prev, `${leg.flight} יצאה בחודש הקודם, ושם זוכו ${minToHhmm(prev)}. בחודש הזה ${minToHhmm(leg.skdDur - prev)} מתוך ${minToHhmm(leg.skdDur)}`);
+        continue;
+      }
+      if (split.error) {
+        // אי אפשר לדעת מתי המריאה בשעון הבסיס. בסוף החודש זה משנה את הסכום, ובאמצעו רק את החלוקה.
+        if (leg.date === monthEnd) { error = split.error; break; }
+        add(leg.date, leg.skdDur, `${leg.flight}: לא ידועה שעת ההמראה בשעון הבסיס, כל הקרדיט ביום שבו היא רשומה`);
+        continue;
+      }
+      const date = addDays(leg.date, split.shift);
+      const moved = split.shift ? `${leg.flight} רשומה ב-${dayOf(leg.date)} אבל המריאה ב-${dayOf(date)} בשעון הבסיס` : null;
+      if (split.before == null) { add(date, leg.skdDur, moved); continue; }
+      const next = addDays(date, 1);
+      if (next > monthEnd) {
+        add(date, split.before, `${leg.flight} חוצה את סוף החודש: בחודש הזה ${minToHhmm(split.before)} מההמראה בפועל עד חצות, והשאר בחודש הבא`);
+        continue;
+      }
+      add(date, split.before, `${leg.flight} חוצה חצות: ${minToHhmm(split.before)} מההמראה בפועל עד חצות`);
+      add(next, leg.skdDur - split.before, `${leg.flight}: ${minToHhmm(leg.skdDur - split.before)} אחרי חצות (${minToHhmm(leg.skdDur)} − ${minToHhmm(split.before)})`);
+    }
     if (error) {
       ctx.review(`${describePairing(pairing)}: ${error} דורש בדיקה ידנית.`, rule);
       continue;
     }
-    let expected = credit;
-    const why = ['קרדיט לפי STA − STD'];
-    if (carry) {
-      expected -= carry.before;
-      why.push(`${carry.leg.flight} יצאה בחודש הקודם, ושם זוכו ${minToHhmm(carry.before)}. בחודש הזה ${minToHhmm(carry.leg.skdDur - carry.before)} מתוך ${minToHhmm(carry.leg.skdDur)}`);
+    for (const [date, d] of days) {
+      ctx.expectPairingDay(pairing, date, 'flight', d.min, rule, ['קרדיט לפי STA − STD', ...d.why].join('. '));
     }
-    if (cut) {
-      expected += cut.before - cut.leg.skdDur;
-      why.push(`${cut.leg.flight} חוצה את סוף החודש: בחודש הזה ${minToHhmm(cut.before)} מההמראה בפועל עד חצות, והשאר בחודש הבא`);
-    }
-    ctx.expectPairing(pairing, 'flight', expected, rule, why.join('. '));
   }
 }
 
 /**
- * רגל שנוחתת אחרי חצות של היום האחרון בחודש: הדוח מזכה בחודש הזה את הזמן מההמראה בפועל
- * ועד חצות בשעון הבסיס, והשאר בחודש הבא (31/05/2026: LY387, ‏ATD 19:38 → 04:22, יותר
- * מ-SkdDur 04:15). כך הדוח מפצל טיסת לילה גם בין שני ימים בתוך החודש (25/01/2026).
+ * ההמראה בפועל בשעון הבסיס, ביחס לחצות של היום שבו הרגל רשומה: `shift` – כמה ימים
+ * אחרי (או לפני) היום הרשום היא המריאה, ו-`before` – כמה ממנה חל לפני חצות של יום
+ * ההמראה, או null אם היא לא חוצה חצות. השעות בדוח מקומיות, ולכן ההפרש של שדה המוצא
+ * נלמד מהנחיתה בבסיס, או לפי אזור הזמן של השדה.
  */
-function monthEndSplit(pairing, monthEnd, domicile) {
-  const leg = pairing.legs.findLast((l) => l.date === monthEnd);
-  if (!leg) return null;
-  const before = beforeMidnight(leg, domicile);
-  if (before?.error) return before;
-  if (before == null) return null;
-  return { leg, before };
-}
-
-/**
- * החלק השני של monthEndSplit: הרגל שיצאה בחודש הקודם מזוכה בחודש הזה ב-SkdDur פחות מה
- * שזוכה עליה שם. 01/06/2026: LY387, ‏SkdDur 04:15, זוכו 04:22 במאי → ‎−00:07 ביוני.
- */
-function carriedIn(pairing, domicile) {
-  const leg = pairing.legs[0];
-  if (!leg?.prevMonth) return null;
-  const before = beforeMidnight(leg, domicile);
-  if (before?.error) return before;
-  return { leg, before: before ?? leg.skdDur }; // נחתה לפני חצות: כולה זוכתה בחודש הקודם
-}
-
-/** כמה מהרגל חל לפני חצות בשעון הבסיס, או null אם היא לא חוצה חצות. */
-function beforeMidnight(leg, domicile) {
+function splitAtMidnight(leg, domicile) {
   const dur = leg.actDur ?? leg.skdDur;
-  let dep = null; // המראה בשעון הבסיס
-  if (leg.org === domicile) dep = leg.atd ?? leg.std;
-  else if (leg.dst === domicile && (leg.ata ?? leg.sta) != null && dur != null) dep = mod((leg.ata ?? leg.sta) - dur, 1440);
-  if (dep == null || dur == null) return { error: `לא ניתן לדעת כמה מ-${leg.flight} חל לפני חצות של סוף החודש.` };
-  return dep + dur <= 1440 ? null : 1440 - dep;
+  let local = leg.atd ?? leg.std; // ההמראה בשעון המקומי, ביחס ליום הרשום
+  if (local == null || dur == null) return { error: `לא ניתן לדעת מתי המריאה ${leg.flight}.` };
+  if (leg.atd != null && leg.std != null) {
+    if (leg.atd - leg.std < -720) local += 1440; // עיכוב אל מעבר לחצות
+    else if (leg.atd - leg.std > 720) local -= 1440; // הקדמה לפני חצות
+  }
+  let off = null; // שעון מקומי בשדה המוצא פחות שעון הבסיס
+  if (leg.org === domicile) off = 0;
+  else if (leg.dst === domicile && (leg.ata ?? leg.sta) != null) {
+    const depBase = mod((leg.ata ?? leg.sta) - dur, 1440);
+    off = mod(local - depBase + 720, 1440) - 720;
+  } else off = stationOffset(leg.org, leg.date, domicile);
+  if (off == null) return { error: `לא ניתן לדעת מתי המריאה ${leg.flight} בשעון הבסיס.` };
+  const dep = local - off;
+  const shift = Math.floor(dep / 1440);
+  const clock = dep - shift * 1440;
+  return { shift, before: clock + dur <= 1440 ? null : 1440 - clock };
 }
 
 const sumLegs = (pairing) =>

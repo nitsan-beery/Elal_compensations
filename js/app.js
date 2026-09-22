@@ -213,7 +213,8 @@ function shownComparison(res) {
     if (host) host.marks.push(c); else orphans.push({ ...c, marks: [] });
   }
   const order = (c) => (MAIN_COLUMNS.includes(c.column) ? MAIN_COLUMNS.indexOf(c.column) : MAIN_COLUMNS.length);
-  return [...main, ...orphans].sort((a, b) => a.dates[0].localeCompare(b.dates[0]) || order(a) - order(b));
+  const at = (c) => c.at ?? c.dates[0]; // שורות של סבב שלם מוצגות אחרי היום האחרון שלו
+  return [...main, ...orphans].sort((a, b) => at(a).localeCompare(at(b)) || order(a) - order(b));
 }
 const isGap = (c) => c.ok === false || c.marks.length > 0;
 
