@@ -326,15 +326,32 @@ function night_landings(ctx, params, rule) {
   }
   if (night.length < params.min_planned_count) return;
 
+  // מה נחשב ביצוע: הטיסה בדוח, או ביטול ושינוי הצבה ביוזמת החברה (done / company / no / unknown).
+  if (ctx.hasExec) {
+    for (const n of night) {
+      n.target = ctx.execPairings.find((e) => e.legs.some((l) => l.flight === n.leg.flight && l.type !== 'DHO' &&
+        Math.abs(Date.parse(l.date) - Date.parse(n.leg.date)) <= dayMs)) ?? null;
+      if (n.target) { n.status = 'done'; continue; }
+      const cause = companyCause(ctx, n.pairing);
+      const a = cause == null ? ctx.answer(`night_landing:${n.pairing.id}`)?.value : null;
+      n.status = cause === true || a === 'company' ? 'company' : cause === false || a === 'mine' ? 'no' : 'unknown';
+    }
+  } else {
+    for (const n of night) { n.target = n.pairing; n.status = 'done'; }
+  }
+  const threshold = params.paid_from_count;
+
   // נספרות רק טיסות בהרכב צוות מ-`counted_crews` (2024 ס' 39–40: בודד או מוגבר). ההרכב אינו בקבצים, ולכן
   // שואלים על כל טיסה, רק כל עוד התשובות עוד יכולות להביא למינימום.
+  let pool = night;
   if (params.counted_crews) {
     const counted = params.counted_crews;
     const crewOf = (n) => ctx.answer(`night_crew:${n.leg.date}:${n.leg.flight}`)?.value;
     const kept = night.filter((n) => counted.includes(crewOf(n)));
     const open = night.filter((n) => crewOf(n) == null);
     if (kept.length + open.length < params.min_planned_count) return;
-    if (open.length) {
+    // עם דוח ביצוע: אם גם כשכל הטיסות הפתוחות ייספרו לא מגיעים לטיסה ה-`paid_from_count` שבוצעה, לא שואלים.
+    if (open.length && [...kept, ...open].filter((n) => n.status !== 'no').length >= threshold) {
       for (const n of open) {
         ctx.ask({
           id: `night_crew:${n.leg.date}:${n.leg.flight}`,
@@ -350,30 +367,23 @@ function night_landings(ctx, params, rule) {
       }
       return;
     }
-    night.splice(0, night.length, ...kept);
+    pool = [...kept, ...open];
   }
 
-  // מה נחשב ביצוע: הטיסה בדוח, או ביטול ושינוי הצבה ביוזמת החברה.
-  const counted = [];
-  const unknown = [];
-  for (const n of night) {
-    if (!ctx.hasExec) { counted.push({ ...n, target: n.pairing }); continue; }
-    const exec = ctx.execPairings.find((e) => e.legs.some((l) => l.flight === n.leg.flight && l.type !== 'DHO' &&
-      Math.abs(Date.parse(l.date) - Date.parse(n.leg.date)) <= dayMs));
-    if (exec) { counted.push({ ...n, target: exec }); continue; }
-    const cause = companyCause(ctx, n.pairing);
-    if (cause === true) counted.push({ ...n, target: null });
-    else if (cause == null) unknown.push(n);
+  const counted = pool.filter((n) => n.status === 'done' || n.status === 'company');
+  const unknown = pool.filter((n) => n.status === 'unknown');
+  if (counted.length + unknown.length < threshold) {
+    const list = (items) => items.map((n) => `${ddmm(n.leg.date)} ${n.leg.flight}${n.status === 'company' ? ' – שינוי ביוזמת החברה' : ''}`).join(', ');
+    const missed = pool.filter((n) => !counted.includes(n));
+    ctx.note(ctx.monthFirst, `${rule.title}: תוכננו ${pool.length} טיסות עם נחיתה בין ${params.window_from} ל-${params.window_to}, ` +
+      `נספרות כבוצעות: ${counted.length}${counted.length ? ` (${list(counted)})` : ''}${missed.length ? `; לא בוצעו: ${list(missed)}` : ''}. ` +
+      `הפיצוי הוא מהטיסה ה-${threshold} שבוצעה, ולכן אין פיצוי.`, rule);
+    return;
   }
-
-  const threshold = params.paid_from_count;
-  if (unknown.length && counted.length < threshold && counted.length + unknown.length >= threshold) {
+  if (unknown.length && counted.length < threshold) {
     for (const n of unknown) {
-      const id = `night_landing:${n.pairing.id}`;
-      const a = ctx.answer(id);
-      if (a) { if (a.value === 'company') counted.push({ ...n, target: null }); continue; }
       ctx.ask({
-        id,
+        id: `night_landing:${n.pairing.id}`,
         date: n.pairing.from,
         title: `${describePairing(n.pairing)}: טיסה עם נחיתת לילה (${minToHhmm(n.clock)}) שלא בוצעה`,
         body: `תוכננו ${night.length} טיסות עם נחיתה בין ${params.window_from} ל-${params.window_to}. ביטול או שינוי הצבה ביוזמת החברה ` +
