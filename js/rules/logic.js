@@ -260,7 +260,7 @@ function vacation_credit_balance(ctx, params, rule) {
     ctx.review(`איזון החופשה החודשי (${n} × ${rate}) עובר את התקרה של ${params.monthly_max_hours} שעות.`, rule);
   }
   if (params.yearly_cap_days != null) {
-    ctx.note(days[0].date, `תקרת ${params.yearly_cap_days} ימי חופשה בשנה אינה נבדקת בחודש בודד.`, rule);
+    ctx.note(null, `תקרת ${params.yearly_cap_days} ימי חופשה בשנה אינה נבדקת בחודש בודד.`, rule);
   }
 }
 

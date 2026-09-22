@@ -478,7 +478,7 @@ function renderNotes(res) {
   if (!res.notes.length) return '';
   return `<details class="card">
     <summary><h2 style="display:inline">הערות <span class="count">${res.notes.length}</span></h2></summary>
-    <ul class="list">${res.notes.map((n) => `<li><strong class="num">${ddmm(n.date)}</strong> ${esc(n.message)}${n.ruleTitle ? ` <span class="tag">${esc(n.ruleTitle)}</span>` : ''}</li>`).join('')}</ul>
+    <ul class="list">${res.notes.map((n) => `<li>${n.date ? `<strong class="num">${ddmm(n.date)}</strong> ` : ''}${esc(n.message)}${n.ruleTitle ? ` <span class="tag">${esc(n.ruleTitle)}</span>` : ''}</li>`).join('')}</ul>
   </details>`;
 }
 

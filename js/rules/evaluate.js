@@ -227,6 +227,7 @@ function makeContext({ out, timeline, domicile, codes, answers, plan, exec, supp
       reviewKeys.add(message);
       out.reviews.push({ message, ...ruleRef(rule) });
     },
+    /** `date` הוא null בהערה על החודש כולו, בלי יום מסוים. */
     note(date, message, rule) {
       const k = `${date}|${message}`;
       if (noteKeys.has(k)) return;

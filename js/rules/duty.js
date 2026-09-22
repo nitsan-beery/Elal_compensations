@@ -294,7 +294,7 @@ const CREW_PILOTS = { single: 2, augmented: 3, double: 4 };
 
 function night_landings(ctx, params, rule) {
   if (!ctx.hasPlan) {
-    ctx.note(ctx.monthFirst, `${rule.title}: החוק נקבע לפי התכנון, ובלי קובץ תכנון הוא לא נבדק.`, rule);
+    ctx.note(null, `${rule.title}: החוק נקבע לפי התכנון, ובלי קובץ תכנון הוא לא נבדק.`, rule);
     return;
   }
   const from = parseClock(params.window_from);
@@ -375,7 +375,7 @@ function night_landings(ctx, params, rule) {
   if (counted.length + unknown.length < threshold) {
     const list = (items) => items.map((n) => `${ddmm(n.leg.date)} ${n.leg.flight}${n.status === 'company' ? ' – שינוי ביוזמת החברה' : ''}`).join(', ');
     const missed = pool.filter((n) => !counted.includes(n));
-    ctx.note(ctx.monthFirst, `${rule.title}: תוכננו ${pool.length} טיסות עם נחיתה בין ${params.window_from} ל-${params.window_to}, ` +
+    ctx.note(null, `${rule.title}: תוכננו ${pool.length} טיסות עם נחיתה בין ${params.window_from} ל-${params.window_to}, ` +
       `נספרות כבוצעות: ${counted.length}${counted.length ? ` (${list(counted)})` : ''}${missed.length ? `; לא בוצעו: ${list(missed)}` : ''}. ` +
       `הפיצוי הוא מהטיסה ה-${threshold} שבוצעה, ולכן אין פיצוי.`, rule);
     return;
@@ -580,7 +580,7 @@ function free_days_waived(ctx, params, rule) {
   const paidDays = missing - (params.paid_from_day - 1);
   const what = `בתכנון ${free.length} ימים ללא פעילות, והמינימום לקרדיט מתוכנן ${minToHhmm(credit)} הוא ${due}`;
   if (paidDays <= 0) {
-    ctx.note(ctx.monthFirst, `${what}. חסר יום אחד, והפיצוי מתחיל מהיום השני.`, rule);
+    ctx.note(null, `${what}. חסר יום אחד, והפיצוי מתחיל מהיום השני.`, rule);
     return;
   }
   const id = `free_days:${ctx.monthFirst.slice(0, 7)}`;
