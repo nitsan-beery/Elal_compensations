@@ -50,13 +50,15 @@ export async function parseExec(data) {
       const dayNo = readDayNumber(row, dayCols);
       if (dayNo != null) {
         const date = isoDate(header.period.year, header.period.month, dayNo);
-        current = days[date] = { date, day: dayNo, src: null, details: null, values: {}, legs: [] };
+        current = days[date] = { date, day: dayNo, src: null, details: null, values: {}, legs: [], sims: [] };
         fillDayRow(current, row, dayCols);
         legCols = null;
         continue;
       }
 
       if (legCols && current && isLegRow(row, legCols)) { current.legs.push(readLegRow(row, legCols)); continue; }
+      // שורת SIM: אימון בסימולטור, עם התחנה ו-STD/STA בשעון מקומי (שעות האימון בפועל).
+      if (legCols && current && isSimRow(row, legCols)) { current.sims.push(readLegRow(row, legCols)); continue; }
 
       const totals = readTotalsRow(row, dayCols);
       if (totals) totalsRows.push(totals);
@@ -187,6 +189,11 @@ function parseValue(raw) {
 const isLegRow = (row, cols) => {
   const first = row[0];
   return /^(LEG|DHO)$/.test(first.s) && Math.abs(centerX(first) - (cols.Details ?? centerX(first))) <= MAX_SNAP * 2;
+};
+
+const isSimRow = (row, cols) => {
+  const first = row[0];
+  return first.s === 'SIM' && Math.abs(centerX(first) - (cols.Details ?? centerX(first))) <= MAX_SNAP * 2;
 };
 
 function readLegRow(row, cols) {

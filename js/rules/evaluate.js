@@ -98,7 +98,7 @@ export function evaluate({ rulesData, plan = null, exec = null, answers = {} }) 
         'אין חוק נתמך שקובע מה מגיע במקרה הזה. דורש בדיקה ידנית.' });
   }
 
-  const ctx = makeContext({ out, timeline, domicile, codes, answers, plan, exec, supported, matches, planPairings,
+  const ctx = makeContext({ out, timeline, domicile, codes, holidays: rulesData.holidays ?? {}, answers, plan, exec, supported, matches, planPairings,
     period, fleet,
     // בלי דוח ביצוע, הסבבים המתוכננים משמשים לחישוב הקרדיט והרי"ג הצפויים.
     execPairings: exec ? execPairings : planPairings });
@@ -127,7 +127,7 @@ export function evaluate({ rulesData, plan = null, exec = null, answers = {} }) 
 
 // ---------- ctx: מה שהלוגיקות רואות ----------
 
-function makeContext({ out, timeline, domicile, codes, answers, plan, exec, supported, matches, planPairings, period, fleet, execPairings }) {
+function makeContext({ out, timeline, domicile, codes, holidays, answers, plan, exec, supported, matches, planPairings, period, fleet, execPairings }) {
   const absenceBy = new Map(); // date → Set(ruleId)
   const pairingTags = new Map(); // pairing.id → Set(tag)
   const askedIds = new Set();
@@ -153,6 +153,8 @@ function makeContext({ out, timeline, domicile, codes, answers, plan, exec, supp
     period,
     fleet,
     monthFirst: timeline[0].date,
+    /** ימי חג לפי שנה (`holidays` ב-rules.json). */
+    holidays: (year) => holidays[String(year)] ?? null,
     stationOffsets: plan?.stationOffsets ?? null,
     planSummary: plan?.summary ?? null,
     hasExec: !!exec,

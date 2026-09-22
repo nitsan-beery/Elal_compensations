@@ -1027,6 +1027,10 @@ export const LOGIC_ORDER = [
   'free_days_waived',
   'consecutive_saturdays',
   'consecutive_night_rounds',
+  'sim_night_session',
+  'sim_extension',
+  'sim_friday_holiday_eve',
+  'covered_by',
   // אחרון מבין חוקי הפיצוי: מה שנשאר בדוח בלי הסבר.
   'unexplained_report_amount',
   'absence_month_cap',

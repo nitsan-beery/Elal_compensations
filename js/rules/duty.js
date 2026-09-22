@@ -864,6 +864,118 @@ function stay_extension(ctx, params, rule) {
   }
 }
 
+
+// ---------- סימולטור בישראל (2024 ס' 15–18; 2026 ס' 18) ----------
+
+/**
+ * אימוני סימולטור בישראל מדוח הביצוע: שורות SIM עם STD/STA בשעון מקומי. סימולטור בחו"ל (SIM_BER) אינו בפרק "סימולטור בישראל" ואינו נבדק.
+ */
+function israelSims(ctx, params) {
+  const stations = params.stations ?? [ctx.domicile];
+  return ctx.timeline.flatMap((day) => (day.exec?.sims ?? [])
+    .filter((s) => stations.includes(s.org) && s.std != null)
+    .map((s) => ({ ...s, date: day.date })));
+}
+
+const simLabel = (s) => `סימולטור ב-${ddmm(s.date)} ${minToHhmm(s.std)}–${s.sta != null ? minToHhmm(s.sta) : '?'}`;
+
+/** ימי החג של השנה, ובדיקה ידנית אחת לכל שנה שחסרה ב-rules.json. */
+function holidaysOf(ctx, year, rule, what) {
+  const list = ctx.holidays(year);
+  if (!list) ctx.review(`${what}: אין ב-rules.json את תאריכי החגים לשנת ${year}, ולכן נבדק רק לפי ימי השבוע. נדרש עדכון של קובץ החוקים.`, rule);
+  return list ?? [];
+}
+
+const weekday = (iso) => new Date(Date.parse(iso)).getUTCDay();
+
+/**
+ * אימון שתחילתו בין `night_from` ל-`night_to`, או ביום שבת או חג (2024 ס' 18). השעות בשורת ה-SIM אינן
+ * מדויקות: האימון מתחיל `start_after_std_minutes` אחרי STD (החלטת בעל המוצר, 22/09/2026). בשבת ובחג
+ * אין אימונים, ולכן כל אימון ביום כזה הוא אחרי צאת השבת או החג. חלון הלילה של 2026 (ס' 18.1.7)
+ * ומוצ"ש של 2026 (ס' 18.1.8) נכללים כאן: אין כפל פיצוי. ההסכמה מונחת.
+ */
+function sim_night_session(ctx, params, rule) {
+  if (!ctx.hasExec) return;
+  const key = keyFor(params.report_column);
+  const from = parseClock(params.night_from);
+  const to = parseClock(params.night_to);
+  const sims = israelSims(ctx, params);
+  const years = [...new Set(sims.map((s) => s.date.slice(0, 4)))];
+  const holidays = new Set(years.flatMap((y) => holidaysOf(ctx, y, rule, 'סימולטור במוצאי חג')));
+  for (const s of sims) {
+    const start = mod(s.std + (params.start_after_std_minutes ?? 0), 1440);
+    const night = from > to ? (start >= from || start <= to) : (start >= from && start <= to);
+    const saturday = weekday(s.date) === 6;
+    const holiday = holidays.has(s.date);
+    if (!night && !saturday && !holiday) continue;
+    const why = [night && `תחילתו ב-${minToHhmm(start)}, בין ${params.night_from} ל-${params.night_to}`, saturday && 'במוצאי שבת', holiday && 'במוצאי חג']
+      .filter(Boolean).join(', ');
+    ctx.expect(s.date, key, H(params.hours), rule, `${simLabel(s)}: ${why}`);
+  }
+}
+
+/**
+ * אימון ביום שישי או בערב חג (2018 ס' 182.5.5), לפי התאריך. ערב חג = היום שלפני יום חג שאינו
+ * המשך של חג (ערב ראש השנה, ולא היום הראשון שלו).
+ */
+function sim_friday_holiday_eve(ctx, params, rule) {
+  if (!ctx.hasExec) return;
+  const key = keyFor(params.report_column);
+  const sims = israelSims(ctx, params);
+  const years = [...new Set(sims.flatMap((s) => [s.date.slice(0, 4), addDays(s.date, 1).slice(0, 4)]))];
+  const holidays = new Set(years.flatMap((y) => holidaysOf(ctx, y, rule, 'סימולטור בערב חג')));
+  for (const s of sims) {
+    const next = addDays(s.date, 1);
+    const eve = holidays.has(next) && !holidays.has(s.date);
+    const friday = weekday(s.date) === 5;
+    if (!eve && !friday) continue;
+    ctx.expect(s.date, key, H(params.hours), rule, `${simLabel(s)}: ${[friday && 'ביום שישי', eve && 'בערב חג'].filter(Boolean).join(', ')}`);
+  }
+}
+
+/**
+ * הארכת אימון (2024 ס' 17): אימון ארוך מ-`max_hours` (4 שעות ועוד רבע שעה), לפי STA − STD.
+ * הפיצוי רק כשההארכה לבקשת החברה. מניחים שכן, ושואלים רק כשהדוח לא מזכה.
+ */
+function sim_extension(ctx, params, rule) {
+  if (!ctx.hasExec) return;
+  const key = keyFor(params.report_column);
+  const max = H(params.max_hours);
+  for (const s of israelSims(ctx, params)) {
+    if (s.sta == null) continue;
+    const dur = mod(s.sta - s.std, 1440);
+    if (dur <= max) continue;
+    const what = `${simLabel(s)} נמשך ${minToHhmm(dur)}, יותר מ-${minToHhmm(max)}`;
+    const paid = ctx.reportedOnDate(s.date, params.report_column) - ctx.expectedOnDate(s.date, key) >= H(params.hours);
+    if (!paid) {
+      const id = `sim_extension:${s.date}:${s.std}`;
+      const a = ctx.answer(id);
+      if (!a) {
+        ctx.ask({
+          id,
+          date: s.date,
+          title: `${what}. האם ההארכה הייתה לבקשת החברה?`,
+          body: 'על הארכת אימון בסימולטור לבקשת החברה מגיע פיצוי, והדוח לא מזכה אותו.',
+          options: [
+            { value: 'company', label: 'לבקשת החברה', hint: minToHhmm(H(params.hours)) },
+            { value: 'mine', label: 'לא לבקשת החברה', hint: 'אין פיצוי' },
+          ],
+          ruleId: rule.id,
+        });
+        continue;
+      }
+      if (a.value !== 'company') {
+        ctx.note(s.date, `${what}. לפי תשובתך ההארכה לא הייתה לבקשת החברה: אין פיצוי.`, rule);
+        continue;
+      }
+    }
+    ctx.expect(s.date, key, H(params.hours), rule, what);
+  }
+}
+
+/** חוק שהפיצוי שלו נבדק בחוק אחר (`rule`), כדי שלא יהיה כפל פיצוי. */
+function covered_by() {}
+
 /**
  * קיבוץ סבבי הביצוע ל-FDP: סבבים עוקבים שאין ביניהם מנוחה חוקית, לפי STD/STA. סבב חתוך,
  * או סבב שחסרים לו זמנים, עומד לבד.
@@ -893,6 +1005,10 @@ export const DUTY_LOGIC = {
   consecutive_saturdays,
   consecutive_night_rounds,
   stay_extension,
+  sim_night_session,
+  sim_extension,
+  sim_friday_holiday_eve,
+  covered_by,
 };
 
 export const DUTY_PARAMS = {
@@ -907,4 +1023,8 @@ export const DUTY_PARAMS = {
   consecutive_night_rounds: ['hours', 'report_column', 'more_than', 'window_from', 'window_to', 'legal_rest_hours', 'report_minutes_before_std'],
   white_flight: ['hours', 'report_column', 'report_minutes_before_std', 'report_after', 'report_until', 'min_block_hours'],
   stay_extension: ['over_hours', 'capped_days', 'hours', 'report_column'],
+  sim_night_session: ['hours', 'report_column', 'stations', 'night_from', 'night_to', 'start_after_std_minutes'],
+  sim_friday_holiday_eve: ['hours', 'report_column', 'stations'],
+  sim_extension: ['hours', 'report_column', 'stations', 'max_hours'],
+  covered_by: ['rule'],
 };
