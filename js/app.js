@@ -18,6 +18,7 @@ const KIND_LABEL = { plan: 'קובץ תכנון', exec: 'קובץ ביצוע' };
 const MODE_LABEL = { full: 'תכנון וביצוע', plan: 'תכנון בלבד', exec: 'ביצוע בלבד' };
 const CATEGORY_LABEL = { plan: 'תכנון', exec: 'ביצוע', train: 'הדרכה' };
 const KEY_LABEL = { flight: 'קרדיט טיסה', absence: 'זיכוי היעדרות', credit: 'קרדיט', rig: 'Rig', com: 'COM', sc: 'S/C' };
+const CREDIT_KEYS = new Set(['flight', 'absence', 'credit']);
 // תוויות לתשובות שכבר ניתנו. ערך שאינו כאן מוצג כמות שהוא.
 const ANSWER_LABEL = {
   special_call: 'קריאה מיוחדת', voluntary_swap: 'החלפה מרצוני', replaced: 'החברה החליפה את הטיסה',
@@ -359,19 +360,22 @@ function renderExpectations(res) {
   const rows = [...res.expectations].sort((a, b) => a.date.localeCompare(b.date));
   const total = (key) => rows.filter((e) => e.key === key).reduce((s, e) => s + e.min, 0);
   const keys = [...new Set(rows.map((e) => e.key))];
-  const open = res.mode === 'plan' ? 'open' : '';
+  const planOnly = res.mode === 'plan';
+  const open = planOnly ? 'open' : '';
+  // בתכנון לבד הקרדיט של כל טיסה הוא רק רעש: הסך הכול בשורה העליונה, ובטבלה רק הפיצויים.
+  const shown = planOnly ? rows.filter((e) => !CREDIT_KEYS.has(e.key)) : rows;
   return `<details class="card" ${open}>
     <summary><h2 style="display:inline">${res.mode === 'plan' ? 'קרדיט ופיצויים צפויים' : 'פירוט הצפוי לפי חוק'}</h2></summary>
     <p class="small">${keys.map((k) => `${esc(KEY_LABEL[k] ?? k)}: <span class="num">${minToHhmm(total(k))}</span>`).join(' · ')}</p>
-    <div class="table-wrap"><table>
+    ${!shown.length ? '<p class="small muted">אין פיצויים צפויים לפי התכנון.</p>' : `<div class="table-wrap"><table>
       <thead><tr><th>תאריך</th><th>חוק</th><th>סוג</th><th>צפוי</th><th>הסבר</th></tr></thead>
-      <tbody>${rows.map((e) => `<tr>
+      <tbody>${shown.map((e) => `<tr>
         <td class="num">${e.dates.length > 1 ? `${ddmm(e.dates[0])}–${ddmm(e.dates.at(-1))}` : ddmm(e.date)}</td>
         <td>${esc(e.ruleTitle)}${e.pairing ? `<div class="small muted">${esc(e.pairing)}</div>` : ''}</td>
         <td>${esc(KEY_LABEL[e.key] ?? e.key)}</td>
         <td class="num">${minToHhmm(e.min)}</td>
         <td class="small">${esc(e.note ?? '')}</td></tr>`).join('')}</tbody>
-    </table></div>
+    </table></div>`}
   </details>`;
 }
 
