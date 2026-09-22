@@ -41,7 +41,7 @@ const ANSWER_LABEL = {
   special_call: 'קריאה מיוחדת', voluntary_swap: 'החלפה מרצוני', replaced: 'החלפה ביוזמת החברה (כולל זכיה במכרז)',
   wet_lease: 'מטוס חכור', trainee: 'הורדה בגלל חניך', swap_777: 'הטיסה עברה ל-777 (לא כשיר MFF)', cancelled: 'בוטלה ללא פיצוי', other: 'סיבה אחרת',
   yes: 'כן, הייתי מוצב', no: 'לא הייתי מוצב',
-  standby_bid: 'סיום כוננות בגלל זכייה במכרז', standby_activated: 'הפעלת הכוננות',
+  standby_bid: 'סיום כוננות בגלל זכייה במכרז', standby_activated: 'הפעלת הכוננות', regular_standby: 'מצב הכן רגיל',
 };
 
 const state = {
@@ -483,7 +483,7 @@ function renderNotes(res) {
   </details>`;
 }
 
-const QUESTION_KIND = { cancelled: 'סבב שלא בוצע', unplanned: 'פעילות לא מתוכננת', replaced: 'סבב שהוחלף', assigned: 'מוצב לפעילות', standby_bid: 'טיסה בסוף כוננות' };
+const QUESTION_KIND = { cancelled: 'סבב שלא בוצע', unplanned: 'פעילות לא מתוכננת', replaced: 'סבב שהוחלף', assigned: 'מוצב לפעילות', standby_bid: 'טיסה בסוף כוננות', standby_code: 'קוד כוננות' };
 
 function describeQuestionId(id) {
   const [kind, ...rest] = id.split(':');

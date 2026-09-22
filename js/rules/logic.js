@@ -156,6 +156,13 @@ function expectMinSlip(ctx, group, min, params, rule) {
  */
 function absence_day_credit(ctx, params, rule) {
   const credit = H(params.credit_hours);
+  if (params.confirm_code_prefixes?.length) {
+    askUnconfirmedCodes(ctx, params, rule);
+    const confirmed = confirmedCodes(ctx, params);
+    params = { ...params, plan_codes: [...(params.plan_codes ?? []), ...confirmed],
+      report_codes: [...(params.report_codes ?? []), ...confirmed.map((c) => c.slice(0, 5))] };
+    noteUpgrade(ctx, params, rule, credit);
+  }
   const onFlightDay = new Set();
   for (const day of ctx.timeline) {
     if (!matchesCode(day, params, ctx)) continue;
@@ -207,6 +214,83 @@ function absence_day_credit(ctx, params, rule) {
     }
     if (params.tab_hours != null && !away) ctx.expectTab(day.date, H(params.tab_hours), rule);
     ctx.markAbsence(day.date, rule.id);
+  }
+}
+
+/**
+ * `confirm_code_prefixes`: קוד שמתחיל בקידומת (SBY), ואף חוק זיכוי יומי אינו מונה אותו במפורש
+ * (SBY_S הוא הכן מיידי), עוד לא נראה בקבצים. לא מנחשים: שואלים פעם אחת לכל קוד אם הוא
+ * `confirm_label` (מצב הכן רגיל, 3:45). קוד בדוח (5 תווים) שהוא תחילת קוד בתכנון נשאל עליו.
+ */
+function unconfirmedCandidates(ctx, params) {
+  const listed = new Set(ctx.rulesWithLogic('absence_day_credit')
+    .flatMap((r) => [...(r.logic.params?.plan_codes ?? []), ...(r.logic.params?.report_codes ?? [])]));
+  const byCode = new Map();
+  const add = (code, date) => {
+    if (listed.has(code) || !params.confirm_code_prefixes.some((x) => code.startsWith(x))) return;
+    if (!byCode.has(code)) byCode.set(code, { code, dates: [], credits: new Set() });
+    const c = byCode.get(code);
+    if (!c.dates.includes(date)) c.dates.push(date);
+    return c;
+  };
+  for (const day of ctx.timeline) for (const code of day.plan?.codes ?? []) add(code, day.date);
+  const planCodes = [...byCode.keys()];
+  for (const day of ctx.timeline) {
+    for (const code of ctx.execCodes(day)) {
+      const c = add(planCodes.find((p) => p.slice(0, 5) === code) ?? code, day.date);
+      const reported = day.exec?.values?.Credit?.min;
+      if (c && reported) c.credits.add(reported);
+    }
+  }
+  return [...byCode.values()];
+}
+
+const confirmId = (code) => `standby_code:${code}`;
+
+function confirmedCodes(ctx, params) {
+  return unconfirmedCandidates(ctx, params)
+    .filter((c) => ctx.answer(confirmId(c.code))?.value === params.confirm_answer).map((c) => c.code);
+}
+
+function askUnconfirmedCodes(ctx, params, rule) {
+  const value = minToHhmm(H(params.credit_hours));
+  for (const c of unconfirmedCandidates(ctx, params)) {
+    const answer = ctx.answer(confirmId(c.code));
+    const days = c.dates.map(dayOf).join(', ');
+    if (!answer) {
+      const credits = [...c.credits].map(minToHhmm).join(', ');
+      ctx.ask({
+        id: confirmId(c.code),
+        date: c.dates[0],
+        title: `קוד ${c.code}: האם זה ${params.confirm_label}?`,
+        body: `הקוד מופיע ב-${days}${credits ? `, ובדוח Credit ${credits}` : ''}. הוא עוד לא נראה בקבצים, ` +
+          `והאפליקציה לא מנחשת את הזיכוי שלו. ${params.confirm_label} מזכה ב-${value} ליום.`,
+        options: [
+          { value: params.confirm_answer, label: `כן, ${params.confirm_label}`, hint: `${value} ליום` },
+          { value: 'other', label: 'לא, משהו אחר', needsText: true },
+        ],
+        ruleId: rule.id,
+      });
+    } else if (answer.value === 'other') {
+      ctx.review(`קוד ${c.code} (${days}): ${answer.text || 'לא ' + params.confirm_label}. דורש בדיקה ידנית.`, rule);
+    }
+  }
+}
+
+/**
+ * יום שבתכנון קוד החוק ובביצוע קוד של חוק זיכוי יומי אחר (הכן רגיל שעבר להכן מיידי): הזיכוי
+ * לפי הביצוע, והחוק של קוד הביצוע כבר צופה אותו.
+ */
+function noteUpgrade(ctx, params, rule, credit) {
+  if (!ctx.hasExec) return;
+  for (const day of ctx.timeline) {
+    if (!(day.plan?.codes ?? []).some((c) => codeIn(c, params.plan_codes, params.plan_code_prefixes))) continue;
+    if (matchesCode(day, params, ctx)) continue;
+    const other = ctx.execCodes(day).map((c) => ({ c, r: ctx.rulesWithLogic('absence_day_credit').find((r) => r !== rule &&
+      codeIn(c, r.logic.params?.report_codes, r.logic.params?.report_code_prefixes)) })).find((x) => x.r);
+    if (!other) continue;
+    ctx.note(day.date, `בתכנון ${rule.title} (${minToHhmm(credit)}), ובביצוע ${other.c}: ${other.r.title} ` +
+      `(${minToHhmm(H(other.r.logic.params.credit_hours))}). הזיכוי לפי הביצוע.`, rule);
   }
 }
 
@@ -830,7 +914,9 @@ function standbyDayRule(ctx, planCode) {
   if (!planCode) return null;
   const rule = ctx.rulesWithLogic('absence_day_credit').find((r) => {
     const p = r.logic.params ?? {};
-    return codeIn(planCode, p.plan_codes, p.plan_code_prefixes) || codeIn(planCode.slice(0, 5), p.report_codes, p.report_code_prefixes);
+    const confirmed = p.confirm_code_prefixes?.length ? confirmedCodes(ctx, p) : [];
+    return codeIn(planCode, p.plan_codes, p.plan_code_prefixes) || codeIn(planCode.slice(0, 5), p.report_codes, p.report_code_prefixes) ||
+      confirmed.includes(planCode);
   });
   return rule ? { rule, min: H(rule.logic.params.credit_hours) } : null;
 }
@@ -874,7 +960,7 @@ export const LOGIC = {
 export const KNOWN_PARAMS = {
   credit_from_scheduled: [],
   min_slip_credit: ['min_credit_hours', 'per_fdp', 'legal_rest_hours', 'report_minutes_before_std'],
-  absence_day_credit: ['plan_codes', 'report_codes', 'plan_code_prefixes', 'report_code_prefixes', 'report_flag_column', 'credit_hours', 'tab_hours', 'requires_assigned_activity', 'flight_day_takes_higher', 'away_flag_on_pairing_start'],
+  absence_day_credit: ['plan_codes', 'report_codes', 'plan_code_prefixes', 'report_code_prefixes', 'report_flag_column', 'credit_hours', 'tab_hours', 'requires_assigned_activity', 'flight_day_takes_higher', 'away_flag_on_pairing_start', 'confirm_code_prefixes', 'confirm_label', 'confirm_answer'],
   vacation_credit_balance: ['per_day_hours', 'days_full_rate', 'monthly_max_hours', 'yearly_cap_days', 'taper_table', 'taper_table_complete', 'taper_monthly_totals'],
   absence_month_cap: ['cap_hours'],
   late_landing_home: ['grace_minutes', 'step_minutes', 'hours_per_step'],
