@@ -355,6 +355,7 @@ function special_call(ctx, params, rule) {
         body: `לא נרשם ${column} בדוח, ולכן לא ניתן לדעת אם מגיעה קריאה מיוחדת. מה קרה?`,
         options: [
           { value: 'special_call', label: 'קריאה מיוחדת' },
+          { value: 'replaced', label: 'החברה החליפה בה סבב שתוכנן בימים אחרים', hint: 'הגבוה מבין השתיים, וההפרש ב-Rig', needsLink: true },
           { value: 'voluntary_swap', label: 'החלפה מרצוני', needsLink: true },
           { value: 'other', label: 'סיבה אחרת', needsText: true },
         ],
@@ -436,7 +437,9 @@ function higher_of_planned_performed(ctx, params, rule) {
     if (params.excluded_when_special_call && ctx.pairingHandledBy(match.exec, 'special_call')) continue;
     if (params.excluded_when_voluntary_swap && answer?.value === 'voluntary_swap') continue;
 
-    const performed = match.exec ? sumLegs(match.exec) : 0;
+    // סבב שלא בוצע והוחלף בפעילות בימים אחרים: המבוצע הוא הפעילות שקושרה אליו.
+    const replacement = match.exec ?? (answer?.link ? ctx.execPairingById(answer.link) : null);
+    const performed = replacement ? sumLegs(replacement) : 0;
     const planned = ctx.plannedCredit(match.plan);
     if (planned == null || performed == null) continue;
     if (planned <= performed) continue;
@@ -468,7 +471,7 @@ function higher_of_planned_performed(ctx, params, rule) {
       continue;
     }
 
-    const target = paidOn ?? match.exec ?? match.plan;
+    const target = paidOn ?? replacement ?? match.plan;
     ctx.expectPairing(target, column, planned - performed, rule,
       `המתוכנן (${describePairing(match.plan)}) גבוה מהמבוצע. ההפרש לפי "הגבוה מבין השתיים".`);
   }
@@ -529,7 +532,7 @@ function cancelled_no_compensation(ctx, params, rule) {
         title: `סבב מתוכנן שלא בוצע: ${describePairing(match.plan)}`,
         body: 'הסיבה אינה מופיעה בקבצים, והיא קובעת מה מגיע. מה קרה?',
         options: [
-          { value: 'replaced', label: 'הוחלפה בטיסה אחרת', hint: 'הגבוה מבין השתיים, וההפרש ב-Rig' },
+          { value: 'replaced', label: 'הוחלפה בטיסה אחרת', hint: 'הגבוה מבין השתיים, וההפרש ב-Rig', needsLink: true },
           { value: 'wet_lease', label: 'הועברה למטוס חכור ולא נמצאה חלופה', hint: 'השעות שהפסיד, ב-Rig' },
           { value: 'cancelled', label: 'בוטלה ללא פיצוי', hint: 'לא מגיע כלום' },
           { value: 'voluntary_swap', label: 'החלפה מרצוני', hint: 'רק הקרדיט של מה שבוצע', needsLink: true },

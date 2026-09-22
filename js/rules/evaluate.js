@@ -22,6 +22,8 @@ const KEY_COLUMNS = {
   sc: ['S/C'],
 };
 const COMPARED_COLUMNS = ['Credit', 'FLT+DH', 'Rig', 'COM', 'S/C'];
+/** תשובות שמקשרות סבב שלא בוצע לפעילות לא מתוכננת בימים אחרים. */
+const LINKING_ANSWERS = new Set(['voluntary_swap', 'replaced']);
 
 /**
  * @param {object} input
@@ -59,7 +61,7 @@ export function evaluate({ rulesData, plan = null, exec = null, answers = {} }) 
   const matches = mode === 'full'
     ? matchPairings(planPairings, execPairings)
     : mode === 'exec' ? execPairings.map((e) => ({ plan: null, exec: e, how: 'noplan' })) : [];
-  explainByActivity(matches, timeline, codes);
+  explainByActivity(matches, timeline, codes, sickCodeTest(supported));
 
   const out = {
     period,
@@ -116,6 +118,7 @@ export function evaluate({ rulesData, plan = null, exec = null, answers = {} }) 
   }
 
   attachLinkCandidates(out.questions, matches, ctx);
+  showSwaps(out, answers);
   if (exec) {
     out.comparison = compare({ out, timeline, execPairings, domicile, codes });
     out.totals = compareTotals(out, exec);
@@ -133,10 +136,11 @@ function makeContext({ out, timeline, domicile, codes, answers, plan, exec, supp
   const noteKeys = new Set();
   const reviewKeys = new Set();
   const ruleRef = (rule) => ({ ruleId: rule.id, ruleTitle: rule.title });
+  // החלפה (מרצון או ע"י החברה) שקושרה לסבב בצד השני. link הוא הסבב שבצד השני.
   const linkedSwap = (prefix, pairingId) => {
     const hit = Object.entries(answers).find(([id, a]) =>
-      id.startsWith(prefix) && a.value === 'voluntary_swap' && a.link === pairingId);
-    return hit ? { value: 'voluntary_swap', via: hit[0] } : null;
+      id.startsWith(prefix) && LINKING_ANSWERS.has(a.value) && a.link === pairingId);
+    return hit ? { value: hit[1].value, via: hit[0], link: hit[0].slice(prefix.length) } : null;
   };
 
   const planRanges = plan ? buildPairings(timeline, domicile, (d) => d.plan?.legs) : [];
@@ -148,6 +152,7 @@ function makeContext({ out, timeline, domicile, codes, answers, plan, exec, supp
     execPairings,
     planPairings,
     matches,
+    execPairingById: (id) => execPairings.find((p) => p.id === id) ?? null,
     domicile,
     period,
     fleet,
@@ -239,7 +244,7 @@ function makeContext({ out, timeline, domicile, codes, answers, plan, exec, supp
     },
 
     /**
-     * התשובה שרלוונטית להתאמה. החלפה מרצון שקושרה לסבב בצד השני סוגרת גם את
+     * התשובה שרלוונטית להתאמה. החלפה (מרצון או ע"י החברה) שקושרה לסבב בצד השני סוגרת גם את
      * השאלה עליו, בשני הכיוונים: ביצוע לא מתוכנן ↔ תכנון שלא בוצע.
      */
     answerFor(match) {
@@ -355,7 +360,7 @@ function fleetOf(plan) {
  * מהקובץ, ולכן לא שואלים "מה קרה". פעילות קרקע במקום סבב עוברת לבדיקה ידנית,
  * כי אין חוק נתמך שקובע מה מגיע עליה.
  */
-function explainByActivity(matches, timeline, codes) {
+function explainByActivity(matches, timeline, codes, isSick) {
   const ground = new Set(codes.ground_activity ?? []);
   const reportLeave = new Set(Object.entries(codes.plan_to_report ?? {})
     .filter(([full]) => (codes.leave ?? []).includes(full)).map(([, short]) => short));
@@ -374,7 +379,17 @@ function explainByActivity(matches, timeline, codes) {
     m.how = kinds.has('ground') ? 'replaced_by_ground' : 'replaced_by_leave';
     m.replacedBy = found;
     m.byLeave = kinds.has('leave'); // היעדרות של אצ"א בימי הסבב, גם כשאחריה פעילות קרקע
+    m.bySick = found.every((f) => isSick(f.code));
   }
+}
+
+/** קודי מחלה (כולל מחלת בן משפחה): הקודים של חוקי זיכוי היום שמסמנים את עמודת SICK או SCKFM בדוח. */
+function sickCodeTest(supported) {
+  const sick = supported.filter((r) => r.logic.id === 'absence_day_credit' &&
+    [r.logic.params?.report_flag_column ?? []].flat().some((c) => c === 'SICK' || c === 'SCKFM'));
+  const exact = new Set(sick.flatMap((r) => [...(r.logic.params.plan_codes ?? []), ...(r.logic.params.report_codes ?? [])]));
+  const prefixes = sick.flatMap((r) => [...(r.logic.params.plan_code_prefixes ?? []), ...(r.logic.params.report_code_prefixes ?? [])]);
+  return (c) => exact.has(c) || prefixes.some((p) => c.startsWith(p));
 }
 
 function describeMatch(m) {
@@ -382,14 +397,16 @@ function describeMatch(m) {
     exact: 'בוצע כמתוכנן',
     dates: 'הוחלף בסבב אחר באותם ימים',
     cancelled: 'סבב מתוכנן שלא בוצע',
-    unplanned: 'פעילות ביום שלא תוכננה בו פעילות',
+    unplanned: 'פעילות ביום לא מתוכנן',
     noplan: 'בוצע (אין קובץ תכנון להשוואה)',
     replaced_by_leave: 'סבב מתוכנן שהוחלף בהיעדרות',
     replaced_by_ground: 'סבב מתוכנן שהוחלף בפעילות קרקע',
   };
   return {
     how: m.how,
-    label: labels[m.how] ?? m.how,
+    label: m.bySick
+      ? `סבב מתוכנן שהוחלף ב${new Set(m.replacedBy.map((r) => r.date)).size > 1 ? 'ימי' : 'יום'} מחלה`
+      : labels[m.how] ?? m.how,
     date: (m.plan ?? m.exec).from,
     planId: m.plan?.id ?? null,
     execId: m.exec?.id ?? null,
@@ -397,6 +414,30 @@ function describeMatch(m) {
     exec: m.exec ? describePairing(m.exec) : null,
     replacedBy: m.replacedBy?.map((r) => `${r.code} ${r.date.slice(8, 10)}/${r.date.slice(5, 7)}`) ?? null,
   };
+}
+
+/**
+ * פעילות לא מתוכננת שהמשתמש ענה שהיא החלפה (מרצון או ע"י החברה): בשינויים היא מוצגת "במקום" הסבב
+ * שתוכנן בימים אחרים. כשהיא קושרה לסבב שלא בוצע, שתי השורות מתאחדות לשורה אחת.
+ * בלי קישור (טיסה בחודש אחר) – "בחודש אחר" בצד התכנון.
+ */
+function showSwaps(out, answers) {
+  const linkOf = new Map(); // execId → planId | null
+  for (const [id, a] of Object.entries(answers)) {
+    if (!LINKING_ANSWERS.has(a?.value)) continue;
+    if (id.startsWith('unplanned:') && !linkOf.get(id.slice(10))) linkOf.set(id.slice(10), a.link ?? null);
+    if (id.startsWith('cancelled:') && a.link) linkOf.set(a.link, id.slice(10));
+  }
+  const drop = new Set();
+  for (const c of out.changes) {
+    if (c.how !== 'unplanned' || !linkOf.has(c.execId)) continue;
+    const planned = out.changes.find((p) => p.how === 'cancelled' && p.planId === linkOf.get(c.execId));
+    c.how = 'swap';
+    c.label = 'במקום סבב שתוכנן בימים אחרים';
+    c.plan = planned?.plan ?? 'בחודש אחר';
+    if (planned) { c.planId = planned.planId; drop.add(planned); }
+  }
+  out.changes = out.changes.filter((c) => !drop.has(c));
 }
 
 /**
