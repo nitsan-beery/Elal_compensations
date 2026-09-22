@@ -162,9 +162,9 @@ function makeContext({ out, timeline, domicile, codes, answers, plan, exec, supp
         (activityCodes.has(c) || activityCodes.has(expandCode(c, codes))));
     },
 
-    expect(date, key, min, rule, note) {
+    expect(date, key, min, rule, note, extra) {
       if (!min) return;
-      out.expectations.push({ date, dates: [date], key, min, note, ...ruleRef(rule) });
+      out.expectations.push({ date, dates: [date], key, min, note, ...ruleRef(rule), ...extra });
     },
     expectPairing(pairing, key, min, rule, note) {
       if (!min) return;

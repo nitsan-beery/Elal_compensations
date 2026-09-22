@@ -195,7 +195,7 @@ function absence_day_credit(ctx, params, rule) {
         continue;
       }
     }
-    ctx.expect(day.date, 'absence', credit, rule, rule.title);
+    ctx.expect(day.date, 'absence', credit, rule, rule.title, { code: matchedCode(day, params, ctx) });
     // יום בתוך סבב, בלי טיסה משלו (SIM_BER ב-18/11/2025, באמצע סבב BER): ה-TAB הוא של השהייה בחו"ל,
     // וסימון העמודה נרשם ביום תחילת הסבב.
     const away = !day.exec?.legs?.length && !day.plan?.legs?.length
@@ -213,9 +213,12 @@ function absence_day_credit(ctx, params, rule) {
  * כשיש דוח ביצוע, רק הדוח קובע: פעילות קרקע שתוכננה ליום אחד יכולה לזוז ליום אחר
  * (HOME_RGT תוכנן ל-07/01/2026 ובוצע ב-05/01). קוד התכנון משמש רק בלי דוח.
  */
-function matchesCode(day, params, ctx) {
-  if (ctx.hasExec) return ctx.execCodes(day).some((c) => codeIn(c, params.report_codes, params.report_code_prefixes));
-  return (day.plan?.codes ?? []).some((c) => codeIn(c, params.plan_codes, params.plan_code_prefixes));
+const matchesCode = (day, params, ctx) => matchedCode(day, params, ctx) != null;
+
+/** הקוד שבגללו היום מזוכה, כדי שהסיכום יוכל למיין את הימים (HOME_RGT לעומת שאר אימון הקרקע). */
+function matchedCode(day, params, ctx) {
+  if (ctx.hasExec) return ctx.execCodes(day).find((c) => codeIn(c, params.report_codes, params.report_code_prefixes)) ?? null;
+  return (day.plan?.codes ?? []).find((c) => codeIn(c, params.plan_codes, params.plan_code_prefixes)) ?? null;
 }
 
 const codeIn = (code, list = [], prefixes = []) => list.includes(code) || prefixes.some((p) => code.startsWith(p));

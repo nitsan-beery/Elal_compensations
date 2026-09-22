@@ -17,8 +17,19 @@ const monthName = (p) => `${MONTH_NAMES[p.month - 1]} ${p.year}`;
 const KIND_LABEL = { plan: 'קובץ תכנון', exec: 'קובץ ביצוע' };
 const MODE_LABEL = { full: 'תכנון וביצוע', plan: 'תכנון בלבד', exec: 'ביצוע בלבד' };
 const CATEGORY_LABEL = { plan: 'תכנון', exec: 'ביצוע', train: 'הדרכה' };
-const KEY_LABEL = { flight: 'קרדיט טיסה', absence: 'זיכוי היעדרות', credit: 'קרדיט', rig: 'Rig', com: 'COM', sc: 'S/C' };
+const KEY_LABEL = { flight: 'קרדיט טיסה', absence: 'קרדיט יום', credit: 'קרדיט', rig: 'Rig', com: 'COM', sc: 'S/C' };
 const CREDIT_KEYS = new Set(['flight', 'absence', 'credit']);
+const COM_KEYS = new Set(['com', 'sc']); // S/C נספר יחד עם COM בסיכום
+// ימים שזוכו על פעילות שאינה טיסה, לפי החוק שזיכה אותם (ובאימון קרקע – לפי הקוד).
+const isHomeRgt = (e) => e.code?.startsWith('HOME_');
+const DAY_KINDS = [
+  { one: 'יום מחלה אחד', many: 'ימי מחלה', test: (e) => e.ruleId === 'planned_sick_credit' || e.ruleId === 'sick_credit' },
+  { one: 'יום פעילות קרקעית אחד', many: 'ימי פעילות קרקעית', test: (e) => e.ruleId === 'ground_training_credit' && !isHomeRgt(e) },
+  { one: 'יום סימולטור אחד', many: 'ימי סימולטור', test: (e) => e.ruleId === 'sim_day_credit' },
+  { one: 'יום HOME RGT אחד', many: 'ימי HOME RGT', test: (e) => e.ruleId === 'ground_training_credit' && isHomeRgt(e) },
+  { one: 'יום חופשה אחד', many: 'ימי חופשה', test: (e) => e.ruleId === 'vacation_base_credit' },
+  { one: 'יום כוננות אחד', many: 'ימי כוננות', test: (e) => e.ruleId === 'short_call_standby_credit' },
+];
 // תוויות לתשובות שכבר ניתנו. ערך שאינו כאן מוצג כמות שהוא.
 const ANSWER_LABEL = {
   special_call: 'קריאה מיוחדת', voluntary_swap: 'החלפה מרצוני', replaced: 'החברה החליפה את הטיסה',
@@ -395,15 +406,24 @@ function renderComparison(res) {
 function renderExpectations(res) {
   if (!res.expectations.length) return '';
   const rows = [...res.expectations].sort((a, b) => a.date.localeCompare(b.date));
-  const total = (key) => rows.filter((e) => e.key === key).reduce((s, e) => s + e.min, 0);
-  const keys = [...new Set(rows.map((e) => e.key))];
+  const sumKeys = (keys) => rows.filter((e) => keys.has(e.key)).reduce((s, e) => s + e.min, 0);
+  // שורה שנייה: Rig, ואחריו כמה ימים זוכו על פעילות שאינה טיסה, לפי סוג.
+  const rig = sumKeys(new Set(['rig']));
+  const second = [
+    ...(rig ? [`Rig: <span class="num">${minToHhmm(rig)}</span>`] : []),
+    ...DAY_KINDS.map((k) => {
+      const n = new Set(rows.filter((e) => e.key === 'absence' && k.test(e)).map((e) => e.date)).size;
+      return n ? `${n === 1 ? k.one : `<span class="num">${n}</span> ${k.many}`}` : null;
+    }).filter(Boolean),
+  ];
   const planOnly = res.mode === 'plan';
   const open = planOnly ? 'open' : '';
   // בתכנון לבד הקרדיט של כל טיסה הוא רק רעש: הסך הכול בשורה העליונה, ובטבלה רק הפיצויים.
   const shown = planOnly ? rows.filter((e) => !CREDIT_KEYS.has(e.key)) : rows;
   return `<details class="card" ${open}>
     <summary><h2 style="display:inline">${res.mode === 'plan' ? 'קרדיט ופיצויים צפויים' : 'פירוט הצפוי לפי חוק'}</h2></summary>
-    <p class="small">${keys.map((k) => `${esc(KEY_LABEL[k] ?? k)}: <span class="num">${minToHhmm(total(k))}</span>`).join(' · ')}</p>
+    <p class="small">סה"כ קרדיט: <span class="num">${minToHhmm(sumKeys(CREDIT_KEYS))}</span> · סה"כ COM: <span class="num">${minToHhmm(sumKeys(COM_KEYS))}</span></p>
+    ${second.length ? `<p class="small">${second.join(' · ')}</p>` : ''}
     ${!shown.length ? '<p class="small muted">אין פיצויים צפויים לפי התכנון.</p>' : `<div class="table-wrap"><table>
       <thead><tr><th>תאריך</th><th>חוק</th><th>סוג</th><th>צפוי</th><th>הסבר</th></tr></thead>
       <tbody>${shown.map((e) => `<tr>
