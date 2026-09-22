@@ -405,8 +405,9 @@ function renderComparison(res) {
         const cls = gap || (c.pending ? 'pending' : '');
         const status = gap ? `<span class="status ${gap}">✗</span>` : c.pending ? '<span class="status pending">ממתין</span>' : '<span class="status ok">✓</span>';
         const why = [
-          ...(c.ok !== true ? c.items.filter((e) => e.ruleTitle || e.note)
-            .map((e) => `${esc(e.ruleTitle ?? '')}${e.note ? `: ${esc(e.note)}` : ''}${e.min != null && c.unit !== 'count' ? ` <span class="num">${minToHhmm(e.min)}</span>` : ''}`) : []),
+          // שורה תקינה מציגה רק הערה שמסבירה פיצוי בלי ודאות (hint).
+          ...c.items.filter((e) => (c.ok !== true || e.hint) && (e.ruleTitle || e.note))
+            .map((e) => `${esc(e.ruleTitle ?? '')}${e.note ? `: ${esc(e.note)}` : ''}${e.min != null && c.unit !== 'count' ? ` <span class="num">${minToHhmm(e.min)}</span>` : ''}`),
           ...c.marks.map((m) => `${esc(m.column)}: צפוי <span class="num">${hm(m.expected, m.unit)}</span>, בדוח <span class="num">${hm(m.reported, m.unit)}</span>`),
         ].join('<br>');
         return `<tr class="${cls}">

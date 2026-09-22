@@ -290,6 +290,13 @@ function makeContext({ out, timeline, domicile, codes, answers, plan, exec, supp
     expectedOn: (pairing, key, except = []) => out.expectations
       .filter((e) => e.pairingId === pairing.id && e.key === key && !except.includes(e.ruleId)).reduce((s, e) => s + e.min, 0),
 
+    /** מה שצפוי על ימי הסבב בדוח: ציפיות של הסבב, וציפיות לפי תאריך שנופלות בימים שלו. */
+    expectedAround(pairing, key) {
+      const dates = reportDates(pairing, timeline, domicile);
+      return out.expectations.filter((e) => e.key === key &&
+        (e.pairingId === pairing.id || (!e.pairingId && dates.includes(e.date)))).reduce((s, e) => s + e.min, 0);
+    },
+
     /** עמודה בדוח ביום אחד, ומה שכבר צפוי באותו יום. */
     reportedOnDate: (date, column) => dayOf(timeline, date)?.exec?.values?.[column]?.min ?? 0,
     expectedOnDate: (date, key) => out.expectations
