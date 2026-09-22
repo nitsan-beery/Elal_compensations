@@ -345,7 +345,7 @@ function renderTotals(res) {
       <div class="total free ${fd.free >= fd.due ? 'ok' : 'bad'}">
         <div class="label" style="direction:rtl">ימים פנויים בתכנון</div>
         <div class="val num">${fd.free}</div>
-        <div class="rep">מינימום <span class="num">${fd.due}</span> בהסכם${fd.free >= fd.due ? ' ✓' : ''}</div>
+        <div class="rep">מינימום <span class="num">${fd.due}</span>${fd.free >= fd.due ? ' ✓' : ''}</div>
       </div>` : ''}
     </div>
   </div>`;

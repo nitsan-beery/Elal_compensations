@@ -42,6 +42,8 @@ function credit_from_scheduled(ctx, params, rule) {
     };
     let error = null;
     for (const leg of pairing.legs) {
+      // בתכנון בלבד הקרדיט הוא ה-FT של כל יום, שכבר רשום ביום שלו. אין מה לפצל.
+      if (!ctx.hasExec) { add(leg.date, leg.skdDur); continue; }
       const split = splitAtMidnight(leg, ctx.domicile);
       if (leg.prevMonth) {
         // הרגל רשומה ביום 1 אבל יצאה ביום האחרון של החודש הקודם.
