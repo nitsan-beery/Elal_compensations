@@ -319,8 +319,9 @@ function renderTotals(res) {
       </div>`;
     }).join('')}${fd ? `
       <div class="total free ${fd.free >= fd.due ? 'ok' : 'bad'}">
-        <div class="val"><span class="num">${fd.free}</span> ימים פנויים בתכנון</div>
-        <div class="rep">מול מינימום <span class="num">${fd.due}</span> בהסכם</div>
+        <div class="label" style="direction:rtl">ימים פנויים בתכנון</div>
+        <div class="val num">${fd.free}</div>
+        <div class="rep">מינימום <span class="num">${fd.due}</span> בהסכם${fd.free >= fd.due ? ' ✓' : ''}</div>
       </div>` : ''}
     </div>
   </div>`;
