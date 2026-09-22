@@ -36,12 +36,13 @@ export function evaluate({ rulesData, plan = null, exec = null, answers = {} }) 
   const period = (exec ?? plan).period;
   const mode = plan && exec ? 'full' : plan ? 'plan' : 'exec';
   // חודש שנשמר בגרסה קודמת מחזיק אזהרת עמודות חסרות מהחילוץ; היא נבנית מחדש כאן.
-  const warnings = [...(plan?.warnings ?? []), ...(exec?.warnings ?? []).filter((w) => !w.startsWith(MISSING_COLUMNS_PREFIX))];
+  const warnings = [...(plan?.warnings ?? []), ...(exec?.warnings ?? []).filter((w) => !w.startsWith(MISSING_COLUMNS_PREFIX) && !w.startsWith(IPAD_WARNING_PREFIX))];
   const missingRequired = (exec?.missingColumns ?? []).filter((c) => !OPTIONAL_COLUMNS.includes(c));
   if (missingRequired.length) {
     warnings.push(`${MISSING_COLUMNS_PREFIX}: ${missingRequired.join(', ')}. ייתכן שהן נחתכו בהדפסה. חוקים שתלויים בהן לא ייבדקו.`);
   }
   checkSameMonthAndEmployee(plan, exec, warnings);
+  checkMissingData(plan, exec, warnings);
 
   const inEffect = rulesInEffect(rulesData, period.year, period.month);
   const { supported, unsupported } = partitionRules(inEffect);
@@ -589,6 +590,44 @@ function warnMissingColumns(out, exec) {
 }
 
 const MISSING_COLUMNS_PREFIX = 'עמודות חסרות בדוח';
+// אזהרה שהייתה נשמרת בחודשים שחולצו לפני שהוסרה (קובץ שהודפס מ-iPad).
+const IPAD_WARNING_PREFIX = 'הקובץ הודפס מ-iPad';
+
+/** שעות רגל שהחישובים צריכים, בדוח הביצוע (עמודה והשדה שנקרא ממנה). */
+const EXEC_LEG_FIELDS = { Flt: 'flight', ORG: 'org', DST: 'dst', STD: 'std', STA: 'sta', ATD: 'atd', ATA: 'ata', SkdDur: 'skdDur' };
+
+/**
+ * מידע שהחישובים צריכים וחסר בקבצים: יום שאין לו שורה בדוח (בכל הדוחות שנבדקו מופיעים כל ימי
+ * החודש), עמודת רגל שלא נמצאה, רגל בלי זמנים, שורת סיכום שלא נמצאה ורגל תכנון בלי שדות או שעות.
+ * עמודות הימים נבדקות לפי missingColumns, ו-Sum שלא נקרא – בחוק הימים ללא פעילות.
+ */
+function checkMissingData(plan, exec, warnings) {
+  const list = (items) => (items.length > 6 ? `${items.slice(0, 6).join(', ')} ועוד ${items.length - 6}` : items.join(', '));
+  const dm = (iso) => `${iso.slice(8, 10)}/${iso.slice(5, 7)}`;
+  if (exec) {
+    const absent = Object.values(exec.days ?? {}).filter((d) => d.absent).map((d) => dm(d.date));
+    if (absent.length) warnings.push(`בדוח הביצוע לא נמצאו שורות ${absent.length === 1 ? 'ליום' : 'לימים'} ${list(absent)}. ייתכן שעמוד חסר או נחתך. ${absent.length === 1 ? 'היום נבדק' : 'הימים נבדקים'} כאילו לא הייתה בהם פעילות.`);
+    if (exec.legColumns?.length) {
+      const cols = Object.keys(EXEC_LEG_FIELDS).filter((c) => !exec.legColumns.includes(c));
+      if (cols.length) warnings.push(`בטבלת הרגליים בדוח הביצוע ${cols.length === 1 ? 'חסרה העמודה' : 'חסרות העמודות'} ${cols.join(', ')}. ייתכן ש${cols.length === 1 ? 'היא נחתכה' : 'הן נחתכו'} בהדפסה. חוקים שתלויים בזמני הטיסות לא ייבדקו כראוי.`);
+    }
+    const incomplete = [];
+    for (const d of Object.values(exec.days ?? {})) {
+      for (const l of d.legs ?? []) {
+        const gaps = Object.entries(EXEC_LEG_FIELDS).filter(([c, f]) => l[f] == null && exec.legColumns?.includes(c)).map(([c]) => c);
+        if (gaps.length) incomplete.push(`${dm(d.date)} ${l.flight ?? ''} (${gaps.join(', ')})`.replace('  ', ' '));
+      }
+    }
+    if (incomplete.length) warnings.push(`בדוח הביצוע חסרים ערכים ברגליים: ${list(incomplete)}. החישובים של הרגליים האלה עלולים להיות שגויים.`);
+    if (!Object.keys(exec.totals ?? {}).length) warnings.push('לא נמצאה שורת הסיכום של טבלת הימים בדוח הביצוע, ולכן אין השוואה של הסיכומים.');
+  }
+  if (plan) {
+    const incomplete = Object.values(plan.days ?? {}).flatMap((d) => (d.legs ?? [])
+      .filter((l) => !l.dep || !l.arr || !/^[A-Z]{3}$/.test(l.org ?? '') || !/^[A-Z]{3}$/.test(l.dst ?? ''))
+      .map((l) => `${dm(d.date)} ${l.flight}`));
+    if (incomplete.length) warnings.push(`בקובץ התכנון לא נקראו השדות או השעות של ${list(incomplete)}. החישובים של הטיסות האלה עלולים להיות שגויים.`);
+  }
+}
 
 function checkSameMonthAndEmployee(plan, exec, warnings) {
   if (!plan || !exec) return;

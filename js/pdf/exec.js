@@ -38,12 +38,13 @@ export async function parseExec(data) {
   const totalsRows = [];
   let dayCols = null;
   let legCols = null;
+  const legColumns = new Set();
   let current = null;
 
   for (const page of pages) {
     for (const row of toRows(page.items)) {
       if (isDayHeaderRow(row)) { dayCols = buildColumnMap(row, KNOWN_DAY_COLUMNS); legCols = null; continue; }
-      if (isLegHeaderRow(row)) { legCols = buildColumnMap(row, LEG_COLUMNS); continue; }
+      if (isLegHeaderRow(row)) { legCols = buildColumnMap(row, LEG_COLUMNS); Object.keys(legCols).forEach((c) => legColumns.add(c)); continue; }
       if (!dayCols) continue; // עדיין בכותרת הדוח
 
       const dayNo = readDayNumber(row, dayCols);
@@ -76,6 +77,7 @@ export async function parseExec(data) {
     ...header,
     columns: present,
     missingColumns: missing,
+    legColumns: [...legColumns],
     days,
     totals: pickBestTotals(totalsRows),
     reportTotals: parseReportTotals(pages),
@@ -97,10 +99,8 @@ function parseHeader(pages, warnings) {
     return m ? m[1].trim() : null;
   };
 
+  // בפורמט ה-iPad נחתכת לפעמים העמודה הימנית (PICK). אין אזהרה כללית: עמודה שחוק צריך נבדקת ב-missingColumns.
   const format = /Upload Document/i.test(text) ? 'ipad' : 'print';
-  if (format === 'ipad') {
-    warnings.push('הקובץ הודפס מ-iPad. בפורמט הזה ייתכן שעמודות בצד ימין נחתכו.');
-  }
 
   return {
     employee: employee ? { name: employee[1].trim(), id: employee[2] } : null,
@@ -224,7 +224,7 @@ function readTotalsRow(row, cols) {
 
 const pickBestTotals = (rows) => rows.sort((a, b) => Object.keys(b).length - Object.keys(a).length)[0] ?? {};
 
-/** ימים שאין להם שורה בדוח הם ימים ללא פעילות, ולא ימים חסרים. */
+/** יום שאין לו שורה בדוח מסומן absent. בכל הדוחות שנבדקו מופיעים כל ימי החודש, ולכן evaluate מתריע עליו. */
 function fillMissingDays(days, period) {
   for (let d = 1; d <= daysInMonth(period.year, period.month); d++) {
     const date = isoDate(period.year, period.month, d);

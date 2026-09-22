@@ -187,16 +187,25 @@ function readLeg(c, lyItem, warnings, date) {
 /**
  * שעות המראה ונחיתה. לפעמים שתיהן מגיעות כפריט אחד ("1615 !2030"),
  * ולפעמים כשני פריטים בעמודות t1 ו-t2. נחיתה ביום שאחרי ההמראה מגיעה לפעמים עם
- * "+1" והיעד צמודים אליה ("!0118+1TBS", 05/05/2026).
+ * "+1" והיעד צמודים אליה ("!0118+1TBS", 05/05/2026). המראה ביום שלפני שורת הרגל מגיעה צמודה
+ * למוצא עם "-1" ("BUD!2315-1", LY2368 ב-15/06/2026: יצאה ב-23:15 שעון בודפשט, 00:15 שעון הבסיס).
  */
 function readTimedRow(c, anchorItem) {
   const y = anchorItem.y;
-  const org = near(c.org, y)?.s ?? null;
-  const a = near(c.t1, y)?.s ?? null;
-  const b = near(c.t2, y)?.s ?? null;
+  let org = near(c.org, y)?.s ?? null;
+  let a = near(c.t1, y)?.s ?? null;
+  let b = near(c.t2, y)?.s ?? null;
+  let prevDay = false;
+  const glued = org?.match(/^([A-Z]{3})(!?\d{4})-1$/);
+  if (glued) {
+    org = glued[1];
+    prevDay = true;
+    [a, b] = [glued[2], a && /\s/.test(a) ? a.split(/\s+/)[1] : a ?? b];
+  }
   const [depRaw, arrRaw] = a && /\s/.test(a) ? a.split(/\s+/) : [a, b];
   const m = arrRaw?.match(/^(!?\d{4})(?:\+(\d))?([A-Z]{3})?$/);
-  return { org, dep: clockToMin(depRaw), arr: clockToMin(m ? m[1] : arrRaw), dst: m?.[3] ?? null };
+  const dep = clockToMin(depRaw);
+  return { org, dep: dep && prevDay ? { ...dep, prevDay } : dep, arr: clockToMin(m ? m[1] : arrRaw), dst: m?.[3] ?? null };
 }
 
 // ---------- משך רגלי DH ----------
@@ -215,7 +224,8 @@ function resolveDeadheads(days) {
   const learned = {}; // station → [{date, off}]
   for (const day of Object.values(days)) {
     const legs = day.legs.filter((l) => !l.dh);
-    if (!legs.length || day.info.FT == null || legs.some((l) => !l.dep || !l.arr)) continue;
+    // רגל שיצאה ביום הקודם: ה-FT של היום כולל גם רגליים מהיום ההוא, ואין ממנו מה ללמוד.
+    if (!legs.length || day.info.FT == null || legs.some((l) => !l.dep || !l.arr || l.dep.prevDay)) continue;
     const foreign = new Set(legs.flatMap((l) => [l.dep.foreign && l.org, l.arr.foreign && l.dst]).filter(Boolean));
     if (foreign.size !== 1) continue;
     const [station] = foreign;
