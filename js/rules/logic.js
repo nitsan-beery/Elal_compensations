@@ -465,7 +465,7 @@ function higher_of_planned_performed(ctx, params, rule) {
         title: diff > 0 ? `סבב שהוחלף בסבב קצר יותר: ${what}` : `${reportColumn} לא מוסבר על סבב שהחליף סבב מתוכנן: ${what}`,
         body: `${facts} הסיבה אינה בקבצים, והיא קובעת מה מגיע. מה קרה?`,
         options: [
-          { value: 'replaced', label: 'החברה החליפה את הטיסה', hint: diff > 0 ? `ההפרש ${minToHhmm(diff)} ב-${reportColumn}` : 'אין הפרש לתשלום' },
+          { value: 'replaced', label: 'החלפה ביוזמת החברה (כולל זכיה במכרז)', hint: diff > 0 ? `ההפרש ${minToHhmm(diff)} ב-${reportColumn}` : 'אין הפרש לתשלום' },
           ...lostHoursOptions(ctx, match.plan, 'בנוסף לקרדיט של מה שבוצע'),
           { value: 'voluntary_swap', label: 'החלפה מרצוני', hint: 'רק הקרדיט של מה שבוצע' },
           { value: 'other', label: 'סיבה אחרת', needsText: true },
