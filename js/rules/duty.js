@@ -696,6 +696,62 @@ function white_flight(ctx, params, rule) {
   }
 }
 
+// ---------- הארכת שהייה (ישן כ"ה ס' 10.א(5), 10.ב) ----------
+
+/**
+ * סבב שחזר לבסיס יותר מ-`over_hours` אחרי הנחיתה המתוכננת. הסיבה אינה בקבצים, ולכן שואלים:
+ * - `voluntary` – מרצון, אין פיצוי.
+ * - `force_majeure` – אירוע שאינו בשליטת החברה (ס' 10.ב): קריאה מיוחדת ל-48 השעות הראשונות,
+ *   כלומר `capped_days` יממות × `hours`. גם אש"ל לכל התקופה ובלי זיכוי שהייה – הערה בלבד.
+ * - `company` – פיצוי על כל יממה לא מתוכננת (פרשנות בעל המוצר, 22/09/2026): מהיום שאחרי
+ *   יום החזרה המתוכנן ועד יום החזרה בפועל, בשעון הבסיס, `hours` לכל יממה.
+ * הסבב מסומן, כדי שחוק הקריאה המיוחדת לא יספור אותו כולו כקריאה מיוחדת.
+ */
+function stay_extension(ctx, params, rule) {
+  if (!ctx.hasPlan || !ctx.hasExec) return;
+  const key = keyFor(params.report_column);
+  for (const m of ctx.matches) {
+    if (!m.plan || !m.exec) continue;
+    const planned = planSpan(m.plan, ctx.domicile, ctx.monthFirst).end;
+    const actual = execSpan(m.exec, ctx.domicile, false).end;
+    if (planned == null || actual == null || actual - planned <= H(params.over_hours)) continue;
+
+    ctx.markPairing(m.exec, 'stay_extension');
+    const what = `${describePairing(m.exec)}: החזרה לבסיס ב-${ddmm(dateOf(actual))} ${hhmm(actual)}, ` +
+      `${minToHhmm(actual - planned)} שעות אחרי המתוכנן (${ddmm(dateOf(planned))} ${hhmm(planned)})`;
+    const id = `stay_extension:${m.exec.id}`;
+    const a = ctx.answer(id);
+    if (!a) {
+      ctx.ask({
+        id,
+        date: m.exec.from,
+        title: `חזרה מאוחרת לבסיס: ${describePairing(m.exec)}`,
+        body: `${what}. הפיצוי תלוי בסיבה, והיא אינה בקבצים. מה קרה?`,
+        options: [
+          { value: 'voluntary', label: 'החזרה המאוחרת מרצונך', hint: 'ללא פיצוי' },
+          { value: 'force_majeure', label: 'העיכוב מאירוע שלא בשליטת החברה', hint: `מגיע פיצוי רק על ${params.over_hours} שעות` },
+          { value: 'company', label: 'מגיע פיצוי על כל הימים הלא מתוכננים' },
+        ],
+        ruleId: rule.id,
+      });
+      continue;
+    }
+    if (a.value === 'voluntary') {
+      ctx.note(dateOf(actual), `${what}. מרצונך, לפי תשובתך: אין פיצוי.`, rule);
+    } else if (a.value === 'force_majeure') {
+      ctx.expectPairing(m.exec, key, params.capped_days * H(params.hours), rule,
+        `${what}. אירוע שלא בשליטת החברה, לפי תשובתך: קריאה מיוחדת על ${params.over_hours} השעות הראשונות ` +
+        `(${params.capped_days} יממות). מגיע גם אש"ל לכל התקופה, ובתקופה הזאת אין זיכוי שהייה בחו"ל.`);
+    } else if (a.value === 'company') {
+      const days = [];
+      for (let d = addDays(dateOf(planned), 1); d <= dateOf(actual); d = addDays(d, 1)) days.push(d);
+      ctx.expectPairing(m.exec, key, days.length * H(params.hours), rule,
+        `${what}. ${days.length === 1 ? 'יממה לא מתוכננת' : `${days.length} יממות לא מתוכננות`} ` +
+        `(${days.map(ddmm).join(', ')}), לפי תשובתך.`);
+    }
+  }
+}
+
 /**
  * קיבוץ סבבי הביצוע ל-FDP: סבבים עוקבים שאין ביניהם מנוחה חוקית, לפי STD/STA. סבב חתוך,
  * או סבב שחסרים לו זמנים, עומד לבד.
@@ -723,6 +779,7 @@ export const DUTY_LOGIC = {
   white_flight,
   free_days_waived,
   consecutive_saturdays,
+  stay_extension,
 };
 
 export const DUTY_PARAMS = {
@@ -735,4 +792,5 @@ export const DUTY_PARAMS = {
   free_days_waived: ['hours', 'report_column', 'paid_from_day', 'off_block_from', 'on_block_until', 'min_free_days'],
   consecutive_saturdays: ['hours', 'report_column'],
   white_flight: ['hours', 'report_column', 'report_minutes_before_std', 'report_after', 'report_until', 'min_block_hours'],
+  stay_extension: ['over_hours', 'capped_days', 'hours', 'report_column'],
 };

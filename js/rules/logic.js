@@ -329,7 +329,7 @@ function wrapDelta(delta) {
 function special_call(ctx, params, rule) {
   const column = params.report_column ?? 'S/C';
   for (const match of ctx.matches) {
-    if (!match.exec) continue;
+    if (!match.exec || ctx.pairingHandledBy(match.exec, 'stay_extension')) continue;
     const reported = ctx.reportedOn(match.exec, column);
     const answer = ctx.answerFor(match);
 
@@ -699,6 +699,8 @@ export const LOGIC_ORDER = [
   'vacation_recall',
   'training_cancelled_flight',
   'dh_activated',
+  // לפני הקריאה המיוחדת: סבב שהשהייה בו הוארכה אינו נספר כולו כקריאה מיוחדת.
+  'stay_extension',
   'special_call',
   'lost_hours_credit',
   'min_slip_credit',
