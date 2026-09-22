@@ -3,6 +3,7 @@
 
 import { parsePlan } from './pdf/plan.js';
 import { parseExec } from './pdf/exec.js';
+import { xlsxBlob } from './xlsx.js';
 import { evaluate } from './rules/evaluate.js';
 import { loadRules, partitionRules } from './rules/catalog.js';
 import { minToHhmm } from './time.js';
@@ -598,8 +599,8 @@ async function renderHistory() {
   });
 }
 
-function download(name, text, type) {
-  const url = URL.createObjectURL(new Blob([text], { type }));
+function download(name, content, type) {
+  const url = URL.createObjectURL(content instanceof Blob ? content : new Blob([content], { type }));
   const a = Object.assign(document.createElement('a'), { href: url, download: name });
   document.body.append(a);
   a.click();
@@ -633,7 +634,7 @@ function renderRules() {
           <label class="small"><input type="checkbox"> רק חוקים שבתוקף ונתמכים</label>
           <span class="spacer"></span>
           <button class="btn" data-action="export-json">ייצוא rules.json</button>
-          <button class="btn" data-action="print">ייצוא PDF</button>
+          <button class="btn" data-action="export-xlsx">ייצוא ל-Excel</button>
         </div>
         <div class="small muted" data-role="count"></div>
       </div>
@@ -642,14 +643,14 @@ function renderRules() {
     $('input[type="search"]', root).addEventListener('input', (e) => { rulesUi.q = e.target.value; renderRuleList(); });
     $('select', root).addEventListener('change', (e) => { rulesUi.category = e.target.value; renderRuleList(); });
     $('input[type="checkbox"]', root).addEventListener('change', (e) => { rulesUi.onlyActive = e.target.checked; renderRuleList(); });
-    $('[data-action="print"]', root).addEventListener('click', () => window.print());
     $('[data-action="export-json"]', root).addEventListener('click', exportRulesJson);
+    $('[data-action="export-xlsx"]', root).addEventListener('click', exportRulesXlsx);
   }
   renderRuleList();
 }
 
-function renderRuleList() {
-  const root = $('#view-rules');
+/** החוקים לפי החיפוש והסינון שבמסך, והסיבה לכל חוק שאינו נתמך. */
+function filteredRules() {
   const data = state.rulesData;
   const today = new Date().toISOString().slice(0, 10);
   const { unsupported } = partitionRules(data.rules);
@@ -665,6 +666,16 @@ function renderRuleList() {
     if (!q) return true;
     return [r.id, r.title, r.when, r.amount?.text, r.source, r.note, r.logic?.id].some((s) => String(s ?? '').toLowerCase().includes(q));
   });
+  return { rules, reasonOf, today };
+}
+
+const dmy = (iso) => (iso ? iso.split('-').reverse().join('/') : null);
+const amountText = (r) => r.amount?.text ?? (r.amount?.value != null ? `${r.amount.value}` : '—');
+
+function renderRuleList() {
+  const root = $('#view-rules');
+  const data = state.rulesData;
+  const { rules, reasonOf, today } = filteredRules();
 
   $('[data-role="count"]', root).textContent = `מוצגים ${rules.length} מתוך ${data.rules.length} חוקים (מתוכם ${rules.filter((r) => reasonOf.has(r.id)).length} לא נתמכים)`;
   $('[data-role="list"]', root).innerHTML = rules.map((r) => {
@@ -677,13 +688,12 @@ function renderRuleList() {
       expired ? '<span class="tag bad">לא בתוקף</span>' : '',
       reason ? '<span class="tag warn">לא נתמך</span>' : '<span class="tag ok">נתמך</span>',
     ].join(' ');
-    const dmy = (iso) => (iso ? iso.split('-').reverse().join('/') : null);
     const validity = `מ-${dmy(r.valid_from) ?? 'תמיד'} עד ${dmy(r.valid_to) ?? 'היום'}`;
     return `<article class="rule ${r.status === 'cancelled' || expired ? 'inactive' : ''}">
       <div class="rule-head"><h3>${esc(r.title)}</h3>${tags}</div>
       <dl>
         <dt>מתי</dt><dd>${esc(r.when)}</dd>
-        <dt>כמה</dt><dd>${esc(r.amount?.text ?? (r.amount?.value != null ? `${r.amount.value}` : '—'))}</dd>
+        <dt>כמה</dt><dd>${esc(amountText(r))}</dd>
         <dt>מקור</dt><dd>${esc(r.source)}</dd>
         <dt>תוקף</dt><dd>${esc(validity)}</dd>
         ${r.note ? `<dt>הערה</dt><dd>${esc(r.note)}</dd>` : ''}
@@ -705,4 +715,28 @@ async function exportRulesJson() {
     text = JSON.stringify(state.rulesData, null, 2);
   }
   download('rules.json', text, 'application/json');
+}
+
+/** החוקים שמוצגים במסך (לפי החיפוש והסינון) כגיליון Excel. */
+function exportRulesXlsx() {
+  const { rules, reasonOf, today } = filteredRules();
+  const STATUS = { ok: '', cancelled: 'בוטל', changed: 'שונה' };
+  const header = ['שם', 'קטגוריה', 'מתי', 'כמה', 'מקור', 'בתוקף מ-', 'בתוקף עד', 'סטטוס', 'נתמך', 'הערה', 'למה לא נתמך', 'מזהה', 'לוגיקה'];
+  const rows = rules.map((r) => [
+    r.title,
+    CATEGORY_LABEL[r.category] ?? r.category,
+    r.when,
+    amountText(r),
+    r.source,
+    dmy(r.valid_from) ?? 'תמיד',
+    dmy(r.valid_to) ?? 'היום',
+    [STATUS[r.status] ?? r.status, r.valid_to && r.valid_to < today ? 'לא בתוקף' : ''].filter(Boolean).join(', '),
+    reasonOf.has(r.id) ? 'לא' : 'כן',
+    r.note,
+    reasonOf.get(r.id),
+    r.id,
+    r.logic?.id,
+  ]);
+  const blob = xlsxBlob(header, rows, { sheet: 'חוקים', widths: [30, 10, 50, 30, 25, 11, 11, 10, 7, 40, 40, 28, 24] });
+  download(`rules-${state.rulesData.rules_version}.xlsx`, blob);
 }
