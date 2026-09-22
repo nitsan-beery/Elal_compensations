@@ -518,6 +518,27 @@ function free_days_waived(ctx, params, rule) {
       !(sp.start >= d0 + offFrom && sp.end >= d0 + 1440) && !(sp.start < d0 && sp.end <= d0 + onUntil));
   }).map((d) => d.date);
 
+  // X ב-1 לחודש בלי טיסה ביום: ייתכן שזו נחיתה של סבב מהחודש הקודם, שאינו בתכנון. שואלים. עד התשובה היום לא נספר.
+  const first = ctx.timeline.find((d) => d.date === ctx.monthFirst);
+  if (free.includes(ctx.monthFirst) && (first?.plan?.codes ?? []).includes('X')) {
+    const fid = `free_days_first:${ctx.monthFirst.slice(0, 7)}`;
+    const fa = ctx.answer(fid);
+    if (fa?.value !== 'free') free.splice(free.indexOf(ctx.monthFirst), 1);
+    if (!fa) {
+      ctx.ask({
+        id: fid,
+        date: ctx.monthFirst,
+        title: `ימים ללא פעילות: ב-${ddmm(ctx.monthFirst)} מסומן X. האם נחתת בו מסבב של החודש הקודם?`,
+        body: `X ב-1 לחודש מופיע גם כשסבב מהחודש הקודם נוחת בו, והנחיתה אינה בתכנון. יום עם נחיתה בבסיס עד ${params.on_block_until} נחשב פנוי.`,
+        options: [
+          { value: 'free', label: `לא נחתתי בו, או שנחתתי עד ${params.on_block_until}`, hint: 'יום פנוי' },
+          { value: 'busy', label: `נחתתי אחרי ${params.on_block_until}`, hint: 'לא יום פנוי' },
+        ],
+        ruleId: rule.id,
+      });
+    }
+  }
+
   ctx.setFreeDays({ free: free.length, due, dates: free });
   const missing = due - free.length;
   if (missing <= 0) return;
