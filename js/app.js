@@ -419,12 +419,13 @@ function renderExpectations(res) {
   const planOnly = res.mode === 'plan';
   const open = planOnly ? 'open' : '';
   // בתכנון לבד הקרדיט של כל טיסה הוא רק רעש: הסך הכול בשורה העליונה, ובטבלה רק הפיצויים.
-  const shown = planOnly ? rows.filter((e) => !CREDIT_KEYS.has(e.key)) : rows;
+  // עם דוח ביצוע אין טבלה: הפירוט לפי יום נמצא בטבלת ההשוואה מול הדוח.
+  const shown = planOnly ? rows.filter((e) => !CREDIT_KEYS.has(e.key)) : [];
   return `<details class="card" ${open}>
-    <summary><h2 style="display:inline">${res.mode === 'plan' ? 'קרדיט ופיצויים צפויים' : 'פירוט הצפוי לפי חוק'}</h2></summary>
+    <summary><h2 style="display:inline">${planOnly ? 'קרדיט ופיצויים צפויים' : 'סיכום'}</h2></summary>
     <p class="small">סה"כ קרדיט: <span class="num">${minToHhmm(sumKeys(CREDIT_KEYS))}</span> · סה"כ COM: <span class="num">${minToHhmm(sumKeys(COM_KEYS))}</span></p>
     ${second.length ? `<p class="small">${second.join(' · ')}</p>` : ''}
-    ${!shown.length ? '<p class="small muted">אין פיצויים צפויים לפי התכנון.</p>' : `<div class="table-wrap"><table>
+    ${!planOnly ? '' : !shown.length ? '<p class="small muted">אין פיצויים צפויים לפי התכנון.</p>' : `<div class="table-wrap"><table>
       <thead><tr><th>תאריך</th><th>חוק</th><th>סוג</th><th>צפוי</th><th>הסבר</th></tr></thead>
       <tbody>${shown.map((e) => `<tr>
         <td class="num">${e.dates.length > 1 ? `${ddmm(e.dates[0])}–${ddmm(e.dates.at(-1))}` : ddmm(e.date)}</td>
@@ -443,7 +444,7 @@ function renderChanges(res) {
     <summary><h2 style="display:inline">שינויים בין תכנון לביצוע <span class="count">${changes.length}</span></h2></summary>
     ${changes.length ? `<ul class="list">${changes.map((c) => `<li>
       <strong class="num">${ddmm(c.date)}</strong> ${esc(c.label)}
-      <div class="small">תכנון: ${esc(c.plan ?? '—')} · ביצוע: ${esc(c.exec ?? '—')}${c.replacedBy ? ` · במקום: ${esc(c.replacedBy.join(', '))}` : ''}</div>
+      <div class="small">תכנון: ${esc(c.plan ?? '—')} · ביצוע: ${esc(c.exec ?? (c.replacedBy?.join(', ') || '—'))}</div>
     </li>`).join('')}</ul>` : '<p class="muted">כל הסבבים בוצעו כמתוכנן.</p>'}
   </details>`;
 }
