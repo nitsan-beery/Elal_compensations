@@ -188,16 +188,17 @@ function absence_day_credit(ctx, params, rule) {
       }
     }
     if (params.requires_assigned_activity) {
-      const assigned = ctx.wasAssigned(day.date);
+      // הדוח כבר מזכה על היום: היית מוצב, ואין פער שמצדיק שאלה (החלטת בעל המוצר, 23/09/2026).
+      const assigned = ctx.wasAssigned(day.date) ?? (ctx.paidOnDate(day.date, 'Credit', 'absence', credit) || null);
       if (assigned == null) {
         ctx.ask({
           id: `assigned:${day.date}`,
           date: day.date,
           title: `${rule.title} ב-${day.date.slice(8, 10)}/${day.date.slice(5, 7)}: האם היית מוצב לפעילות?`,
-          body: 'אין קובץ תכנון לחודש הזה. קרדיט על היום ניתן רק אם היית מוצב בו לפעילות.',
+          body: 'אין קובץ תכנון לחודש הזה, והדוח לא מזכה על היום. קרדיט על היום ניתן רק אם היית מוצב בו לפעילות.',
           options: [
-            { value: 'yes', label: 'כן, הייתי מוצב' },
-            { value: 'no', label: 'לא הייתי מוצב' },
+            { value: 'yes', label: 'כן, הייתי מוצב', hint: `${minToHhmm(credit)} – פער מול הדוח` },
+            { value: 'no', label: 'לא הייתי מוצב', hint: 'אין קרדיט' },
           ],
           ruleId: rule.id,
         });
@@ -278,7 +279,10 @@ function askUnconfirmedCodes(ctx, params, rule) {
         ruleId: rule.id,
       });
     } else if (answer.value === 'other') {
+      ctx.explainCode(c.code, c.dates, answer.text || `לא ${params.confirm_label}`);
       ctx.review(`קוד ${c.code} (${days}): ${answer.text || 'לא ' + params.confirm_label}. דורש בדיקה ידנית.`, rule);
+    } else {
+      ctx.explainCode(c.code, c.dates, `${params.confirm_label} – ${value} ליום (${rule.title})`);
     }
   }
 }
@@ -563,18 +567,19 @@ function higher_of_planned_performed(ctx, params, rule) {
     if (diff <= 0 && unexplained <= 0) continue;
 
     const what = `${describePairing(match.plan)} → ${describePairing(match.exec ?? match.plan)}`;
-    if (!answer && params.requires_user_answer) {
-      const facts = [
-        diff > 0 ? `המתוכנן ארוך מהמבוצע ב-${minToHhmm(diff)}.` : `המבוצע אינו קצר מהמתוכנן.`,
-        unexplained > 0 ? `בדוח ${reportColumn} ${minToHhmm(unexplained)} על ${describePairing(match.exec)}, שאף חוק אחר אינו מסביר.` : '',
-      ].filter(Boolean).join(' ');
+    // הדוח כבר מזכה את ההפרש, על הסבב המחליף או על סבב סמוך: אין פער, ולא שואלים
+    // (החלטת בעל המוצר, 23/09/2026). ההפרש נרשם כאילו נענה "החלפה ביוזמת החברה".
+    const covered = diff > 0 && !!match.exec && !!findShortfallPaid(ctx, match, diff, column, reportColumn, true);
+    if (!answer && params.requires_user_answer && diff > 0 && !covered) {
+      const facts = `המתוכנן ארוך מהמבוצע ב-${minToHhmm(diff)}, והדוח לא מזכה את ההפרש ב-${reportColumn}` +
+        (unexplained > 0 ? ` (יש שם ${minToHhmm(unexplained)} שאף חוק אינו מסביר, פחות מההפרש).` : '.');
       ctx.ask({
         id: `replaced:${match.plan.id}`,
         date: match.plan.from,
-        title: diff > 0 ? `סבב שהוחלף בסבב קצר יותר: ${what}` : `${reportColumn} לא מוסבר על סבב שהחליף סבב מתוכנן: ${what}`,
+        title: `סבב שהוחלף בסבב קצר יותר: ${what}`,
         body: `${facts} הסיבה אינה בקבצים, והיא קובעת מה מגיע. מה קרה?`,
         options: [
-          { value: 'replaced', label: 'החלפה ביוזמת החברה (כולל זכיה במכרז)', hint: diff > 0 ? `ההפרש ${minToHhmm(diff)} ב-${reportColumn}` : 'אין הפרש לתשלום' },
+          { value: 'replaced', label: 'החלפה ביוזמת החברה (כולל זכיה במכרז)', hint: `ההפרש ${minToHhmm(diff)} ב-${reportColumn} – פער מול הדוח` },
           ...lostHoursOptions(ctx, match.plan, 'בנוסף לקרדיט של מה שבוצע'),
           { value: 'voluntary_swap', label: 'החלפה מרצוני', hint: 'רק הקרדיט של מה שבוצע' },
           { value: 'other', label: 'סיבה אחרת', needsText: true },
@@ -592,7 +597,9 @@ function higher_of_planned_performed(ctx, params, rule) {
 
     // לפעמים ההשלמה נרשמת על סבב סמוך ולא על המחליף עצמו (10/06/2026: LTN 11–12 → OTP 11,
     // ה-Rig 05:10 נרשם על OTP של 10/06).
-    const paidOn = match.exec ? findShortfallPaid(ctx, match, diff, column, reportColumn) : null;
+    const paidOn = match.exec
+      ? findShortfallPaid(ctx, match, diff, column, reportColumn) ?? findShortfallPaid(ctx, match, diff, column, reportColumn, true)
+      : null;
     const where = paidOn && paidOn !== match.exec ? `, ונרשם על ${describePairing(paidOn)}` : '';
     ctx.expectPairing(paidOn ?? match.exec ?? match.plan, column, diff, rule,
       `המתוכנן (${describePairing(match.plan)}) גבוה מהמבוצע. ההפרש לפי "הגבוה מבין השתיים"${where}.`);
@@ -600,15 +607,19 @@ function higher_of_planned_performed(ctx, params, rule) {
 }
 
 /**
- * הסבב שעליו הדוח כבר רשם בדיוק את ההפרש: קודם הסבב המחליף, ואחר כך סבב ביצוע שנוגע
- * בטווח של יום אחד מהסבב המתוכנן. "בדיוק" = מה שבדוח פחות מה שכבר צפוי עליו מחוקים אחרים.
+ * הסבב שעליו הדוח כבר רשם את ההפרש: קודם הסבב המחליף, ואחר כך סבב ביצוע שנוגע בטווח של
+ * יום אחד מהסבב המתוכנן. הסכום הוא מה שבדוח פחות מה שכבר צפוי עליו מחוקים אחרים.
+ * `atLeast` מרפה את ההשוואה מ"בדיוק ההפרש" ל"לפחות ההפרש", לבדיקה אם הפיצוי כבר התקבל.
  */
-function findShortfallPaid(ctx, match, diff, key, column) {
-  const extra = (p) => ctx.reportedOn(p, column) - ctx.expectedOn(p, key);
-  if (extra(match.exec) === diff) return match.exec;
+function findShortfallPaid(ctx, match, diff, key, column, atLeast = false) {
+  const hit = (p) => {
+    const extra = ctx.reportedOn(p, column) - ctx.expectedOn(p, key);
+    return atLeast ? extra >= diff : extra === diff;
+  };
+  if (hit(match.exec)) return match.exec;
   const from = addDays(match.plan.from, -1);
   const to = addDays(match.plan.to, 1);
-  return ctx.execPairings.find((p) => p !== match.exec && p.dates.some((d) => from <= d && d <= to) && extra(p) === diff) ?? null;
+  return ctx.execPairings.find((p) => p !== match.exec && p.dates.some((d) => from <= d && d <= to) && hit(p)) ?? null;
 }
 
 /** השעות שהפסיד (מטוס חכור, חניך, 787 שהוחלף ב-777), לפי התשובה `answer_value`. כולל השלמה לסליפ קצר. */
@@ -616,7 +627,10 @@ function lost_hours_credit(ctx, params, rule) {
   for (const match of ctx.matches) {
     if (!match.plan) continue;
     const answer = ctx.answerFor(match);
-    if (answer?.value !== params.answer_value) continue;
+    // בלי תשובה, כשהדוח כבר מזכה את השעות שהפסיד על סבב שלא בוצע: אין פער, ולא שואלים
+    // מה קרה (החלטת בעל המוצר, 23/09/2026). הזיכוי נרשם על החוק הראשון שמתאים.
+    const assumed = !answer && match.how === 'cancelled' ? paidLostHours(ctx, match.plan) : null;
+    if (answer?.value !== params.answer_value && assumed?.rule !== rule) continue;
     if (!lostHoursApplies(ctx, match.plan, params)) {
       ctx.review(`${describePairing(match.plan)}: התשובה "${params.answer_label}" אינה מתאימה לצי או לסוג המטוס בתכנון. דורש בדיקה ידנית.`, rule);
       continue;
@@ -625,12 +639,37 @@ function lost_hours_credit(ctx, params, rule) {
     const lost = lostHours(ctx, match.plan, params);
     if (lost == null) { ctx.review(`${describePairing(match.plan)}: אין שעות מתוכננות בקובץ, לא ניתן לחשב את השעות שהפסיד.`, rule); continue; }
     const key = params.credit_column === 'Rig' ? 'rig' : 'credit';
-    const note = `${describePairing(match.plan)}: ${params.answer_label}. השעות שהפסיד` +
+    const why = assumed
+      ? `הדוח מזכה ב-${assumed.column} את השעות שהפסיד, והסיבה אינה בקבצים (${assumed.labels})`
+      : params.answer_label;
+    const note = `${describePairing(match.plan)}: ${why}. השעות שהפסיד` +
       (match.exec ? `, בנוסף לקרדיט של ${describePairing(match.exec)}.` : '.');
     if (match.exec) ctx.expectPairing(match.exec, key, lost, rule, note);
-    else ctx.expect(match.plan.from, key, lost, rule, note);
+    else ctx.expect(assumed?.date ?? match.plan.from, key, lost, rule, note);
     ctx.markPairing(match.plan, 'lost_hours_credit');
   }
+}
+
+/**
+ * סבב מתוכנן שלא בוצע, שהדוח כבר מזכה עליו את השעות שהפסיד: מחזיר את החוק הראשון שמתאים,
+ * העמודה, הסכום והיום שבו הדוח זיכה. הסיבה עצמה אינה בקבצים, וכל החוקים המזכים נותנים את
+ * אותו סכום באותה עמודה, ולכן הנימוק מונה את כולם ואינו בוחר אחד מהם.
+ * null כשאי אפשר לחשב את הקרדיט המתוכנן, כשהחוקים שבתוקף אינם מסכימים על הסכום או על
+ * העמודה (ואז אי אפשר להסיק מהדוח), או כשהדוח אינו מזכה – ואז נשאלת השאלה.
+ */
+function paidLostHours(ctx, planPairing) {
+  const rules = ctx.rulesWithLogic('lost_hours_credit').filter((r) => lostHoursApplies(ctx, planPairing, r.logic.params ?? {}));
+  if (!rules.length) return null;
+  const of = (r) => ({ column: r.logic.params?.credit_column ?? 'Credit', lost: lostHours(ctx, planPairing, r.logic.params ?? {}) });
+  const first = of(rules[0]);
+  if (first.lost == null) return null;
+  if (rules.some((r) => of(r).column !== first.column || of(r).lost !== first.lost)) return null;
+  const key = first.column === 'Rig' ? 'rig' : 'credit';
+  // רק יום שאין בו סבב ביצוע: ביום שבו טסת, הסכום בדוח יכול להיות גם השלמה לסליפ קצר או
+  // פיצוי אחר על הטיסה עצמה, ואז אי אפשר לייחס אותו לסבב שבוטל – ושואלים.
+  const free = (d) => !ctx.execPairings.some((e) => e.dates.includes(d));
+  const date = planPairing.dates.find((d) => free(d) && ctx.paidOnDate(d, first.column, key, first.lost));
+  return date ? { rule: rules[0], ...first, date, labels: rules.map((r) => r.logic.params?.answer_label).join(' או ') } : null;
 }
 
 /** סוג המטוס כמשפחה: B789 → B787, ‏B738 → B737. */
@@ -683,6 +722,8 @@ function cancelled_no_compensation(ctx, params, rule) {
   for (const match of ctx.matches) {
     if (!match.plan || match.how !== 'cancelled') continue;
     const answer = ctx.answerFor(match);
+    // הדוח כבר מזכה את השעות שהפסיד: `lost_hours_credit` רושם אותן, ואין על מה לשאול.
+    if (!answer && paidLostHours(ctx, match.plan)) continue;
     if (!answer) {
       ctx.ask({
         id: `cancelled:${match.plan.id}`,
@@ -825,7 +866,9 @@ function standby_end_for_bid(ctx, params, rule) {
       if (match.how !== 'unplanned' || !tail.includes(match.exec.from)) continue;
       const pairing = match.exec;
       const id = `standby_bid:${pairing.id}`;
-      const answer = ctx.answer(id);
+      // הדוח כבר מזכה את הקריאה המיוחדת: זו זכייה במכרז, ואין מה לשאול.
+      const answer = ctx.answer(id) ??
+        (ctx.paidOn(pairing, sc?.logic?.params?.report_column ?? 'S/C', 'sc', bidAmount(pairing, ctx, sc)) ? { value: 'standby_bid' } : null);
       const range = run.length === 1 ? dayOf(run[0]) : `${dayOf(run[0])}–${dayOf(run.at(-1))}`;
       if (!answer) {
         ctx.markPairing(pairing, 'standby_bid_pending');
@@ -835,7 +878,7 @@ function standby_end_for_bid(ctx, params, rule) {
           title: `טיסה ביומיים האחרונים של כוננות: ${describePairing(pairing)}`,
           body: `בתכנון כוננות ב-${range}, והטיסה יצאה ב-${dayOf(pairing.from)}. ` +
             (run.at(-1) === monthEnd ? 'הכוננות מגיעה לסוף החודש, וייתכן שהיא נמשכת בחודש הבא. ' : '') +
-            'אם החברה אישרה לך לסיים את הכוננות בגלל זכייה במכרז, מגיעה קריאה מיוחדת על ימי הטיסה. אם הכוננות הופעלה, מגיע רק קרדיט הטיסה. מה קרה?',
+            'הדוח לא מזכה קריאה מיוחדת. אם החברה אישרה לך לסיים את הכוננות בגלל זכייה במכרז, מגיעה קריאה מיוחדת על ימי הטיסה. אם הכוננות הופעלה, מגיע רק קרדיט הטיסה. מה קרה?',
           options: [
             { value: 'standby_bid', label: 'סיום כוננות בגלל זכייה במכרז', hint: bidHint(pairing, ctx, sc) },
             { value: 'standby_activated', label: 'הפעלת הכוננות', hint: 'קרדיט הטיסה, בלי קריאה מיוחדת' },
@@ -951,6 +994,15 @@ function bidHint(pairing, ctx, sc) {
   return `קריאה מיוחדת: ${n === 1 ? 'יממה אחת' : `${n} יממות`}, ${minToHhmm(n * H(p.hours))} ב-${p.report_column ?? 'S/C'}`;
 }
 
+/** הסכום שזכייה במכרז הייתה מזכה בו, לבדיקה אם הדוח כבר זיכה אותו. 0 כשאי אפשר לחשב. */
+function bidAmount(pairing, ctx, sc) {
+  if (!sc) return 0;
+  const p = sc.logic.params ?? {};
+  const stay = awayFromBase(pairing, ctx.domicile, ctx.timeline.at(-1).date);
+  if (stay.error) return 0;
+  return countSpecialCallDays(stay, p).counted.length * H(p.hours);
+}
+
 export const LOGIC = {
   credit_from_scheduled,
   min_slip_credit,
@@ -1029,6 +1081,7 @@ export const LOGIC_ORDER = [
   'base_rest_shortfall',
   'special_date_activity',
   'white_flight',
+  'ulh_flight',
   'free_days_waived',
   'consecutive_saturdays',
   'consecutive_night_rounds',

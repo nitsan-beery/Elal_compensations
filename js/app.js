@@ -306,13 +306,47 @@ function renderAlerts(res) {
     out.push(`<div class="notice warn"><strong>אזהרות</strong><ul>${res.warnings.map((w) => `<li>${esc(w)}</li>`).join('')}</ul></div>`);
   }
   if (res.unknownCodes.length) {
-    out.push(`<div class="notice bad"><strong>קודים לא מוכרים</strong> – האפליקציה לא יודעת מה מגיע עליהם ולא ניחשה:
-      <ul>${res.unknownCodes.map((u) => `<li><span class="num">${esc(u.code)}</span> ב${u.where === 'plan' ? 'תכנון' : 'ביצוע'}, בתאריכים ${u.dates.map(ddmm).join(', ')}</li>`).join('')}</ul></div>`);
+    const open = res.unknownCodes.some((u) => !u.answer);
+    out.push(`<div class="notice ${open ? 'bad' : 'warn'}"><strong>קודים שהאפליקציה לא מכירה</strong>
+      <ul class="codes">${res.unknownCodes.map(renderUnknownCode).join('')}</ul>
+      <p class="small">כדי שהאפליקציה תדע מה מגיע על קוד חדש, ולא תשאל עליו שוב, צריך להוסיף אותו ל-<span class="num">rules.json</span>: לרשימת הקודים, ולפרמטרים של החוק שמזכה עליו. הפרטים כאן הם מה שדרוש לעדכון.</p>
+      <button class="btn no-print" data-action="copy-codes">העתק פרטים</button></div>`);
   }
   if (res.reviews.length) {
     out.push(`<div class="notice bad"><strong>לבדיקה ידנית</strong><ul>${res.reviews.map((v) => `<li>${esc(v.message)}${v.ruleTitle ? ` <span class="tag">${esc(v.ruleTitle)}</span>` : ''}</li>`).join('')}</ul></div>`);
   }
   return out.length ? `<div class="card">${out.join('')}</div>` : '';
+}
+
+/**
+ * קוד לא מוכר, עם כל מה שיודע עליו: התאריכים, מה שהדוח רשם באותם ימים, ותשובת
+ * המשתמש עליו אם נשאל. כל אלה מה שדרוש כדי לעדכן את `rules.json` לפי הקוד החדש.
+ */
+function renderUnknownCode(u) {
+  const lines = unknownCodeLines(u).map((l) => `<div class="small">${esc(l)}</div>`).join('');
+  return `<li><span class="num">${esc(u.code)}</span> ${esc(whereOf(u))}, בתאריכים ${u.dates.map(ddmm).join(', ')}${lines}</li>`;
+}
+
+const whereOf = (u) => (u.where === 'both' ? 'בתכנון ובביצוע' : u.where === 'plan' ? 'בתכנון' : 'בביצוע');
+
+/** שורות הפירוט של קוד לא מוכר, בלי HTML: אותן שורות מוצגות ומועתקות. */
+function unknownCodeLines(u) {
+  const lines = [];
+  const texts = [...new Set((u.report ?? []).map((r) => r.text))];
+  if (texts.length === 1) lines.push(`בדוח: ${texts[0]}`);
+  else for (const r of u.report ?? []) lines.push(`בדוח ${ddmm(r.date)}: ${r.text}`);
+  lines.push(u.answer ? `לפי תשובתך: ${u.answer}` : 'האפליקציה לא יודעת מה מגיע עליו, ולא ניחשה.');
+  return lines;
+}
+
+/** הפרטים כטקסט, להעתקה ולשליחה לעדכון האפליקציה. */
+function unknownCodesText(res) {
+  const head = `קודים שהאפליקציה לא מכירה – ${monthName(res.period)} · חוקים ${res.rulesVersion}`;
+  const items = res.unknownCodes.map((u) => [
+    `${u.code} ${whereOf(u)}, בתאריכים ${u.dates.map(ddmm).join(', ')}`,
+    ...unknownCodeLines(u).map((l) => `  ${l}`),
+  ].join('\n'));
+  return [head, ...items].join('\n');
 }
 
 function renderQuestions(res) {
@@ -502,6 +536,25 @@ function describePairingId(id) {
 
 function bindResults(root) {
   $('[data-action="print"]', root)?.addEventListener('click', () => window.print());
+  const copy = $('[data-action="copy-codes"]', root);
+  copy?.addEventListener('click', async () => {
+    const text = unknownCodesText(state.result);
+    try {
+      await navigator.clipboard.writeText(text);
+      copy.textContent = 'הועתק';
+      setTimeout(() => { copy.textContent = 'העתק פרטים'; }, 2000);
+    } catch {
+      // דפדפן שאינו מרשה העתקה: מציגים את הטקסט מסומן, להעתקה ידנית.
+      const box = document.createElement('textarea');
+      box.className = 'copy-text';
+      box.readOnly = true;
+      box.value = text;
+      box.rows = Math.min(12, text.split('\n').length);
+      copy.replaceWith(box);
+      box.focus();
+      box.select();
+    }
+  });
   for (const chip of root.querySelectorAll('[data-filter]')) {
     chip.addEventListener('click', () => { state.filter = chip.dataset.filter; renderResults(); });
   }

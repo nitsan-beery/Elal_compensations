@@ -183,6 +183,24 @@ function makeContext({ out, timeline, domicile, codes, holidays, answers, plan, 
       out.expectations.push({ date, dates: [date], pairingId: pairing.id,
         pairing: describePairing(pairing), key, min, note, ...ruleRef(rule) });
     },
+    /**
+     * קוד שאינו ב-`rules.json`, ומה שהמשתמש ענה עליו. גם קוד שהקוד מזהה לפי קידומת
+     * (SBY_X הוא כוננות, בלי שידוע מה מגיע עליו) נרשם כאן, כדי שאפשר יהיה לעדכן את
+     * האפליקציה לפיו (בקשת בעל המוצר, 23/09/2026). הקוד בדוח מקוצר ל-5 תווים, ולכן ההשוואה לשני הכיוונים.
+     */
+    explainCode(code, dates, text) {
+      const same = (a, b) => a === b || a === b.slice(0, 5) || b === a.slice(0, 5);
+      const hits = out.unknownCodes.filter((u) => same(u.code, code));
+      if (hits.length) {
+        for (const u of hits) u.answer = text;
+        return;
+      }
+      const days = dates.map((d) => dayOf(timeline, d)).filter(Boolean);
+      const inPlan = days.some((d) => (d.plan?.codes ?? []).some((c) => same(c, code)));
+      const inExec = days.some((d) => execCodesOf(d).some((c) => same(c, code)));
+      out.unknownCodes.push({ code, where: inPlan && inExec ? 'both' : inExec ? 'exec' : 'plan', dates: [...dates], answer: text,
+        report: days.map((d) => ({ date: d.date, text: reportedCells(d) })).filter((r) => r.text) });
+    },
     expectFlag(date, column, count, rule) {
       out.flags.push({ date, column, count, ...ruleRef(rule) });
     },
@@ -303,6 +321,26 @@ function makeContext({ out, timeline, domicile, codes, holidays, answers, plan, 
     reportedOnDate: (date, column) => dayOf(timeline, date)?.exec?.values?.[column]?.min ?? 0,
     expectedOnDate: (date, key) => out.expectations
       .filter((e) => e.date === date && e.key === key).reduce((s, e) => s + e.min, 0),
+
+    /**
+     * האם הדוח כבר זיכה את הסכום על הסבב (או על היום), מעבר למה שחוקים אחרים כבר מסבירים.
+     * שאלה למשתמש נשאלת רק כשהתשובה שלילית (החלטת בעל המוצר, 23/09/2026): כשהדוח זיכה
+     * אין פער, ואין על מה לשאול. בלי דוח ביצוע אין מה להשוות, ולכן false.
+     */
+    paidOn(pairing, column, key, min, except = []) {
+      if (!exec || !min) return false;
+      const reported = reportDates(pairing, timeline, domicile)
+        .reduce((s, date) => s + (dayOf(timeline, date)?.exec?.values?.[column]?.min ?? 0), 0);
+      const explained = out.expectations
+        .filter((e) => e.pairingId === pairing.id && e.key === key && !except.includes(e.ruleId)).reduce((s, e) => s + e.min, 0);
+      return reported - explained >= min;
+    },
+    paidOnDate(date, column, key, min) {
+      if (!exec || !min) return false;
+      const reported = dayOf(timeline, date)?.exec?.values?.[column]?.min ?? 0;
+      const explained = out.expectations.filter((e) => e.date === date && e.key === key).reduce((s, e) => s + e.min, 0);
+      return reported - explained >= min;
+    },
 
     capAbsenceTotal(capMin, rule) {
       const total = out.expectations.filter((e) => e.key === 'absence').reduce((s, e) => s + e.min, 0);
@@ -525,18 +563,33 @@ function isIgnoredPlanCode(code, codes) {
   return (codes.ignored_plan_notes ?? []).some((n) => code === n || code.startsWith(n));
 }
 
+/**
+ * קוד שאינו מוכר מוצג למשתמש עם כל מה שיש עליו בקבצים: התאריכים, ומה שהדוח רשם באותם ימים.
+ * זה מה שדרוש כדי לעדכן את `rules.json` לפי הקוד החדש (בקשת בעל המוצר, 23/09/2026).
+ * `answer` מתווסף אחר כך, אם המשתמש נשאל על הקוד וענה (`ctx.explainCode`).
+ */
 function collectUnknownCodes(timeline, codes, supported) {
   const found = new Map();
-  const add = (code, where, date) => {
+  const add = (code, where, day) => {
     const k = `${where}|${code}`;
-    if (!found.has(k)) found.set(k, { code, where, dates: [] });
-    found.get(k).dates.push(date);
+    if (!found.has(k)) found.set(k, { code, where, dates: [], report: [] });
+    const u = found.get(k);
+    u.dates.push(day.date);
+    const text = reportedCells(day);
+    if (text) u.report.push({ date: day.date, text });
   };
   for (const day of timeline) {
-    for (const c of day.plan?.codes ?? []) if (classifyCode(c, codes, supported) === 'unknown') add(c, 'plan', day.date);
-    for (const c of execCodesOf(day)) if (classifyCode(c, codes, supported) === 'unknown') add(c, 'exec', day.date);
+    for (const c of day.plan?.codes ?? []) if (classifyCode(c, codes, supported) === 'unknown') add(c, 'plan', day);
+    for (const c of execCodesOf(day)) if (classifyCode(c, codes, supported) === 'unknown') add(c, 'exec', day);
   }
   return [...found.values()];
+}
+
+/** מה שהדוח רשם ביום, כלשונו: "Credit 03:45 · SBY 1.00". ריק כשאין דוח, או שאין בו ערך ביום. */
+function reportedCells(day) {
+  return Object.entries(day.exec?.values ?? {})
+    .filter(([, v]) => (v.kind === 'duration' ? v.min : v.kind === 'count' ? v.count : v.raw))
+    .map(([column, v]) => `${column} ${v.raw}`).join(' · ');
 }
 
 // ---------- השוואה מול הדוח ----------

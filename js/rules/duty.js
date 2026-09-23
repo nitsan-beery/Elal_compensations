@@ -26,7 +26,14 @@ const parseClock = (s) => {
   const m = String(s ?? '').match(/^(\d{1,2}):(\d{2})$/);
   return m ? Number(m[1]) * 60 + Number(m[2]) : null;
 };
-const keyFor = (column) => (column === 'S/C' ? 'sc' : 'com');
+const keyFor = (column) => (column === 'S/C' ? 'sc' : column === 'Credit' ? 'credit' : 'com');
+
+/** בתכנון אין משך לרגל: STA − STD, כששעת נחיתה עם ! מומרת לשעון הבסיס לפי airports.js. */
+const planBlock = (l) => {
+  if (!l.arr || !l.dep) return null;
+  const off = l.arr.foreign ? stationOffset(l.dst, l.date) : 0;
+  return off == null ? null : mod(l.arr.min - off - l.dep.min, 1440);
+};
 
 // ---------- זמני סבב ----------
 
@@ -146,10 +153,11 @@ function second_unplanned_activity(ctx, params, rule) {
   // SIM_PRG ב-28/01/2025: סימולטור בחו"ל שתוכנן באמצע סבב.
   const simPlanned = (day) => (day.plan?.codes ?? []).some((c) => simPlan.includes(c) || simPlanPrefixes.some((x) => c.startsWith(x)));
   const key = keyFor(params.report_column);
+  const own = ctx.rulesWithLogic('second_unplanned_activity').map((r) => r.id);
 
   const askRest = (id, date, title) => ctx.ask({
     id, date, title,
-    body: `לסימולטור אין שעות בקבצים. פעילות שנייה מזכה רק אם הייתה מנוחה חוקית (${params.legal_rest_hours} שעות לפחות) בין שתי הפעילויות, כלומר הן לא באותו FDP.`,
+    body: `לסימולטור אין שעות בקבצים, והדוח לא מזכה על הפעילות השנייה. היא מזכה רק אם הייתה מנוחה חוקית (${params.legal_rest_hours} שעות לפחות) בין שתי הפעילויות, כלומר הן לא באותו FDP.`,
     options: [
       { value: 'separate', label: `הייתה מנוחה של ${params.legal_rest_hours} שעות לפחות`, hint: `${minToHhmm(H(params.hours))} על הפעילות השנייה` },
       { value: 'same_fdp', label: 'שתיהן באותו FDP', hint: 'אין פיצוי' },
@@ -185,9 +193,11 @@ function second_unplanned_activity(ctx, params, rule) {
     const simDay = ctx.timeline.find((d) => d.date === day && isSimDay(d));
     if (!simDay) continue;
     const id = `second_activity:${u.id}`;
-    const a = ctx.answer(id);
+    const answered = ctx.answer(id);
+    const a = answered ?? (ctx.paidOn(u, params.report_column, key, H(params.hours), own) ? { value: 'separate' } : null);
     if (!a) askRest(id, day, `${describePairing(u)} לא הייתה בתכנון, ובאותה יממה היה סימולטור. האם הייתה מנוחה ביניהם?`);
-    else if (a.value === 'separate') ctx.expectPairing(u, key, H(params.hours), rule, `${describePairing(u)} לא הייתה בתכנון, ובאותה יממה היה סימולטור (לפי תשובתך, עם מנוחה חוקית ביניהם)`);
+    else if (a.value === 'separate') ctx.expectPairing(u, key, H(params.hours), rule, `${describePairing(u)} לא הייתה בתכנון, ובאותה יממה היה סימולטור ` +
+      `(${answered ? 'לפי תשובתך, עם מנוחה חוקית ביניהם' : `הדוח מזכה ${params.report_column}`})`);
   }
 
   // סימולטור לא מתוכנן ביום טיסה
@@ -196,9 +206,11 @@ function second_unplanned_activity(ctx, params, rule) {
     const flights = ctx.execPairings.filter((p) => p.dates.includes(day.date));
     if (!flights.length) continue;
     const id = `second_activity:sim:${day.date}`;
-    const a = ctx.answer(id);
+    const answered = ctx.answer(id);
+    const a = answered ?? (ctx.paidOnDate(day.date, params.report_column, key, H(params.hours)) ? { value: 'separate' } : null);
     if (!a) askRest(id, day.date, `סימולטור ב-${ddmm(day.date)} לא היה בתכנון, ובאותה יממה בוצעה ${flights.map(describePairing).join(', ')}. האם הייתה מנוחה ביניהם?`);
-    else if (a.value === 'separate') ctx.expect(day.date, key, H(params.hours), rule, 'סימולטור לא מתוכנן ביממה עם טיסה (לפי תשובתך, עם מנוחה חוקית ביניהם)');
+    else if (a.value === 'separate') ctx.expect(day.date, key, H(params.hours), rule,
+      `סימולטור לא מתוכנן ביממה עם טיסה (${answered ? 'לפי תשובתך, עם מנוחה חוקית ביניהם' : `הדוח מזכה ${params.report_column}`})`);
   }
 }
 
@@ -502,21 +514,23 @@ function special_date_activity(ctx, params, rule) {
     const coded = days.find((d) => ctx.activityCodes(d).length);
     if (!coded) continue;
     const id = `occasion:${rule.id}:${date}`;
-    const a = ctx.answer(id);
+    const answered = ctx.answer(id);
+    const a = answered ?? (ctx.paidOnDate(coded.date, params.report_column, key, H(params.hours)) ? { value: 'yes' } : null);
     if (!a) {
       ctx.ask({
         id,
         date: coded.date,
         title: `${occ.title}: האם היית בפעילות מטעם החברה בין ${hhmm(wFrom)} ל-${hhmm(wTo)}?`,
-        body: `ב-${ddmm(coded.date)} רשום ${ctx.activityCodes(coded).join(', ')}, ואין בקבצים שעות לפעילות הזאת.`,
+        body: `ב-${ddmm(coded.date)} רשום ${ctx.activityCodes(coded).join(', ')}, אין בקבצים שעות לפעילות הזאת, והדוח לא מזכה עליה.`,
         options: [
-          { value: 'yes', label: 'כן', hint: `${minToHhmm(H(params.hours))}` },
+          { value: 'yes', label: 'כן', hint: `${minToHhmm(H(params.hours))} – פער מול הדוח` },
           { value: 'no', label: 'לא', hint: 'אין פיצוי' },
         ],
         ruleId: rule.id,
       });
     } else if (a.value === 'yes') {
-      ctx.expect(coded.date, key, H(params.hours), rule, `${occ.title}: ${ctx.activityCodes(coded).join(', ')} בחלון ${window} (לפי תשובתך)`);
+      ctx.expect(coded.date, key, H(params.hours), rule, `${occ.title}: ${ctx.activityCodes(coded).join(', ')} בחלון ${window} ` +
+        `(${answered ? 'לפי תשובתך' : `הדוח מזכה ${params.report_column}`})`);
     }
   }
 }
@@ -559,18 +573,27 @@ function free_days_waived(ctx, params, rule) {
       !(sp.start >= d0 + offFrom && sp.end >= d0 + 1440) && !(sp.start < d0 && sp.end <= d0 + onUntil));
   }).map((d) => d.date);
 
-  // X ב-1 לחודש בלי טיסה ביום: ייתכן שזו נחיתה של סבב מהחודש הקודם, שאינו בתכנון. שואלים. עד התשובה היום לא נספר.
+  // X ב-1 לחודש בלי טיסה ביום: ייתכן שזו נחיתה של סבב מהחודש הקודם, שאינו בתכנון. עד התשובה
+  // היום לא נספר. שואלים רק כשהתשובה יכולה להוריד את מספר הימים מתחת למינימום (החלטת בעל
+  // המוצר, 23/09/2026), גם כשחסר יום אחד בלבד ולא מגיע עליו זיכוי: המספר עצמו צריך להיות נכון.
   const first = ctx.timeline.find((d) => d.date === ctx.monthFirst);
+  let pendingFirst = false;
   if (free.includes(ctx.monthFirst) && (first?.plan?.codes ?? []).includes('X')) {
     const fid = `free_days_first:${ctx.monthFirst.slice(0, 7)}`;
     const fa = ctx.answer(fid);
     if (fa?.value !== 'free') free.splice(free.indexOf(ctx.monthFirst), 1);
-    if (!fa) {
+    if (!fa && free.length >= due) {
+      // גם בלי היום יש מספיק ימים: התשובה לא תשנה דבר, ואין על מה לשאול.
+      ctx.note(ctx.monthFirst, `${rule.title}: ב-${ddmm(ctx.monthFirst)} מסומן X, וייתכן שנחתת בו מסבב של החודש הקודם, שאינו בתכנון, ` +
+        `ולכן הוא אינו נספר. גם בלעדיו יש ${free.length} ימים ללא פעילות מול מינימום ${due}, ולכן אין צורך לשאול.`, rule);
+    } else if (!fa) {
+      pendingFirst = true;
       ctx.ask({
         id: fid,
         date: ctx.monthFirst,
         title: `ימים ללא פעילות: ב-${ddmm(ctx.monthFirst)} מסומן X. האם נחתת בו מסבב של החודש הקודם?`,
-        body: `X ב-1 לחודש מופיע גם כשסבב מהחודש הקודם נוחת בו, והנחיתה אינה בתכנון. יום עם נחיתה בבסיס עד ${params.on_block_until} נחשב פנוי.`,
+        body: `X ב-1 לחודש מופיע גם כשסבב מהחודש הקודם נוחת בו, והנחיתה אינה בתכנון. יום עם נחיתה בבסיס עד ${params.on_block_until} נחשב פנוי. ` +
+          `בלעדיו יש ${free.length} ימים ללא פעילות, והמינימום הוא ${due}.`,
         options: [
           { value: 'free', label: `לא נחתתי בו, או שנחתתי עד ${params.on_block_until}`, hint: 'יום פנוי' },
           { value: 'busy', label: `נחתתי אחרי ${params.on_block_until}`, hint: 'לא יום פנוי' },
@@ -584,9 +607,12 @@ function free_days_waived(ctx, params, rule) {
   const missing = due - free.length;
   if (missing <= 0) return;
   const paidDays = missing - (params.paid_from_day - 1);
-  const what = `בתכנון ${free.length} ימים ללא פעילות, והמינימום לקרדיט מתוכנן ${minToHhmm(credit)} הוא ${due}`;
+  const what = `בתכנון ${free.length} ימים ללא פעילות` +
+    (pendingFirst ? ` (${free.length + 1} אם ב-${ddmm(ctx.monthFirst)} לא נחתת)` : '') +
+    `, והמינימום לקרדיט מתוכנן ${minToHhmm(credit)} הוא ${due}`;
   if (paidDays <= 0) {
-    ctx.note(null, `${what}. חסר יום אחד, והפיצוי מתחיל מהיום השני.`, rule);
+    ctx.note(null, `${what}. ${pendingFirst ? 'גם אם נחתת, חסר יום אחד בלבד' : 'חסר יום אחד'}, ` +
+      `והפיצוי ניתן רק מ-${params.paid_from_day} ימים חסרים ומעלה, ולכן לא מגיע זיכוי.`, rule);
     return;
   }
   const id = `free_days:${ctx.monthFirst.slice(0, 7)}`;
@@ -766,13 +792,8 @@ function white_flight(ctx, params, rule) {
   const from = parseClock(params.report_after);
   const to = parseClock(params.report_until);
   const inWindow = (c) => (from < to ? c > from && c <= to : c > from || c <= to);
-  // בתכנון אין משך לרגל: STA − STD, כששעת נחיתה עם ! מומרת לשעון הבסיס לפי airports.js.
-  const planBlock = (l) => {
-    if (!l.arr) return null;
-    const off = l.arr.foreign ? stationOffset(l.dst, l.date) : 0;
-    return off == null ? null : mod(l.arr.min - off - l.dep.min, 1440);
-  };
   const pairings = ctx.hasExec ? ctx.execPairings : ctx.planPairings;
+  const own = ctx.rulesWithLogic('white_flight').map((r) => r.id);
 
   for (const p of pairings) {
     for (const l of p.legs) {
@@ -790,22 +811,67 @@ function white_flight(ctx, params, rule) {
 
       const what = `${l.flight} ${l.org}→${l.dst} ב-${ddmm(l.date)}, התייצבות ${hhmm(reportAt)}, בלוק ${minToHhmm(block)}`;
       const id = `white:${l.date}:${l.flight}`;
-      const a = ctx.answer(id);
+      const answered = ctx.answer(id);
+      const a = answered ?? (ctx.paidOn(p, params.report_column, key, H(params.hours), own) ? { value: 'yes' } : null);
       if (!a) {
         ctx.ask({
           id,
           date: l.date,
-          title: `טיסה לבנה: האם ב-${l.flight} ב-${ddmm(l.date)} היו 3 טייסים או יותר?`,
-          body: `${what}. זו טיסה לבנה אם הצוות מוגבר. גם 4 טייסים, כשאחד מהם עוד לא מוגדר קברניט או קצין ראשון, נחשבים.`,
+          title: `טיסה לבנה: האם ${l.flight} ב-${ddmm(l.date)} בוצעה בצוות מוגבר?`,
+          body: `${what}. הדוח לא מזכה עליה, והיא טיסה לבנה רק אם הצוות היה מוגבר: 3 טייסים ומעלה, ` +
+            'גם 4 כשאחד מהם עוד לא מוגדר קברניט או קצין ראשון.',
           options: [
-            { value: 'yes', label: 'כן, 3 טייסים או יותר', hint: minToHhmm(H(params.hours)) },
+            { value: 'yes', label: 'כן, צוות מוגבר (3 טייסים או יותר)', hint: `${minToHhmm(H(params.hours))} – פער מול הדוח` },
             { value: 'no', label: 'לא', hint: 'אין פיצוי' },
           ],
           ruleId: rule.id,
         });
       } else if (a.value === 'yes') {
-        ctx.expectPairing(p, key, H(params.hours), rule, `${rule.title}: ${what} (צוות מוגבר לפי תשובתך)`);
+        ctx.expectPairing(p, key, H(params.hours), rule,
+          `${rule.title}: ${what} (${answered ? 'צוות מוגבר לפי תשובתך' : `הדוח מזכה ${params.report_column}, ולכן צוות מוגבר`})`);
       }
+    }
+  }
+}
+
+// ---------- טיסות ULH (2026 ס' 21) ----------
+
+/**
+ * טיסת ULH: צוות כפול שתוכנן וביצע טיסה ישירה שזמן הבלוק שלה גדול מ-`min_block_hours`
+ * ועד `max_block_hours` זכאי ל-`hours` (2026 ס' 21.2). אין מדרגה מעל 19 שעות: זו תקרת
+ * התכנון שבס' 21.1, ולא סף פיצוי נוסף.
+ *
+ * הרכב הצוות אינו בקבצים ואינו נשאל, בשונה מטיסה לבנה: לפי ס' 21.1 אישור רת"א לטיסות
+ * האלה מבוקש לטיסה ישירה בצוות כפול בלי עצירת ביניים, ולכן רגל אחת עם בלוק כזה היא
+ * צוות כפול (החלטת בעל המוצר, 23/09/2026). ס' 21.2 אינו מגביל לפי סוג מטוס, ובדוח
+ * הביצוע ממילא אין סוג מטוס, ולכן אין סינון 787.
+ *
+ * הבלוק הוא המתוכנן: SkdDur בדוח, ו-STA − STD בקובץ התכנון (החלטת בעל המוצר,
+ * 23/09/2026). "ביצע" = הרגל בדוח ואינה DH. "תוכנן" = אותה טיסה נמצאת גם בסבב המתוכנן
+ * שהותאם לה; טיסה כזו שלא תוכננה יוצאת לבדיקה ידנית ולא מדולגת בשקט.
+ */
+function ulh_flight(ctx, params, rule) {
+  const key = keyFor(params.report_column);
+  const min = H(params.min_block_hours);
+  const max = H(params.max_block_hours);
+  const entries = ctx.hasExec
+    ? ctx.matches.filter((m) => m.exec).map((m) => ({ pairing: m.exec, plan: m.plan }))
+    : ctx.planPairings.map((p) => ({ pairing: p, plan: p }));
+
+  for (const { pairing, plan } of entries) {
+    for (const l of pairing.legs) {
+      if (ctx.hasExec ? l.dhd || l.type === 'DHO' : l.dh) continue;
+      const block = ctx.hasExec ? l.skdDur : planBlock(l);
+      if (block == null || block <= min || block > max) continue;
+
+      const what = `${l.flight ?? ''} ${l.org}→${l.dst} ב-${ddmm(l.date)}, בלוק ${minToHhmm(block)}`.trim();
+      const planned = !ctx.hasExec ||
+        (plan?.legs ?? []).some((p) => !p.dh && (l.flight ? p.flight === l.flight : p.org === l.org && p.dst === l.dst));
+      if (!planned) {
+        ctx.review(`${rule.title}: ${what} אינה בתכנון. ס' 21.2 מזכה צוות כפול "אשר תוכנן וביצע", ולכן צריך לבדוק ידנית אם מגיע פיצוי.`, rule);
+        continue;
+      }
+      ctx.expectPairingDay(pairing, l.date, key, H(params.hours), rule, `${rule.title}: ${what} (צוות כפול)`);
     }
   }
 }
@@ -824,6 +890,7 @@ function white_flight(ctx, params, rule) {
 function stay_extension(ctx, params, rule) {
   if (!ctx.hasPlan || !ctx.hasExec) return;
   const key = keyFor(params.report_column);
+  const own = ctx.rulesWithLogic('stay_extension').map((r) => r.id);
   for (const m of ctx.matches) {
     if (!m.plan || !m.exec) continue;
     const planned = planSpan(m.plan, ctx.domicile, ctx.monthFirst).end;
@@ -833,14 +900,18 @@ function stay_extension(ctx, params, rule) {
     ctx.markPairing(m.exec, 'stay_extension');
     const what = `${describePairing(m.exec)}: החזרה לבסיס ב-${ddmm(dateOf(actual))} ${hhmm(actual)}, ` +
       `${minToHhmm(actual - planned)} שעות אחרי המתוכנן (${ddmm(dateOf(planned))} ${hhmm(planned)})`;
+    const unplanned = [];
+    for (let d = addDays(dateOf(planned), 1); d <= dateOf(actual); d = addDays(d, 1)) unplanned.push(d);
     const id = `stay_extension:${m.exec.id}`;
-    const a = ctx.answer(id);
+    const answered = ctx.answer(id);
+    // הדוח כבר מזכה את הסכום הגבוה שאפשרי כאן: אין פער, ולא שואלים.
+    const a = answered ?? (ctx.paidOn(m.exec, params.report_column, key, unplanned.length * H(params.hours), own) ? { value: 'company' } : null);
     if (!a) {
       ctx.ask({
         id,
         date: m.exec.from,
         title: `חזרה מאוחרת לבסיס: ${describePairing(m.exec)}`,
-        body: `${what}. הפיצוי תלוי בסיבה, והיא אינה בקבצים. מה קרה?`,
+        body: `${what}. הדוח לא מזכה עליה, והפיצוי תלוי בסיבה, שאינה בקבצים. מה קרה?`,
         options: [
           { value: 'voluntary', label: 'החזרה המאוחרת מרצונך', hint: 'ללא פיצוי' },
           { value: 'force_majeure', label: 'העיכוב מאירוע שלא בשליטת החברה', hint: `מגיע פיצוי רק על ${params.over_hours} שעות` },
@@ -857,11 +928,9 @@ function stay_extension(ctx, params, rule) {
         `${what}. אירוע שלא בשליטת החברה, לפי תשובתך: קריאה מיוחדת על ${params.over_hours} השעות הראשונות ` +
         `(${params.capped_days} יממות). מגיע גם אש"ל לכל התקופה, ובתקופה הזאת אין זיכוי שהייה בחו"ל.`);
     } else if (a.value === 'company') {
-      const days = [];
-      for (let d = addDays(dateOf(planned), 1); d <= dateOf(actual); d = addDays(d, 1)) days.push(d);
-      ctx.expectPairing(m.exec, key, days.length * H(params.hours), rule,
-        `${what}. ${days.length === 1 ? 'יממה לא מתוכננת' : `${days.length} יממות לא מתוכננות`} ` +
-        `(${days.map(ddmm).join(', ')}), לפי תשובתך.`);
+      ctx.expectPairing(m.exec, key, unplanned.length * H(params.hours), rule,
+        `${what}. ${unplanned.length === 1 ? 'יממה לא מתוכננת' : `${unplanned.length} יממות לא מתוכננות`} ` +
+        `(${unplanned.map(ddmm).join(', ')}), ${answered ? 'לפי תשובתך' : `לפי מה שהדוח מזכה ב-${params.report_column}`}.`);
     }
   }
 }
@@ -1003,6 +1072,7 @@ export const DUTY_LOGIC = {
   night_landings,
   special_date_activity,
   white_flight,
+  ulh_flight,
   free_days_waived,
   consecutive_saturdays,
   consecutive_night_rounds,
@@ -1024,6 +1094,7 @@ export const DUTY_PARAMS = {
   consecutive_saturdays: ['hours', 'report_column'],
   consecutive_night_rounds: ['hours', 'report_column', 'more_than', 'window_from', 'window_to', 'legal_rest_hours', 'report_minutes_before_std'],
   white_flight: ['hours', 'report_column', 'report_minutes_before_std', 'report_after', 'report_until', 'min_block_hours'],
+  ulh_flight: ['hours', 'report_column', 'min_block_hours', 'max_block_hours'],
   stay_extension: ['over_hours', 'capped_days', 'hours', 'report_column'],
   sim_night_session: ['hours', 'report_column', 'stations', 'night_from', 'night_to', 'start_after_std_minutes'],
   sim_friday_holiday_eve: ['hours', 'report_column', 'stations'],

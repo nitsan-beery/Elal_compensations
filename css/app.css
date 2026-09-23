@@ -102,6 +102,10 @@ main { max-width: 1100px; margin: 0 auto; padding: 1rem 16px 3rem; }
 .notice.ok { background: var(--ok-bg); color: var(--ok); }
 .notice.info { background: var(--pending-bg); color: var(--pending); }
 .notice ul, .banner ul { margin: .3rem 0 0; padding-inline-start: 1.2rem; }
+/* קוד לא מוכר: שורת הקוד, ותחתיה מה שהדוח רשם ותשובת המשתמש. */
+.notice ul.codes li { margin-bottom: .4rem; }
+.notice ul.codes .small { opacity: .85; }
+.notice .copy-text { width: 100%; font: inherit; }
 
 /* ---------- העלאה ---------- */
 .uploads { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
