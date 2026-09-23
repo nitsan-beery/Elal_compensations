@@ -1187,6 +1187,60 @@ function miami_delay(ctx, params, rule) {
 }
 
 
+// ---------- לאס וגאס (2018 ס' 58.2) ----------
+
+/**
+ * קיצור המנוחה בלאס וגאס (2018 ס' 58.2): המנוחה החוזית בתחנה מקוצרת ל-`rest_hours` שעות
+ * "בתמורה לתשלום פיצוי בגובה 5 שעות לתשלום לכל אצ"א פרטני [לפי 100%]", כל עוד החברה טסה
+ * לשם פעם בשבוע. ההסדר קבוע, ולכן מניחים שכל שהייה בתחנה מזכה, בלי תנאי על אורך השהייה
+ * (החלטת בעל המוצר, 23/09/2026). שואלים רק כשיש דוח שלא זיכה, כי שתי הסיבות שבגללן הפיצוי
+ * אינו מגיע – מנוחה חוזית מלאה, או שהחברה אינה טסה לשם פעם בשבוע – אינן בקבצים.
+ */
+function short_rest_las_vegas(ctx, params, rule) {
+  const key = keyFor(params.report_column);
+  const hours = H(params.hours);
+  const own = ctx.rulesWithLogic('short_rest_las_vegas').map((r) => r.id);
+  const deal = `המנוחה החוזית ב-${params.station} מקוצרת ל-${params.rest_hours} שעות בתמורה לפיצוי של ` +
+    `${minToHhmm(hours)}, כל עוד החברה טסה לשם פעם בשבוע.`;
+  const derived = `שעת ההתייצבות אינה בקבצים ונגזרת מ-STD פחות ${params.report_minutes_before_std} דק'.`;
+  for (const p of ctx.hasExec ? ctx.execPairings : ctx.planPairings) {
+    const stay = stationStay(ctx, p, params, ctx.hasExec);
+    if (!stay) continue;
+    const what = stayLine(p, stay, params);
+    if (!ctx.hasExec) {
+      ctx.expectPairing(p, key, hours, rule, `${what}. ${deal} ${derived}`);
+      continue;
+    }
+    const id = `las_vegas_rest:${p.id}`;
+    const answered = ctx.answer(id);
+    const a = answered ?? (ctx.paidOn(p, params.report_column, key, hours, own) ? { value: 'yes' } : null);
+    if (!a) {
+      ctx.ask({
+        id,
+        date: p.from,
+        title: `קיצור מנוחה ב-${params.station}: האם מגיע פיצוי?`,
+        body: `${what}. ${deal} הדוח לא מזכה ${minToHhmm(hours)} ב-${params.report_column}, והסיבה אינה בקבצים. ${derived}`,
+        options: [
+          { value: 'yes', label: 'כן, המנוחה קוצרה', hint: `${minToHhmm(hours)} – פער מול הדוח` },
+          { value: 'full_rest', label: 'לא, קיבלתי את המנוחה החוזית המלאה', hint: 'אין פיצוי' },
+          { value: 'not_weekly', label: `החברה אינה טסה ל-${params.station} פעם בשבוע`, hint: 'אין פיצוי' },
+        ],
+        ruleId: rule.id,
+      });
+      continue;
+    }
+    if (a.value !== 'yes') {
+      ctx.note(p.from, `${rule.title}: ${what}. ` + (a.value === 'full_rest'
+        ? 'לפי תשובתך המנוחה לא קוצרה, ולכן אין פיצוי.'
+        : `לפי תשובתך החברה אינה טסה ל-${params.station} פעם בשבוע, ולכן הקיצור אינו בתוקף ואין פיצוי.`), rule);
+      continue;
+    }
+    ctx.expectPairing(p, key, hours, rule, `${what}. ${deal} הפיצוי נרשם ` +
+      `${answered ? 'לפי תשובתך' : `לפי מה שהדוח מזכה ב-${params.report_column}`}. ${derived}`);
+  }
+}
+
+
 // ---------- סימולטור בישראל (2024 ס' 15–18; 2026 ס' 18) ----------
 
 /**
@@ -1330,6 +1384,7 @@ export const DUTY_LOGIC = {
   stay_extension,
   short_rest_miami,
   miami_delay,
+  short_rest_las_vegas,
   sim_night_session,
   sim_extension,
   sim_friday_holiday_eve,
@@ -1351,6 +1406,7 @@ export const DUTY_PARAMS = {
   stay_extension: ['over_hours', 'capped_days', 'hours', 'report_column'],
   short_rest_miami: ['station', 'night_from', 'night_to', 'max_nights', 'hours', 'report_column', 'report_minutes_before_std'],
   miami_delay: ['station', 'phase', 'min_delay_hours', 'min_delay_exclusive', 'hours', 'report_column'],
+  short_rest_las_vegas: ['station', 'rest_hours', 'hours', 'report_column', 'report_minutes_before_std'],
   sim_night_session: ['hours', 'report_column', 'stations', 'night_from', 'night_to', 'start_after_std_minutes'],
   sim_friday_holiday_eve: ['hours', 'report_column', 'stations'],
   sim_extension: ['hours', 'report_column', 'stations', 'max_hours'],

@@ -1085,6 +1085,7 @@ export const LOGIC_ORDER = [
   // קיצור המנוחה במיאמי מסמן את הסבב, ושני חוקי הדחייה של ס' 24.4 נשענים על הסימון.
   'short_rest_miami',
   'miami_delay',
+  'short_rest_las_vegas',
   'free_days_waived',
   'consecutive_saturdays',
   'consecutive_night_rounds',
