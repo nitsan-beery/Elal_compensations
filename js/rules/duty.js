@@ -344,85 +344,123 @@ function night_landings(ctx, params, rule) {
   }
   if (night.length < params.min_planned_count) return;
 
-  // מה נחשב ביצוע: הטיסה בדוח, או ביטול ושינוי הצבה ביוזמת החברה (done / company / no / unknown).
+  // מה נחשב ביצוע: הטיסה בדוח, או ביטול ושינוי הצבה ביוזמת החברה (ס' 40). הסיבה נשאלת
+  // במקום אחד בלבד, בשאלה על הסבב שלא בוצע, וכאן רק קוראים מה יצא ממנה.
   if (ctx.hasExec) {
     for (const n of night) {
       n.target = ctx.execPairings.find((e) => e.legs.some((l) => l.flight === n.leg.flight && l.type !== 'DHO' &&
         Math.abs(Date.parse(l.date) - Date.parse(n.leg.date)) <= dayMs)) ?? null;
       if (n.target) { n.status = 'done'; continue; }
-      const cause = companyCause(ctx, n.pairing);
-      const a = cause == null ? ctx.answer(`night_landing:${n.pairing.id}`)?.value : null;
-      n.status = cause === true || a === 'company' ? 'company' : cause === false || a === 'mine' ? 'no' : 'unknown';
+      n.status = cancelStatus(ctx, n.pairing);
     }
   } else {
     for (const n of night) { n.target = n.pairing; n.status = 'done'; }
   }
   const threshold = params.paid_from_count;
+  const key = keyFor(params.report_column);
+  const hours = H(params.hours);
+  const crews = params.counted_crews;
+  const crewOf = (n) => ctx.answer(`night_crew:${n.leg.date}:${n.leg.flight}`)?.value;
 
-  // נספרות רק טיסות בהרכב צוות מ-`counted_crews` (2024 ס' 39–40: בודד או מוגבר). ההרכב אינו בקבצים, ולכן
-  // שואלים על כל טיסה, רק כל עוד התשובות עוד יכולות להביא למינימום.
-  let pool = night;
-  if (params.counted_crews) {
-    const counted = params.counted_crews;
-    const crewOf = (n) => ctx.answer(`night_crew:${n.leg.date}:${n.leg.flight}`)?.value;
-    const kept = night.filter((n) => counted.includes(crewOf(n)));
-    const open = night.filter((n) => crewOf(n) == null);
-    if (kept.length + open.length < params.min_planned_count) return;
-    // עם דוח ביצוע: אם גם כשכל הטיסות הפתוחות ייספרו לא מגיעים לטיסה ה-`paid_from_count` שבוצעה, לא שואלים.
-    if (open.length && [...kept, ...open].filter((n) => n.status !== 'no').length >= threshold) {
-      for (const n of open) {
-        ctx.ask({
-          id: `night_crew:${n.leg.date}:${n.leg.flight}`,
-          date: n.leg.date,
-          title: `נחיתת לילה: באיזה צוות מתוכננת ${n.leg.flight} ב-${ddmm(n.leg.date)} (נחיתה ${minToHhmm(n.clock)} שעון ישראל)?`,
-          body: `בתכנון ${night.length} טיסות עם נחיתה בין ${params.window_from} ל-${params.window_to}. לפיצוי נספרות רק טיסות בצוות ` +
-            `${counted.map((c) => CREW_LABEL[c] ?? c).join(' או ')}, מ-${params.min_planned_count} טיסות כאלה בחודש.`,
-          options: Object.entries(CREW_LABEL).map(([value, label]) => ({
-            value, label: `${label} (${CREW_PILOTS[value]} טייסים)`, hint: counted.includes(value) ? 'נספרת' : 'לא נספרת',
-          })),
-          ruleId: rule.id,
-        });
-      }
-      return;
-    }
-    pool = [...kept, ...open];
+  // נספרות רק טיסות בהרכב צוות מ-`counted_crews` (2024 ס' 39–40: בודד או מוגבר). ההרכב אינו
+  // בקבצים, ולכן מניחים תחילה שכל טיסה שלא נענתה נספרת: ההרכב יכול רק להוריד את המספר, וזאת
+  // התוצאה הגבוהה האפשרית. רק אם תחתיה מגיע פיצוי שהדוח לא זיכה, נשאלת שאלה על הרכב הצוות
+  // (החלטת בעל המוצר, 23/09/2026).
+  const pool = crews ? night.filter((n) => crewOf(n) == null || crews.includes(crewOf(n))) : night;
+  const names = (items) => items.map((n) => `${ddmm(n.leg.date)} ${n.leg.flight}`).join(', ');
+  const list = (items) => items.map((n) => `${ddmm(n.leg.date)} ${n.leg.flight}${n.status === 'company' ? ' – שינוי ביוזמת החברה' : ''}`).join(', ');
+  const planned = `תוכננו ${night.length} טיסות עם נחיתה בין ${params.window_from} ל-${params.window_to}`;
+  if (pool.length < params.min_planned_count) {
+    ctx.note(null, `${rule.title}: ${planned}, ואחרי התשובות על הרכב הצוות נספרות ${pool.length}` +
+      `${pool.length ? ` (${list(pool)})` : ''}. המינימום הוא ${params.min_planned_count}, ולכן אין פיצוי.`, rule);
+    return;
   }
 
   const counted = pool.filter((n) => n.status === 'done' || n.status === 'company');
-  const unknown = pool.filter((n) => n.status === 'unknown');
-  if (counted.length + unknown.length < threshold) {
-    const list = (items) => items.map((n) => `${ddmm(n.leg.date)} ${n.leg.flight}${n.status === 'company' ? ' – שינוי ביוזמת החברה' : ''}`).join(', ');
+  const unsettled = pool.filter((n) => n.status === 'unknown' || n.status === 'review');
+  if (counted.length + unsettled.length < threshold) {
     const missed = pool.filter((n) => !counted.includes(n));
-    ctx.note(null, `${rule.title}: תוכננו ${pool.length} טיסות עם נחיתה בין ${params.window_from} ל-${params.window_to}, ` +
-      `נספרות כבוצעות: ${counted.length}${counted.length ? ` (${list(counted)})` : ''}${missed.length ? `; לא בוצעו: ${list(missed)}` : ''}. ` +
-      `הפיצוי הוא מהטיסה ה-${threshold} שבוצעה, ולכן אין פיצוי.`, rule);
+    ctx.note(null, `${rule.title}: ${planned}, נספרות כבוצעות: ${counted.length}${counted.length ? ` (${list(counted)})` : ''}` +
+      `${missed.length ? `; לא בוצעו: ${list(missed)}` : ''}. הפיצוי הוא מהטיסה ה-${threshold} שבוצעה, ולכן אין פיצוי.`, rule);
     return;
   }
-  if (unknown.length && counted.length < threshold) {
-    for (const n of unknown) {
-      ctx.ask({
-        id: `night_landing:${n.pairing.id}`,
-        date: n.pairing.from,
-        title: `${describePairing(n.pairing)}: טיסה עם נחיתת לילה (${minToHhmm(n.clock)}) שלא בוצעה`,
-        body: `תוכננו ${night.length} טיסות עם נחיתה בין ${params.window_from} ל-${params.window_to}. ביטול או שינוי הצבה ביוזמת החברה ` +
-          'נחשב ביצוע לצורך הפיצוי, ושינוי לבקשתך לא. מה קרה?',
-        options: [
-          { value: 'company', label: 'ביוזמת החברה', hint: 'נספרת כבוצעה' },
-          { value: 'mine', label: 'לבקשתי, או שלא הייתי זמין', hint: 'לא נספרת' },
-        ],
-        ruleId: rule.id,
-      });
+  // הספירה אינה סגורה כל עוד לא ידוע למה סבב לא בוצע. השאלה על כך כבר נשאלה בחוק הסבב
+  // שלא בוצע, ולכן כאן לא שואלים שוב (החלטת בעל המוצר, 23/09/2026), אלא מסבירים במה זה תלוי.
+  // גם על הרכב הצוות לא שואלים עד שהיא תיסגר: עד אז לא ידוע אם בכלל מגיע פיצוי.
+  if (counted.length < threshold) {
+    const why = `${rule.title}: נספרות כבוצעות ${counted.length} טיסות מתוך ${pool.length} מתוכננות עם נחיתה בין ` +
+      `${params.window_from} ל-${params.window_to}, והפיצוי הוא מהטיסה ה-${threshold} שבוצעה`;
+    for (const n of unsettled.filter((x) => x.status === 'review')) {
+      ctx.review(`${ddmm(n.leg.date)} ${n.leg.flight} לא בוצעה, והסיבה שנרשמה עליה היא "סיבה אחרת", כך שלא ידוע אם זה היה ביוזמת ` +
+        `החברה – ורק אז היא נספרת כבוצעה (ס' 40). ${why}. דורש בדיקה ידנית.`, rule);
     }
+    const pending = unsettled.filter((x) => x.status === 'unknown');
+    if (pending.length) {
+      const many = pending.length > 1;
+      ctx.note(null, `${why}. ${list(pending)} לא ${many ? 'בוצעו' : 'בוצעה'}, וביטול או שינוי הצבה ביוזמת החברה ` +
+        `נחשב ביצוע (ס' 40). הספירה תיסגר לפי התשובה על ${many ? 'הסבבים שלא בוצעו' : 'הסבב שלא בוצע'}.`, rule);
+    }
+    return;
   }
 
   counted.sort((a, b) => a.leg.date.localeCompare(b.leg.date) || a.clock - b.clock);
-  counted.forEach((n, i) => {
-    const why = `${ddmm(n.leg.date)} ${n.leg.flight}, נחיתה ${minToHhmm(n.clock)} שעון ישראל: הטיסה ה-${i + 1} מתוך ` +
+  const paying = counted.slice(threshold - 1);
+  const open = crews ? pool.filter((n) => crewOf(n) == null) : [];
+  if (open.length) {
+    const unpaid = paying.filter((n) => !(n.target ? ctx.paidOn(n.target, params.report_column, key, hours)
+      : ctx.paidOnDate(n.pairing.from, params.report_column, key, hours)));
+    if (!unpaid.length) {
+      const one = paying.length === 1;
+      ctx.note(null, `${rule.title}: ${planned}, והדוח מזכה ${minToHhmm(hours)} ב-${params.report_column} על ` +
+        `${names(paying)}. לכן ${one ? 'היא בוצעה' : 'הן בוצעו'} בצוות ${crews.map((c) => CREW_LABEL[c] ?? c).join(' או ')}, ` +
+        'ולא נשאלה שאלה על הרכב הצוות.', rule);
+    } else {
+      // שואלים אחת בכל פעם, מהטיסה הארוכה ביותר (בקשת בעל המוצר, 23/09/2026): תשובה שאינה
+      // נספרת מורידה את המספר ומייתרת את השאר, והסיכוי לכך גדול יותר בטיסה ארוכה.
+      const next = [...open].sort((a, b) => (plannedBlock(ctx, b.leg) ?? 0) - (plannedBlock(ctx, a.leg) ?? 0) ||
+        a.leg.date.localeCompare(b.leg.date))[0];
+      ctx.ask({
+        id: `night_crew:${next.leg.date}:${next.leg.flight}`,
+        date: next.leg.date,
+        title: `נחיתת לילה: באיזה צוות מתוכננת ${next.leg.flight} ב-${ddmm(next.leg.date)} (נחיתה ${minToHhmm(next.clock)} שעון ישראל)?`,
+        body: `${planned}, ולפי התכנון מגיע ${minToHhmm(hours)} ב-${params.report_column} על ${names(unpaid)}, והדוח לא זיכה. ` +
+          `לפיצוי נספרות רק טיסות בצוות ${crews.map((c) => CREW_LABEL[c] ?? c).join(' או ')}, ` +
+          `מ-${params.min_planned_count} טיסות כאלה בחודש${open.length > 1 ? `. נשאלת הטיסה הארוכה ביותר מבין ${open.length} שעדיין לא נענו` : ''}.`,
+        options: Object.entries(CREW_LABEL).map(([value, label]) => ({
+          value, label: `${label} (${CREW_PILOTS[value]} טייסים)`, hint: crews.includes(value) ? 'נספרת' : 'לא נספרת',
+        })),
+        ruleId: rule.id,
+      });
+      return;
+    }
+  }
+
+  paying.forEach((n) => {
+    const why = `${ddmm(n.leg.date)} ${n.leg.flight}, נחיתה ${minToHhmm(n.clock)} שעון ישראל: הטיסה ה-${counted.indexOf(n) + 1} מתוך ` +
       `${night.length} מתוכננות עם נחיתת לילה`;
-    if (i + 1 < threshold) return;
-    if (n.target) ctx.expectPairing(n.target, keyFor(params.report_column), H(params.hours), rule, why);
-    else ctx.expect(n.pairing.from, keyFor(params.report_column), H(params.hours), rule, `${why} (בוטלה ביוזמת החברה)`);
+    if (n.target) ctx.expectPairing(n.target, key, hours, rule, why);
+    else ctx.expect(n.pairing.from, key, hours, rule, `${why} (בוטלה ביוזמת החברה)`);
   });
+}
+
+/**
+ * משך הטיסה המתוכנן של רגל: STA − STD, אחרי שכל צד מומר לשעון הבסיס. ה-`skdDur` של רגל
+ * בתכנון אינו משמש כאן: הוא ה-FT של כל היום, שנרשם על הרגל האחרונה שבו.
+ */
+function plannedBlock(ctx, leg) {
+  if (!leg.dep || !leg.arr) return null;
+  const [o, d] = [offsetOf(ctx, leg.dep, leg.org, leg.date), offsetOf(ctx, leg.arr, leg.dst, leg.date)];
+  return o == null || d == null ? null : mod(leg.arr.min - d - (leg.dep.min - o), 1440);
+}
+
+/** ההפרש בין שעון התחנה לשעון הבסיס: 0 בבסיס, מה שנלמד מהקבצים, ואחרת לפי אזור הזמן. */
+function offsetOf(ctx, time, station, date) {
+  if (!time.foreign) return 0;
+  const learned = ctx.stationOffsets?.[station];
+  if (learned?.length) {
+    return [...learned].sort((a, b) => Math.abs(Date.parse(a.date) - Date.parse(date)) - Math.abs(Date.parse(b.date) - Date.parse(date)))[0].off;
+  }
+  return stationOffset(station, date, ctx.domicile);
 }
 
 /** שעת הנחיתה של רגל מתוכננת בשעון הבסיס, או null. */
@@ -453,18 +491,26 @@ function arrivalAtBaseClock(ctx, leg) {
 }
 
 /**
- * האם סבב מתוכנן שלא בוצע בוטל או שונה ביוזמת החברה: true, false, או null כשלא ידוע.
- * היעדרות והחלפה מרצון אינן ביוזמת החברה.
+ * סבב מתוכנן שלא בוצע, לעניין ס' 40: ביטול או שינוי הצבה ביוזמת החברה נחשב ביצוע.
+ * הסיבה נשאלת פעם אחת בלבד, בשאלה על הסבב שלא בוצע, שרצה לפני החוק הזה. הקריאה כאן היא
+ * לפי הסימונים שהחוקים הקודמים שמו על הסבב, ולא לפי התשובה בלבד: כשהדוח כבר מזכה את
+ * השעות שהפסיד לא נשאלת שאלה, והסבב מסומן `lost_hours_credit` (החלטת בעל המוצר, 23/09/2026).
+ * `company` נספר כבוצע, `no` לא נספר, `review` נדרשת בדיקה ידנית, `unknown` השאלה עוד פתוחה.
  */
-function companyCause(ctx, planPairing) {
+function cancelStatus(ctx, planPairing) {
   const m = ctx.matches.find((x) => x.plan === planPairing);
-  if (!m) return null;
-  if (m.byLeave) return false;
-  if (m.how === 'replaced_by_ground') return true; // החברה הציבה אותו לפעילות קרקע
-  const a = ctx.answerFor(m);
-  if (a?.value === 'voluntary_swap') return false;
-  if (['replaced', 'wet_lease', 'trainee', 'swap_777', 'cancelled'].includes(a?.value)) return true;
-  return null;
+  if (!m) return 'unknown';
+  if (m.byLeave) return 'no'; // היעדרות ומחלה אינן ביוזמת החברה
+  if (m.how === 'replaced_by_ground') return 'company'; // החברה הציבה אותו לפעילות קרקע
+  const by = (tag) => ctx.pairingHandledBy(planPairing, tag);
+  if (by('lost_hours_credit') || by('cancelled_no_compensation')) return 'company';
+  if (by('voluntary_swap')) return 'no';
+  // גם בלי סימון, כשהחוק שמסמן אינו בתוקף בחודש: התשובה עצמה.
+  const a = ctx.answerFor(m)?.value;
+  if (a === 'voluntary_swap') return 'no';
+  if (['cancelled', 'wet_lease', 'trainee', 'swap_777', 'replaced'].includes(a)) return 'company';
+  if (a === 'other') return 'review';
+  return 'unknown';
 }
 
 // ---------- פעילות בתאריכים מיוחדים (2024 ס' 42.1–42.5) ----------
@@ -659,7 +705,7 @@ function consecutive_saturdays(ctx, params, rule) {
     const sp = execSpans.find((s) => overlapsDay(s, date));
     if (sp) return { pairing: sp.p };
     if (ctx.activityCodes(day).length) return { date };
-    const cancelled = planSpans.find((s) => overlapsDay(s, date) && companyCause(ctx, s.p) === true);
+    const cancelled = planSpans.find((s) => overlapsDay(s, date) && cancelStatus(ctx, s.p) === 'company');
     return cancelled ? { date, cancelled: cancelled.p } : null;
   };
 
@@ -712,8 +758,8 @@ function consecutive_night_rounds(ctx, params, rule) {
   // done / company / no / unknown
   const statusOf = (d) => {
     if (!ctx.hasExec || performed.has(d)) return 'done';
-    const cause = companyCause(ctx, planned.get(d));
-    return cause === true ? 'company' : cause === false ? 'no' : 'unknown';
+    const st = cancelStatus(ctx, planned.get(d));
+    return st === 'review' ? 'unknown' : st; // הבדיקה הידנית על הרצף מכסה גם את זה
   };
 
   const nights = [...planned.keys()].sort();
