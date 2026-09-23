@@ -320,6 +320,8 @@ const codeIn = (code, list = [], prefixes = []) => list.includes(code) || prefix
  *
  * הסכום מחושב כתוספת ליום × מספר הימים (החלטת בעל המוצר, 21/09/2026).
  * `taper_monthly_totals` אינו בשימוש בחישוב: הוא שונה מהמכפלה בעד 7 דקות.
+ * `yearly_cap_days` נשמר כנתון בלבד: תקרת ימי החופשה השנתית אינה נבדקת בחודש
+ * בודד, ואין טעם להעיר על כך בכל בדיקה (החלטת בעל המוצר, 23/09/2026).
  * העיגול לדקות נעשה על הסכום ולא על כל יום, כדי לא לצבור שגיאת עיגול.
  */
 function vacation_credit_balance(ctx, params, rule) {
@@ -348,9 +350,6 @@ function vacation_credit_balance(ctx, params, rule) {
   const max = H(params.monthly_max_hours);
   if (max && total > max) {
     ctx.review(`איזון החופשה החודשי (${n} × ${rate}) עובר את התקרה של ${params.monthly_max_hours} שעות.`, rule);
-  }
-  if (params.yearly_cap_days != null) {
-    ctx.note(null, `תקרת ${params.yearly_cap_days} ימי חופשה בשנה אינה נבדקת בחודש בודד.`, rule);
   }
 }
 
