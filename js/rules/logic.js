@@ -1082,6 +1082,9 @@ export const LOGIC_ORDER = [
   'special_date_activity',
   'white_flight',
   'ulh_flight',
+  // קיצור המנוחה במיאמי מסמן את הסבב, ושני חוקי הדחייה של ס' 24.4 נשענים על הסימון.
+  'short_rest_miami',
+  'miami_delay',
   'free_days_waived',
   'consecutive_saturdays',
   'consecutive_night_rounds',

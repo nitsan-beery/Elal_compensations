@@ -454,14 +454,17 @@ function plannedBlock(ctx, leg) {
 }
 
 /** ההפרש בין שעון התחנה לשעון הבסיס: 0 בבסיס, מה שנלמד מהקבצים, ואחרת לפי אזור הזמן. */
-function offsetOf(ctx, time, station, date) {
-  if (!time.foreign) return 0;
+function stationOffsetAt(ctx, station, date) {
+  if (!station || station === ctx.domicile) return 0;
   const learned = ctx.stationOffsets?.[station];
   if (learned?.length) {
     return [...learned].sort((a, b) => Math.abs(Date.parse(a.date) - Date.parse(date)) - Math.abs(Date.parse(b.date) - Date.parse(date)))[0].off;
   }
   return stationOffset(station, date, ctx.domicile);
 }
+
+/** ההפרש של שעה בתכנון: שעה בלי ! היא כבר בשעון הבסיס. */
+const offsetOf = (ctx, time, station, date) => (time.foreign ? stationOffsetAt(ctx, station, date) : 0);
 
 /** שעת הנחיתה של רגל מתוכננת בשעון הבסיס, או null. */
 function arrivalAtBaseClock(ctx, leg) {
@@ -982,6 +985,208 @@ function stay_extension(ctx, params, rule) {
 }
 
 
+// ---------- מיאמי (2026 ס' 24) ----------
+
+/**
+ * זמני רגל בזמן מוחלט בשעון הבסיס. הרגל רשומה ביום ההמראה בשעון הבסיס, בתכנון ובדוח
+ * כאחד, והשעות עצמן מקומיות לתחנה (בתכנון עם !). `actual` – לפי ATD ומשך בפועל כשיש.
+ */
+function legTimes(ctx, leg, actual) {
+  const off = stationOffsetAt(ctx, leg.org, leg.date);
+  if (off == null) return null;
+  const abs = (clock) => at(leg.date, mod(clock - off, 1440));
+  if (leg.dep || leg.arr) { // רגל תכנון
+    const block = plannedBlock(ctx, leg);
+    if (block == null) return null;
+    const dep = abs(leg.dep.min);
+    return { dep, arr: dep + block };
+  }
+  if (leg.std == null || leg.skdDur == null) return null;
+  const dep = abs(leg.std);
+  if (!actual || leg.atd == null) return { dep, arr: dep + leg.skdDur };
+  // המראה בפועל שנראית מוקדמת מה-STD היא ביום שאחרי.
+  const real = dep - abs(leg.atd) > 720 ? abs(leg.atd) + 1440 : abs(leg.atd);
+  return { dep: real, arr: real + (leg.actDur ?? leg.skdDur) };
+}
+
+/**
+ * שהייה בתחנה בתוך סבב: מהנחיתה בה ועד ההתייצבות לרגל שיוצאת ממנה. שעת ההתייצבות אינה
+ * בקבצים, ונגזרת מ-STD פחות `report_minutes_before_std`. מוחזרים גם הזמנים בשעון התחנה,
+ * כי חלון הלילה של ס' 24.3 הוא מקומי. רגל DH נספרת גם היא: הצוות שוהה בתחנה בכל מקרה.
+ */
+function stationStay(ctx, pairing, params, actual) {
+  const legs = pairing.legs;
+  for (let i = 0; i < legs.length - 1; i++) {
+    const [inLeg, outLeg] = [legs[i], legs[i + 1]];
+    if (inLeg.dst !== params.station || outLeg.org !== params.station) continue;
+    const [a, b] = [legTimes(ctx, inLeg, actual), legTimes(ctx, outLeg, false)];
+    const off = stationOffsetAt(ctx, params.station, inLeg.date);
+    if (!a || !b || off == null) return null;
+    const pickup = b.dep - (params.report_minutes_before_std ?? 0);
+    if (pickup <= a.arr) return null;
+    return { inLeg, outLeg, arr: a.arr, pickup, localArr: a.arr + off, localPickup: pickup + off };
+  }
+  return null;
+}
+
+/**
+ * מספר הלילות שהשהייה חופפת להם. לילה = `from`–`to` בשעון התחנה, ונגיעה בקצה אינה נספרת,
+ * לפי הדוגמה שבס' 24.3: נחיתה ב-05:00 ופיקאפ למחרת ב-23:00 הם לילה אחד.
+ */
+function nightsIn(from, to, startLocal, endLocal) {
+  const span = from < to ? to - from : 1440 - from + to;
+  let count = 0;
+  for (let d = Math.floor(startLocal / 1440) - 1; d <= Math.floor(endLocal / 1440); d++) {
+    const s = d * 1440 + from;
+    if (Math.min(endLocal, s + span) - Math.max(startLocal, s) > 0) count++;
+  }
+  return count;
+}
+
+const stayLine = (p, stay, params) =>
+  `${describePairing(p)}: נחיתה ב-${params.station} ${ddmm(dateOf(stay.localArr))} ${hhmm(stay.localArr)} והתייצבות ` +
+  `${ddmm(dateOf(stay.localPickup))} ${hhmm(stay.localPickup)} (שעון ${params.station}), שהייה ${minToHhmm(stay.pickup - stay.arr)}`;
+
+/**
+ * קיצור מנוחה במיאמי (2026 ס' 24.1–24.3): `hours` שעות בכל מקרה שבו הצוות שהה בתחנה
+ * `max_nights` לילה בלבד. "יום אחר יום באמצע השבוע" (ס' 24.1) הוא תנאי לתכנון ולא לפיצוי
+ * ("בכל מקרה" בס' 24.3), ולכן אין סינון לפי יום בשבוע. הספירה עצמה בקבצים, ורק שעת
+ * ההתייצבות נגזרת, ולכן כשיש דוח שלא זיכה שואלים לאישור (החלטת בעל המוצר, 23/09/2026).
+ * סבב שנקבע בו לילה אחד מסומן `miami_one_night`, וחוקי הדחייה של ס' 24.4 נשענים עליו.
+ */
+function short_rest_miami(ctx, params, rule) {
+  const key = keyFor(params.report_column);
+  const hours = H(params.hours);
+  const from = parseClock(params.night_from);
+  const to = parseClock(params.night_to);
+  const own = ctx.rulesWithLogic('short_rest_miami').map((r) => r.id);
+  const window = `בין ${params.night_from} ל-${params.night_to}`;
+  for (const p of ctx.hasExec ? ctx.execPairings : ctx.planPairings) {
+    const stay = stationStay(ctx, p, params, ctx.hasExec);
+    if (!stay) continue;
+    const what = stayLine(p, stay, params);
+    const nights = nightsIn(from, to, stay.localArr, stay.localPickup);
+    if (nights !== params.max_nights) {
+      ctx.note(p.from, `${rule.title}: ${what}, כלומר ${nights} לילות ${window}. הפיצוי ניתן רק על ` +
+        `${params.max_nights} לילה בלבד, ולכן אין פיצוי.`, rule);
+      continue;
+    }
+    const derived = `שעת ההתייצבות אינה בקבצים ונגזרת מ-STD פחות ${params.report_minutes_before_std} דק'.`;
+    const why = `${what}, ולכן לילה אחד בלבד ${window}`;
+    if (!ctx.hasExec) {
+      ctx.markPairing(p, 'miami_one_night');
+      ctx.expectPairing(p, key, hours, rule, `${why}. ${derived}`);
+      continue;
+    }
+    const id = `miami_short_rest:${p.id}`;
+    const answered = ctx.answer(id);
+    const a = answered ?? (ctx.paidOn(p, params.report_column, key, hours, own) ? { value: 'yes' } : null);
+    if (a?.value === 'no') {
+      ctx.note(p.from, `${rule.title}: ${what}. לפי תשובתך שהית שם יותר מלילה אחד, ולכן אין פיצוי.`, rule);
+      continue;
+    }
+    if (!a) {
+      ctx.ask({
+        id,
+        date: p.from,
+        title: `קיצור מנוחה ב-${params.station}: האם שהית שם לילה אחד בלבד?`,
+        body: `${what}. לפי החישוב זה לילה אחד ${window}, והדוח לא מזכה ${minToHhmm(hours)} ב-${params.report_column}. ${derived}`,
+        options: [
+          { value: 'yes', label: 'כן, לילה אחד בלבד', hint: `${minToHhmm(hours)} – פער מול הדוח` },
+          { value: 'no', label: 'לא, יותר מלילה אחד', hint: 'אין פיצוי' },
+        ],
+        ruleId: rule.id,
+      });
+      continue;
+    }
+    ctx.markPairing(p, 'miami_one_night');
+    ctx.expectPairing(p, key, hours, rule,
+      `${why} (${answered ? 'לפי תשובתך' : `לפי מה שהדוח מזכה ב-${params.report_column}`})`);
+  }
+}
+
+/** הדחייה בהמראה מהבסיס: מה-STD המתוכנן ועד ה-ATD בפועל, וכך גם הזזה של לוח הזמנים נכללת. */
+function outboundDelay(ctx, execPairing, leg) {
+  if (leg.atd == null) return null;
+  const [actual, scheduled] = [legTimes(ctx, leg, true), legTimes(ctx, leg, false)];
+  if (!actual || !scheduled) return null;
+  const planLeg = ctx.matches.find((m) => m.exec === execPairing)?.plan?.legs
+    .find((l) => l.flight === leg.flight && l.dst === leg.dst && Math.abs(Date.parse(l.date) - Date.parse(leg.date)) <= dayMs);
+  const planned = planLeg ? legTimes(ctx, planLeg, false) : null;
+  return actual.dep - (planned?.dep ?? scheduled.dep);
+}
+
+const PHASE_LABEL = {
+  before_duty: 'לפני תחילת זמן התפקיד',
+  after_duty: 'אחרי שזמן התפקיד כבר החל',
+};
+
+/**
+ * דחיית הטיסה ביציאה מהארץ (2026 ס' 24.4), בנוסף לקיצור המנוחה של ס' 24.3: דחייה של מעל
+ * `min_delay_hours` שחלה לפני תחילת זמן התפקיד (`phase` = before_duty), או דחייה של
+ * `min_delay_hours` ומעלה בהמראה אחרי שזמן התפקיד כבר החל (after_duty). שני המצבים אינם
+ * יכולים לחול יחד, ולכן שני החוקים חולקים שאלה אחת (`miami_delay:`), והתשובה בוחרת מי מהם
+ * חל (בקשת בעל המוצר, 23/09/2026). קיומה של דחייה נלמד מהקבצים, ומניחים שמגיע עליה פיצוי;
+ * שואלים רק כשהדוח לא זיכה.
+ */
+function miami_delay(ctx, params, rule) {
+  if (!ctx.hasExec) return;
+  const key = keyFor(params.report_column);
+  const hours = H(params.hours);
+  const own = ctx.rulesWithLogic('miami_delay').map((r) => r.id);
+  const enough = (pr, delay) => (pr.min_delay_exclusive ? delay > H(pr.min_delay_hours) : delay >= H(pr.min_delay_hours));
+  const siblingFor = (phase) => ctx.rulesWithLogic('miami_delay').find((r) => r.logic.params.phase === phase);
+  for (const p of ctx.execPairings) {
+    if (!ctx.pairingHandledBy(p, 'miami_one_night')) continue; // ס' 24.4 חל רק בנוסף לקיצור המנוחה
+    const leg = p.legs.find((l) => l.org === ctx.domicile && l.dst === params.station);
+    if (!leg) continue;
+    const delay = outboundDelay(ctx, p, leg);
+    if (delay == null || !enough(params, delay)) continue;
+    const what = `${describePairing(p)}: ${leg.flight ?? `${leg.org}–${leg.dst}`} המריאה ${minToHhmm(delay)} אחרי ה-STD המתוכנן`;
+    const id = `miami_delay:${p.id}`;
+    const answered = ctx.answer(id);
+    const assumed = !ctx.pairingHandledBy(p, 'miami_delay') && ctx.paidOn(p, params.report_column, key, hours, own);
+    const a = answered ?? (assumed ? { value: params.phase } : null);
+    if (!a) {
+      if (ctx.pairingHandledBy(p, 'miami_delay')) continue; // החוק השני כבר קבע
+      const opt = (phase) => {
+        const sib = siblingFor(phase);
+        return { value: phase, label: PHASE_LABEL[phase],
+          hint: sib && enough(sib.logic.params, delay) ? `${minToHhmm(hours)} – פער מול הדוח` : 'אין פיצוי' };
+      };
+      ctx.ask({
+        id,
+        date: p.from,
+        title: `דחייה ביציאה ל-${params.station}: מתי חלה הדחייה?`,
+        body: `${what}, והמנוחה בתחנה קוצרה ללילה אחד. הדוח לא מזכה ${minToHhmm(hours)} ב-${params.report_column}, ` +
+          'והפיצוי תלוי במועד הדחייה, שאינו בקבצים: לפני תחילת זמן התפקיד מגיע פיצוי רק על דחייה של מעל 5 שעות, ' +
+          'ואחרי שזמן התפקיד החל – על דחייה של שעתיים ומעלה.',
+        options: [opt('before_duty'), opt('after_duty'),
+          { value: 'no_rest_cut', label: `הדחייה לא קיצרה עוד את המנוחה ב-${params.station}`, hint: 'אין פיצוי' }],
+        ruleId: rule.id,
+      });
+      continue;
+    }
+    if (a.value === params.phase) {
+      ctx.markPairing(p, 'miami_delay');
+      ctx.expectPairing(p, key, hours, rule, `${what}, ${PHASE_LABEL[params.phase]} ` +
+        `(${answered ? 'לפי תשובתך' : `לפי מה שהדוח מזכה ב-${params.report_column}`}), בנוסף לקיצור המנוחה של ס' 24.3.`);
+      continue;
+    }
+    // התשובה שייכת לחוק השני. אם גם הוא אינו חל על הדחייה הזאת, ההסבר נרשם כאן, פעם אחת.
+    const sib = siblingFor(a.value);
+    if (sib && enough(sib.logic.params, delay)) continue;
+    if (ctx.pairingHandledBy(p, 'miami_delay')) continue;
+    ctx.markPairing(p, 'miami_delay');
+    ctx.note(p.from, `${rule.title}: ${what}. ` + (a.value === 'no_rest_cut'
+      ? `לפי תשובתך הדחייה לא קיצרה עוד את המנוחה ב-${params.station}, ולכן אין פיצוי.`
+      : `לפי תשובתך הדחייה חלה ${PHASE_LABEL[a.value]}, ובמקרה כזה הפיצוי ניתן רק על דחייה של ` +
+        `${sib?.logic.params.min_delay_exclusive ? 'מעל ' : ''}${sib?.logic.params.min_delay_hours ?? '?'} שעות` +
+        `${sib?.logic.params.min_delay_exclusive ? '' : ' ומעלה'}, ולכן אין פיצוי.`), rule);
+  }
+}
+
+
 // ---------- סימולטור בישראל (2024 ס' 15–18; 2026 ס' 18) ----------
 
 /**
@@ -1123,6 +1328,8 @@ export const DUTY_LOGIC = {
   consecutive_saturdays,
   consecutive_night_rounds,
   stay_extension,
+  short_rest_miami,
+  miami_delay,
   sim_night_session,
   sim_extension,
   sim_friday_holiday_eve,
@@ -1142,6 +1349,8 @@ export const DUTY_PARAMS = {
   white_flight: ['hours', 'report_column', 'report_minutes_before_std', 'report_after', 'report_until', 'min_block_hours'],
   ulh_flight: ['hours', 'report_column', 'min_block_hours', 'max_block_hours'],
   stay_extension: ['over_hours', 'capped_days', 'hours', 'report_column'],
+  short_rest_miami: ['station', 'night_from', 'night_to', 'max_nights', 'hours', 'report_column', 'report_minutes_before_std'],
+  miami_delay: ['station', 'phase', 'min_delay_hours', 'min_delay_exclusive', 'hours', 'report_column'],
   sim_night_session: ['hours', 'report_column', 'stations', 'night_from', 'night_to', 'start_after_std_minutes'],
   sim_friday_holiday_eve: ['hours', 'report_column', 'stations'],
   sim_extension: ['hours', 'report_column', 'stations', 'max_hours'],
