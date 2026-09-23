@@ -7,7 +7,7 @@
 import { hoursToMin, minToHhmm } from '../time.js';
 import { describePairing } from '../model.js';
 import { stationOffset } from '../airports.js';
-import { DUTY_LOGIC, DUTY_PARAMS, execFdpGroups } from './duty.js';
+import { DUTY_LOGIC, DUTY_PARAMS, execFdpGroups, amountWord } from './duty.js';
 
 const H = (hours) => hoursToMin(hours) ?? 0;
 
@@ -166,8 +166,9 @@ function absence_day_credit(ctx, params, rule) {
     const confirmed = confirmedCodes(ctx, params);
     params = { ...params, plan_codes: [...(params.plan_codes ?? []), ...confirmed],
       report_codes: [...(params.report_codes ?? []), ...confirmed.map((c) => c.slice(0, 5))] };
-    noteUpgrade(ctx, params, rule, credit);
   }
+  // `note_code_upgrade`: החוק שקוד התכנון שלו יכול לעבור בביצוע לקוד של חוק אחר (SBY_L → SBY_S).
+  if (params.confirm_code_prefixes?.length || params.note_code_upgrade) noteUpgrade(ctx, params, rule, credit);
   const onFlightDay = new Set();
   for (const day of ctx.timeline) {
     if (!matchesCode(day, params, ctx)) continue;
@@ -375,7 +376,7 @@ function unexplained_report_amount(ctx, params, rule) {
   for (const p of ctx.execPairings) {
     const extra = ctx.reportedOn(p, params.report_column) - ctx.expectedAround(p, key);
     if (extra !== H(params.hours)) continue;
-    ctx.expectPairing(p, key, extra, rule, `${describePairing(p)}: ${minToHhmm(extra)} ב-${params.report_column} שאף חוק אחר אינו מסביר. ${params.hint}`, { hint: true });
+    ctx.expectPairing(p, key, extra, rule, `${describePairing(p)}: ${minToHhmm(extra)} שאף חוק אחר אינו מסביר. ${params.hint}`, { hint: true });
   }
 }
 
@@ -466,7 +467,7 @@ function special_call(ctx, params, rule) {
         id: `unplanned:${match.exec.id}`,
         date: match.exec.from,
         title: `פעילות ביום שלא תוכננה בו פעילות: ${describePairing(match.exec)}`,
-        body: `לא נרשם ${column} בדוח, ולכן לא ניתן לדעת אם מגיעה קריאה מיוחדת. מה קרה?`,
+        body: 'הדוח לא מזכה קריאה מיוחדת, ולכן לא ניתן לדעת אם היא מגיעה. מה קרה?',
         options: [
           { value: 'special_call', label: 'קריאה מיוחדת' },
           { value: 'voluntary_swap', label: 'החלפה מרצוני', needsLink: true },
@@ -571,7 +572,7 @@ function higher_of_planned_performed(ctx, params, rule) {
     // (החלטת בעל המוצר, 23/09/2026). ההפרש נרשם כאילו נענה "החלפה ביוזמת החברה".
     const covered = diff > 0 && !!match.exec && !!findShortfallPaid(ctx, match, diff, column, reportColumn, true);
     if (!answer && params.requires_user_answer && diff > 0 && !covered) {
-      const facts = `המתוכנן ארוך מהמבוצע ב-${minToHhmm(diff)}, והדוח לא מזכה את ההפרש ב-${reportColumn}` +
+      const facts = `המתוכנן ארוך מהמבוצע ב-${minToHhmm(diff)}, והדוח לא מזכה את ההפרש` +
         (unexplained > 0 ? ` (יש שם ${minToHhmm(unexplained)} שאף חוק אינו מסביר, פחות מההפרש).` : '.');
       ctx.ask({
         id: `replaced:${match.plan.id}`,
@@ -579,7 +580,7 @@ function higher_of_planned_performed(ctx, params, rule) {
         title: `סבב שהוחלף בסבב קצר יותר: ${what}`,
         body: `${facts} הסיבה אינה בקבצים, והיא קובעת מה מגיע. מה קרה?`,
         options: [
-          { value: 'replaced', label: 'החלפה ביוזמת החברה (כולל זכיה במכרז)', hint: `ההפרש ${minToHhmm(diff)} ב-${reportColumn} – פער מול הדוח` },
+          { value: 'replaced', label: 'החלפה ביוזמת החברה (כולל זכיה במכרז)', hint: `${amountWord(reportColumn)} של ${minToHhmm(diff)} – פער מול הדוח` },
           ...lostHoursOptions(ctx, match.plan, 'בנוסף לקרדיט של מה שבוצע'),
           { value: 'voluntary_swap', label: 'החלפה מרצוני', hint: 'רק הקרדיט של מה שבוצע' },
           { value: 'other', label: 'סיבה אחרת', needsText: true },
@@ -640,7 +641,7 @@ function lost_hours_credit(ctx, params, rule) {
     if (lost == null) { ctx.review(`${describePairing(match.plan)}: אין שעות מתוכננות בקובץ, לא ניתן לחשב את השעות שהפסיד.`, rule); continue; }
     const key = params.credit_column === 'Rig' ? 'rig' : 'credit';
     const why = assumed
-      ? `הדוח מזכה ב-${assumed.column} את השעות שהפסיד, והסיבה אינה בקבצים (${assumed.labels})`
+      ? `הדוח מזכה את השעות שהפסיד, והסיבה אינה בקבצים (${assumed.labels})`
       : params.answer_label;
     const note = `${describePairing(match.plan)}: ${why}. השעות שהפסיד` +
       (match.exec ? `, בנוסף לקרדיט של ${describePairing(match.exec)}.` : '.');
@@ -700,7 +701,7 @@ function lostHoursOptions(ctx, planPairing, extra) {
     const p = r.logic.params ?? {};
     const lost = lostHours(ctx, planPairing, p);
     const amount = lost == null ? 'השעות שהפסיד' : `השעות שהפסיד (${minToHhmm(lost)})`;
-    return { value: p.answer_value, label: p.answer_label, hint: `${amount} ב-${p.credit_column ?? 'Credit'}${extra ? `, ${extra}` : ''}` };
+    return { value: p.answer_value, label: p.answer_label, hint: `${amount}${extra ? `, ${extra}` : ''}` };
   });
 }
 
@@ -1033,7 +1034,7 @@ export const LOGIC = {
 export const KNOWN_PARAMS = {
   credit_from_scheduled: [],
   min_slip_credit: ['min_credit_hours', 'per_fdp', 'legal_rest_hours', 'report_minutes_before_std'],
-  absence_day_credit: ['plan_codes', 'report_codes', 'plan_code_prefixes', 'report_code_prefixes', 'report_flag_column', 'credit_hours', 'tab_hours', 'requires_assigned_activity', 'flight_day_takes_higher', 'away_flag_on_pairing_start', 'confirm_code_prefixes', 'confirm_label', 'confirm_answer'],
+  absence_day_credit: ['plan_codes', 'report_codes', 'plan_code_prefixes', 'report_code_prefixes', 'report_flag_column', 'credit_hours', 'tab_hours', 'requires_assigned_activity', 'flight_day_takes_higher', 'away_flag_on_pairing_start', 'confirm_code_prefixes', 'confirm_label', 'confirm_answer', 'note_code_upgrade'],
   vacation_credit_balance: ['per_day_hours', 'days_full_rate', 'monthly_max_hours', 'yearly_cap_days', 'taper_table', 'taper_table_complete', 'taper_monthly_totals'],
   absence_month_cap: ['cap_hours'],
   late_landing_home: ['grace_minutes', 'step_minutes', 'hours_per_step'],

@@ -14,6 +14,11 @@ import { describePairing } from '../model.js';
 import { stationOffset } from '../airports.js';
 
 const H = (hours) => hoursToMin(hours) ?? 0;
+/**
+ * המילה שמתארת סכום לפי העמודה שבה הוא נרשם: COM ו-S/C הם פיצוי, ו-Credit ו-Rig הם
+ * קרדיט (בעל המוצר, 23/09/2026). שם העמודה עצמו אינו מוצג בהערות ובשאלות.
+ */
+export const amountWord = (column) => (column === 'COM' || column === 'S/C' ? 'פיצוי' : 'קרדיט');
 const dayMs = 86400000;
 const at = (date, clock) => Date.parse(date) / 60000 + clock;
 const dateOf = (abs) => new Date(Math.floor(abs / 1440) * dayMs).toISOString().slice(0, 10);
@@ -197,7 +202,7 @@ function second_unplanned_activity(ctx, params, rule) {
     const a = answered ?? (ctx.paidOn(u, params.report_column, key, H(params.hours), own) ? { value: 'separate' } : null);
     if (!a) askRest(id, day, `${describePairing(u)} לא הייתה בתכנון, ובאותה יממה היה סימולטור. האם הייתה מנוחה ביניהם?`);
     else if (a.value === 'separate') ctx.expectPairing(u, key, H(params.hours), rule, `${describePairing(u)} לא הייתה בתכנון, ובאותה יממה היה סימולטור ` +
-      `(${answered ? 'לפי תשובתך, עם מנוחה חוקית ביניהם' : `הדוח מזכה ${params.report_column}`})`);
+      `(${answered ? 'לפי תשובתך, עם מנוחה חוקית ביניהם' : `הדוח מזכה את הפיצוי`})`);
   }
 
   // סימולטור לא מתוכנן ביום טיסה
@@ -210,7 +215,7 @@ function second_unplanned_activity(ctx, params, rule) {
     const a = answered ?? (ctx.paidOnDate(day.date, params.report_column, key, H(params.hours)) ? { value: 'separate' } : null);
     if (!a) askRest(id, day.date, `סימולטור ב-${ddmm(day.date)} לא היה בתכנון, ובאותה יממה בוצעה ${flights.map(describePairing).join(', ')}. האם הייתה מנוחה ביניהם?`);
     else if (a.value === 'separate') ctx.expect(day.date, key, H(params.hours), rule,
-      `סימולטור לא מתוכנן ביממה עם טיסה (${answered ? 'לפי תשובתך, עם מנוחה חוקית ביניהם' : `הדוח מזכה ${params.report_column}`})`);
+      `סימולטור לא מתוכנן ביממה עם טיסה (${answered ? 'לפי תשובתך, עם מנוחה חוקית ביניהם' : `הדוח מזכה את הפיצוי`})`);
   }
 }
 
@@ -360,12 +365,14 @@ function night_landings(ctx, params, rule) {
   const key = keyFor(params.report_column);
   const hours = H(params.hours);
   const crews = params.counted_crews;
+  const crewNames = crews ? crews.map((c) => CREW_LABEL[c] ?? c).join(' או ') : '';
   const crewOf = (n) => ctx.answer(`night_crew:${n.leg.date}:${n.leg.flight}`)?.value;
 
   // נספרות רק טיסות בהרכב צוות מ-`counted_crews` (2024 ס' 39–40: בודד או מוגבר). ההרכב אינו
   // בקבצים, ולכן מניחים תחילה שכל טיסה שלא נענתה נספרת: ההרכב יכול רק להוריד את המספר, וזאת
   // התוצאה הגבוהה האפשרית. רק אם תחתיה מגיע פיצוי שהדוח לא זיכה, נשאלת שאלה על הרכב הצוות
-  // (החלטת בעל המוצר, 23/09/2026).
+  // (החלטת בעל המוצר, 23/09/2026). מרגע שתוכננו `min_planned_count` טיסות כאלה, כל מסלול
+  // מסתיים בהערה שמסבירה את המצב ואת הסיבה – גם כשאין פיצוי (בקשת בעל המוצר, 23/09/2026).
   const pool = crews ? night.filter((n) => crewOf(n) == null || crews.includes(crewOf(n))) : night;
   const names = (items) => items.map((n) => `${ddmm(n.leg.date)} ${n.leg.flight}`).join(', ');
   const list = (items) => items.map((n) => `${ddmm(n.leg.date)} ${n.leg.flight}${n.status === 'company' ? ' – שינוי ביוזמת החברה' : ''}`).join(', ');
@@ -390,7 +397,8 @@ function night_landings(ctx, params, rule) {
   if (counted.length < threshold) {
     const why = `${rule.title}: נספרות כבוצעות ${counted.length} טיסות מתוך ${pool.length} מתוכננות עם נחיתה בין ` +
       `${params.window_from} ל-${params.window_to}, והפיצוי הוא מהטיסה ה-${threshold} שבוצעה`;
-    for (const n of unsettled.filter((x) => x.status === 'review')) {
+    const reviewed = unsettled.filter((x) => x.status === 'review');
+    for (const n of reviewed) {
       ctx.review(`${ddmm(n.leg.date)} ${n.leg.flight} לא בוצעה, והסיבה שנרשמה עליה היא "סיבה אחרת", כך שלא ידוע אם זה היה ביוזמת ` +
         `החברה – ורק אז היא נספרת כבוצעה (ס' 40). ${why}. דורש בדיקה ידנית.`, rule);
     }
@@ -399,6 +407,11 @@ function night_landings(ctx, params, rule) {
       const many = pending.length > 1;
       ctx.note(null, `${why}. ${list(pending)} לא ${many ? 'בוצעו' : 'בוצעה'}, וביטול או שינוי הצבה ביוזמת החברה ` +
         `נחשב ביצוע (ס' 40). הספירה תיסגר לפי התשובה על ${many ? 'הסבבים שלא בוצעו' : 'הסבב שלא בוצע'}.`, rule);
+    } else {
+      const many = reviewed.length > 1;
+      ctx.note(null, `${why}. ${list(reviewed)} לא ${many ? 'בוצעו' : 'בוצעה'}, והסיבה שנרשמה ` +
+        `${many ? 'עליהן' : 'עליה'} היא "סיבה אחרת", ולכן לא ידוע אם ${many ? 'הן נספרות כבוצעות' : 'היא נספרת כבוצעה'} ` +
+        `(ס' 40). הספירה תיסגר אחרי הבדיקה הידנית.`, rule);
     }
     return;
   }
@@ -411,14 +424,16 @@ function night_landings(ctx, params, rule) {
       : ctx.paidOnDate(n.pairing.from, params.report_column, key, hours)));
     if (!unpaid.length) {
       const one = paying.length === 1;
-      ctx.note(null, `${rule.title}: ${planned}, והדוח מזכה ${minToHhmm(hours)} ב-${params.report_column} על ` +
-        `${names(paying)}. לכן ${one ? 'היא בוצעה' : 'הן בוצעו'} בצוות ${crews.map((c) => CREW_LABEL[c] ?? c).join(' או ')}, ` +
+      ctx.note(null, `${rule.title}: ${planned}, והדוח מזכה ${minToHhmm(hours)} על ` +
+        `${names(paying)}. לכן ${one ? 'היא בוצעה' : 'הן בוצעו'} בצוות ${crewNames}, ` +
         'ולא נשאלה שאלה על הרכב הצוות.', rule);
     } else {
       // שואלים אחת בכל פעם, מהטיסה הארוכה ביותר (בקשת בעל המוצר, 23/09/2026): תשובה שאינה
       // נספרת מורידה את המספר ומייתרת את השאר, והסיכוי לכך גדול יותר בטיסה ארוכה.
       const next = [...open].sort((a, b) => (plannedBlock(ctx, b.leg) ?? 0) - (plannedBlock(ctx, a.leg) ?? 0) ||
         a.leg.date.localeCompare(b.leg.date))[0];
+      ctx.note(null, `${rule.title}: ${planned}. תחת ההנחה שכל טיסה שעדיין לא נענתה היא בצוות ` +
+        `${crewNames}, מגיע פיצוי של ${minToHhmm(hours)}.`, rule);
       ctx.ask({
         id: `night_crew:${next.leg.date}:${next.leg.flight}`,
         date: next.leg.date,
@@ -433,6 +448,12 @@ function night_landings(ctx, params, rule) {
     }
   }
 
+  // כשכל מה שתוכנן נספר כבוצע, מספר אחד מספיק לשניהם.
+  const counts = counted.length === night.length
+    ? `תוכננו ונספרות ${night.length} טיסות עם נחיתה בין ${params.window_from} ל-${params.window_to}`
+    : `${planned}, ונספרות כבוצעות ${counted.length}`;
+  ctx.note(null, `${rule.title}: ${counts} (${list(counted)}). הפיצוי הוא מהטיסה ה-${threshold} שבוצעה, ` +
+    `ולכן מגיע פיצוי של ${minToHhmm(hours)} על ${names(paying)}.`, rule);
   paying.forEach((n) => {
     const why = `${ddmm(n.leg.date)} ${n.leg.flight}, נחיתה ${minToHhmm(n.clock)} שעון ישראל: הטיסה ה-${counted.indexOf(n) + 1} מתוך ` +
       `${night.length} מתוכננות עם נחיתת לילה`;
@@ -577,7 +598,7 @@ function special_date_activity(ctx, params, rule) {
       });
     } else if (a.value === 'yes') {
       ctx.expect(coded.date, key, H(params.hours), rule, `${occ.title}: ${ctx.activityCodes(coded).join(', ')} בחלון ${window} ` +
-        `(${answered ? 'לפי תשובתך' : `הדוח מזכה ${params.report_column}`})`);
+        `(${answered ? 'לפי תשובתך' : `הדוח מזכה את הפיצוי`})`);
     }
   }
 }
@@ -875,7 +896,7 @@ function white_flight(ctx, params, rule) {
         });
       } else if (a.value === 'yes') {
         ctx.expectPairing(p, key, H(params.hours), rule,
-          `${rule.title}: ${what} (${answered ? 'צוות מוגבר לפי תשובתך' : `הדוח מזכה ${params.report_column}, ולכן צוות מוגבר`})`);
+          `${rule.title}: ${what} (${answered ? 'צוות מוגבר לפי תשובתך' : `הדוח מזכה את הפיצוי, ולכן צוות מוגבר`})`);
       }
     }
   }
@@ -915,7 +936,7 @@ function ulh_flight(ctx, params, rule) {
       const planned = !ctx.hasExec ||
         (plan?.legs ?? []).some((p) => !p.dh && (l.flight ? p.flight === l.flight : p.org === l.org && p.dst === l.dst));
       if (!planned) {
-        ctx.review(`${rule.title}: ${what} אינה בתכנון. ס' 21.2 מזכה צוות כפול "אשר תוכנן וביצע", ולכן צריך לבדוק ידנית אם מגיע פיצוי.`, rule);
+        ctx.review(`${rule.title}: ${what} אינה בתכנון. ס' 21.2 מזכה צוות כפול "אשר תוכנן וביצע", ולכן צריך לבדוק ידנית אם מגיע ${amountWord(params.report_column)}.`, rule);
         continue;
       }
       ctx.expectPairingDay(pairing, l.date, key, H(params.hours), rule, `${rule.title}: ${what} (צוות כפול)`);
@@ -977,7 +998,7 @@ function stay_extension(ctx, params, rule) {
     } else if (a.value === 'company') {
       ctx.expectPairing(m.exec, key, unplanned.length * H(params.hours), rule,
         `${what}. ${unplanned.length === 1 ? 'יממה לא מתוכננת' : `${unplanned.length} יממות לא מתוכננות`} ` +
-        `(${unplanned.map(ddmm).join(', ')}), ${answered ? 'לפי תשובתך' : `לפי מה שהדוח מזכה ב-${params.report_column}`}.`);
+        `(${unplanned.map(ddmm).join(', ')}), ${answered ? 'לפי תשובתך' : `לפי מה שהדוח מזכה`}.`);
     }
   }
 }
@@ -1088,7 +1109,7 @@ function short_rest_miami(ctx, params, rule) {
         id,
         date: p.from,
         title: `קיצור מנוחה ב-${params.station}: האם שהית שם לילה אחד בלבד?`,
-        body: `${what}. לפי החישוב זה לילה אחד ${window}, והדוח לא מזכה ${minToHhmm(hours)} ב-${params.report_column}. ${derived}`,
+        body: `${what}. לפי החישוב זה לילה אחד ${window}, והדוח לא מזכה ${minToHhmm(hours)}. ${derived}`,
         options: [
           { value: 'yes', label: 'כן, לילה אחד בלבד', hint: `${minToHhmm(hours)} – פער מול הדוח` },
           { value: 'no', label: 'לא, יותר מלילה אחד', hint: 'אין פיצוי' },
@@ -1099,7 +1120,7 @@ function short_rest_miami(ctx, params, rule) {
     }
     ctx.markPairing(p, 'miami_one_night');
     ctx.expectPairing(p, key, hours, rule,
-      `${why} (${answered ? 'לפי תשובתך' : `לפי מה שהדוח מזכה ב-${params.report_column}`})`);
+      `${why} (${answered ? 'לפי תשובתך' : `לפי מה שהדוח מזכה`})`);
   }
 }
 
@@ -1156,7 +1177,7 @@ function miami_delay(ctx, params, rule) {
         id,
         date: p.from,
         title: `דחייה ביציאה ל-${params.station}: מתי חלה הדחייה?`,
-        body: `${what}, והמנוחה בתחנה קוצרה ללילה אחד. הדוח לא מזכה ${minToHhmm(hours)} ב-${params.report_column}, ` +
+        body: `${what}, והמנוחה בתחנה קוצרה ללילה אחד. הדוח לא מזכה ${minToHhmm(hours)}, ` +
           'והפיצוי תלוי במועד הדחייה, שאינו בקבצים: לפני תחילת זמן התפקיד מגיע פיצוי רק על דחייה של מעל 5 שעות, ' +
           'ואחרי שזמן התפקיד החל – על דחייה של שעתיים ומעלה.',
         options: [opt('before_duty'), opt('after_duty'),
@@ -1168,7 +1189,7 @@ function miami_delay(ctx, params, rule) {
     if (a.value === params.phase) {
       ctx.markPairing(p, 'miami_delay');
       ctx.expectPairing(p, key, hours, rule, `${what}, ${PHASE_LABEL[params.phase]} ` +
-        `(${answered ? 'לפי תשובתך' : `לפי מה שהדוח מזכה ב-${params.report_column}`}), בנוסף לקיצור המנוחה של ס' 24.3.`);
+        `(${answered ? 'לפי תשובתך' : `לפי מה שהדוח מזכה`}), בנוסף לקיצור המנוחה של ס' 24.3.`);
       continue;
     }
     // התשובה שייכת לחוק השני. אם גם הוא אינו חל על הדחייה הזאת, ההסבר נרשם כאן, פעם אחת.
@@ -1217,7 +1238,7 @@ function short_rest_las_vegas(ctx, params, rule) {
         id,
         date: p.from,
         title: `קיצור מנוחה ב-${params.station}: האם מגיע פיצוי?`,
-        body: `${what}. ${deal} הדוח לא מזכה ${minToHhmm(hours)} ב-${params.report_column}, והסיבה אינה בקבצים. ${derived}`,
+        body: `${what}. ${deal} הדוח לא מזכה ${minToHhmm(hours)}, והסיבה אינה בקבצים. ${derived}`,
         options: [
           { value: 'yes', label: 'כן, המנוחה קוצרה', hint: `${minToHhmm(hours)} – פער מול הדוח` },
           { value: 'full_rest', label: 'לא, קיבלתי את המנוחה החוזית המלאה', hint: 'אין פיצוי' },
@@ -1234,7 +1255,7 @@ function short_rest_las_vegas(ctx, params, rule) {
       continue;
     }
     ctx.expectPairing(p, key, hours, rule, `${what}. ${deal} הפיצוי נרשם ` +
-      `${answered ? 'לפי תשובתך' : `לפי מה שהדוח מזכה ב-${params.report_column}`}. ${derived}`);
+      `${answered ? 'לפי תשובתך' : `לפי מה שהדוח מזכה`}. ${derived}`);
   }
 }
 

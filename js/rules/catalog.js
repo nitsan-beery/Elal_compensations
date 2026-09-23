@@ -99,10 +99,14 @@ export function classifyCode(code, codes, supportedRules) {
   if (codes.relevant?.includes(code)) return 'relevant';
   if (codes.ground_activity?.includes(code)) return 'ground';
   if (isIgnored(code, codes)) return 'ignored';
-  // קוד שמופיע בפרמטרים של חוק נתמך נחשב מוכר גם אם אינו ברשימת `relevant`.
+  // קוד שמופיע בפרמטרים של חוק נתמך נחשב מוכר גם אם אינו ברשימת `relevant`. קידומת מספיקה
+  // רק בחוק שקובע כמה מגיע על היום (`credit_hours`): חוק שרק משתמש בקידומת, כמו רצף כוננות
+  // שמזהה כל קוד SBY, אינו יודע מה שווה SBY_FLD, וקוד כזה נשאר לא מוכר ומוצג למשתמש
+  // (החלטת בעל המוצר, 23/09/2026).
   for (const rule of supportedRules) {
     const p = rule.logic.params || {};
     if (p.plan_codes?.includes(code) || p.report_codes?.includes(code)) return 'relevant';
+    if (p.credit_hours == null) continue;
     const prefixes = [...(p.plan_code_prefixes ?? []), ...(p.report_code_prefixes ?? [])];
     if (prefixes.some((x) => code.startsWith(x))) return 'relevant';
   }
