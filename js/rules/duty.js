@@ -9,7 +9,7 @@
 // - סבב ביצוע: רגל עם std/sta/atd/ata ומשכים. השעות מקומיות לכל תחנה, והרגל רשומה
 //   ביום ההמראה בשעון הבסיס (ראו awayFromBase ב-logic.js).
 
-import { hoursToMin, minToHhmm } from '../time.js';
+import { hoursToMin, isoDate, minToHhmm } from '../time.js';
 import { describePairing } from '../model.js';
 import { stationOffset } from '../airports.js';
 
@@ -538,9 +538,36 @@ function cancelStatus(ctx, planPairing) {
 // ---------- פעילות בתאריכים מיוחדים (2024 ס' 42.1–42.5) ----------
 
 /**
+ * תאריך אירוע שאינו קבוע משנה לשנה ואינו בקבצים, כמו פתיחת שנת הלימודים: המשתמש בוחר
+ * אותו ביומן (בקשת בעל המוצר, 24/09/2026). ברירת המחדל היא `default_day` בחודש, ואם הוא
+ * חל באחד מימי `skip_weekdays` – היום שאחריו. עד שנבחר תאריך אין מה לבדוק, והשאלה היא
+ * הפריט הפתוח. אחרי הבחירה החוק נבדק כרגיל: לפי הביצוע כשיש, ואחרת לפי התכנון.
+ */
+function askOccasionDate(ctx, occ, rule) {
+  const ask = occ.ask_date;
+  const id = `${ask.id}:${ctx.period.year}`;
+  const answered = ctx.answer(id);
+  if (answered?.value) return answered.value;
+  let def = isoDate(ctx.period.year, ctx.period.month, ask.default_day ?? 1);
+  while ((ask.skip_weekdays ?? []).includes(weekday(def))) def = addDays(def, 1);
+  ctx.ask({
+    id,
+    date: def,
+    title: `${occ.title}: מה התאריך השנה?`,
+    body: `התאריך אינו בקבצים והוא משתנה משנה לשנה. בחר אותו ביומן, ואחריו ייבדק אם הייתה פעילות ` +
+      `${ctx.hasExec ? 'בביצוע' : 'בתכנון'} בין ${occ.from.time} ל-${occ.to.time}. ברירת המחדל: ${ddmm(def)}.`,
+    options: [],
+    dateInput: { value: def, min: ctx.monthFirst, max: ctx.timeline.at(-1).date },
+    ruleId: rule.id,
+  });
+  return null;
+}
+
+/**
  * פעילות בחלון זמן סביב תאריך מסוים: ערב יום הזיכרון ויום הזיכרון, יום העצמאות, היום
- * הראשון ללימודים. התאריכים לכל שנה ב-`occasions[].dates`. חל גם על שהייה מחוץ לבסיס
- * (ס' 42.5), ולכן כל טווח הסבב נבדק, מההתייצבות ועד הנחיתה בבסיס. פיצוי נפרד לכל אירוע.
+ * הראשון ללימודים. התאריכים לכל שנה ב-`occasions[].dates`, או נבחרים ביומן (`ask_date`).
+ * חל גם על שהייה מחוץ לבסיס (ס' 42.5), ולכן כל טווח הסבב נבדק, מההתייצבות ועד
+ * הנחיתה בבסיס. פיצוי נפרד לכל אירוע.
  *
  * `flight_activity_only`: רק פעילות טיסתית (יום הזיכרון והעצמאות). אחרת כל פעילות מטעם
  * החברה, וקוד פעילות בלי שעות (קרקע, סימולטור, כוננות) – שואלים.
@@ -553,7 +580,12 @@ function special_date_activity(ctx, params, rule) {
   const pairings = ctx.hasExec ? ctx.execPairings : ctx.planPairings;
 
   for (const occ of params.occasions ?? []) {
-    const date = occ.dates?.[String(ctx.period.year)];
+    let date = occ.dates?.[String(ctx.period.year)];
+    // תאריך שאינו קבוע משנה לשנה ואינו בקבצים: המשתמש בוחר אותו ביומן.
+    if (!date && occ.ask_date && (occ.months ?? []).includes(ctx.period.month)) {
+      date = askOccasionDate(ctx, occ, rule);
+      if (!date) continue;
+    }
     if (!date) {
       if ((occ.months ?? []).includes(ctx.period.month)) {
         ctx.review(`${occ.title}: אין ב-rules.json תאריך לשנת ${ctx.period.year}, ולכן החוק לא נבדק. נדרש עדכון של קובץ החוקים.`, rule);

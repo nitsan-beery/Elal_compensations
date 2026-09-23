@@ -44,6 +44,9 @@ const ANSWER_LABEL = {
   standby_bid: 'סיום כוננות בגלל זכייה במכרז', standby_activated: 'הפעלת הכוננות', regular_standby: 'מצב הכן רגיל',
 };
 
+/** ערך תשובה לתצוגה. תאריך שנבחר ביומן מוצג כיום/חודש. */
+const answerLabel = (v) => ANSWER_LABEL[v] ?? (/^\d{4}-\d{2}-\d{2}$/.test(v) ? ddmm(v) : v);
+
 const state = {
   rulesData: null,
   rulesSource: null,
@@ -370,12 +373,16 @@ function renderQuestion(q, i) {
         <select name="link">${(o.linkCandidates ?? []).map((c) => `<option value="${esc(c.id ?? '')}">${esc(c.label)}</option>`).join('')}</select>
       </label></div>` : ''}
     ${o.needsText ? `<div class="extra" data-for="${esc(o.value)}" hidden><textarea name="text" placeholder="פרט מה קרה"></textarea></div>` : ''}`).join('');
+  // שאלה שהתשובה בה היא תאריך: יומן עם ברירת מחדל, ואפשר לשמור אותה מיד.
+  const picker = q.dateInput ? `<label class="date-pick">בחר תאריך
+    <input type="date" name="date" value="${esc(q.dateInput.value)}"${q.dateInput.min ? ` min="${esc(q.dateInput.min)}"` : ''}${q.dateInput.max ? ` max="${esc(q.dateInput.max)}"` : ''} required>
+  </label>` : '';
   return `<div class="question">
     <h3>${esc(q.title)}</h3>
     ${q.body ? `<p>${esc(q.body)}</p>` : ''}
     <form data-qid="${esc(q.id)}">
-      ${options}
-      <div class="row" style="margin-top:.5rem"><button class="btn primary" type="submit" disabled>שמור תשובה</button></div>
+      ${picker}${options}
+      <div class="row" style="margin-top:.5rem"><button class="btn primary" type="submit" ${q.dateInput ? '' : 'disabled'}>שמור תשובה</button></div>
     </form>
   </div>`;
 }
@@ -501,7 +508,7 @@ function renderAnswered() {
   return `<details class="card">
     <summary><h2 style="display:inline">תשובות שנשמרו <span class="count">${answers.length}</span></h2></summary>
     <ul class="list">${answers.map(([id, a]) => `<li class="row">
-      <span>${esc(describeQuestionId(id))}: <strong>${esc(ANSWER_LABEL[a.value] ?? a.value)}</strong>
+      <span>${esc(describeQuestionId(id))}: <strong>${esc(answerLabel(a.value))}</strong>
         ${a.link !== undefined ? `<span class="small muted">(${a.link === 'none' ? 'מסירת הטיסה ללא חלופה' : a.link ? `עם ${esc(describePairingId(a.link))}` : 'בחודש אחר'})</span>` : ''}
         ${a.text ? `<span class="small muted">– ${esc(a.text)}</span>` : ''}</span>
       <span class="spacer"></span>
@@ -518,7 +525,8 @@ function renderNotes(res) {
   </details>`;
 }
 
-const QUESTION_KIND = { cancelled: 'סבב שלא בוצע', unplanned: 'פעילות לא מתוכננת', replaced: 'סבב שהוחלף', assigned: 'מוצב לפעילות', standby_bid: 'טיסה בסוף כוננות', standby_code: 'קוד כוננות' };
+const QUESTION_KIND = { cancelled: 'סבב שלא בוצע', unplanned: 'פעילות לא מתוכננת', replaced: 'סבב שהוחלף', assigned: 'מוצב לפעילות', standby_bid: 'טיסה בסוף כוננות', standby_code: 'קוד כוננות',
+  school_start: 'פתיחת שנת הלימודים' };
 
 function describeQuestionId(id) {
   const [kind, ...rest] = id.split(':');
@@ -570,18 +578,20 @@ function bindResults(root) {
     form.addEventListener('change', () => {
       const chosen = $('input[type="radio"]:checked', form);
       for (const extra of form.querySelectorAll('.extra')) extra.hidden = extra.dataset.for !== chosen?.value;
-      submit.disabled = !chosen;
+      submit.disabled = !chosen && !$('input[type="date"]', form);
     });
     form.addEventListener('submit', async (e) => {
       e.preventDefault();
+      const picker = $('input[type="date"]', form);
       const chosen = $('input[type="radio"]:checked', form);
-      if (!chosen) return;
-      const answer = { value: chosen.value };
-      if (chosen.hasAttribute('data-needs-link')) {
+      if (!chosen && !picker) return;
+      if (picker && !picker.value) { alert('בחר תאריך.'); return; }
+      const answer = { value: picker ? picker.value : chosen.value };
+      if (chosen?.hasAttribute('data-needs-link')) {
         const sel = $(`.extra[data-for="${CSS.escape(chosen.value)}"] select`, form);
         answer.link = sel?.value || null;
       }
-      if (chosen.hasAttribute('data-needs-text')) {
+      if (chosen?.hasAttribute('data-needs-text')) {
         const text = $(`.extra[data-for="${CSS.escape(chosen.value)}"] textarea`, form)?.value.trim();
         if (!text) { alert('פרט בבקשה מה קרה.'); return; }
         answer.text = text;

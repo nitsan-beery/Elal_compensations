@@ -770,9 +770,9 @@ function cancelled_no_compensation(ctx, params, rule) {
         title: `סבב מתוכנן שלא בוצע: ${describePairing(match.plan)}`,
         body: 'הסיבה אינה מופיעה בקבצים, והיא קובעת מה מגיע. מה קרה?',
         options: [
-          { value: 'replaced', label: 'החלפה ביוזמת החברה (כולל זכיה במכרז)', hint: 'מגיע הגבוה מבין שתי הטיסות', needsLink: true },
           { value: 'cancelled', label: 'בוטלה ללא פיצוי', hint: 'לא מגיע כלום' },
           { value: 'voluntary_swap', label: 'החלפה מרצוני', hint: 'רק הקרדיט של מה שבוצע', needsLink: true },
+          { value: 'replaced', label: 'החלפה ביוזמת החברה (כולל זכיה במכרז)', hint: 'מגיע הגבוה מבין שתי הטיסות', needsLink: true },
           ...lostHoursOptions(ctx, match.plan),
           { value: 'other', label: 'סיבה אחרת', needsText: true },
         ],
