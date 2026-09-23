@@ -136,8 +136,8 @@ function makeContext({ out, timeline, domicile, codes, holidays, answers, plan, 
   const ruleRef = (rule) => ({ ruleId: rule.id, ruleTitle: rule.title, ...(rule.short_title && { shortTitle: rule.short_title }) });
   const linkedSwap = (prefix, pairingId) => {
     const hit = Object.entries(answers).find(([id, a]) =>
-      id.startsWith(prefix) && a.value === 'voluntary_swap' && a.link === pairingId);
-    return hit ? { value: 'voluntary_swap', via: hit[0] } : null;
+      id.startsWith(prefix) && LINKED_VALUES.includes(a.value) && a.link === pairingId);
+    return hit ? { value: hit[1].value, via: hit[0] } : null;
   };
 
   const planRanges = plan ? buildPairings(timeline, domicile, (d) => d.plan?.legs) : [];
@@ -280,6 +280,8 @@ function makeContext({ out, timeline, domicile, codes, holidays, answers, plan, 
       return null;
     },
 
+    /** סבב ביצוע לפי המזהה שנבחר בקישור של תשובה. */
+    pairingById: (id) => execPairings.find((p) => p.id === id) ?? null,
     pairingHandledBy: (pairing, tag) => !!pairing && (pairingTags.get(pairing.id)?.has(tag) ?? false),
     markPairing(pairing, tag) {
       if (!pairingTags.has(pairing.id)) pairingTags.set(pairing.id, new Set());
@@ -477,7 +479,7 @@ function describeMatch(m) {
 function showSwaps(out, answers) {
   const linkOf = new Map(); // execId → planId | null
   for (const [id, a] of Object.entries(answers)) {
-    if (a?.value !== 'voluntary_swap') continue;
+    if (!LINKED_VALUES.includes(a?.value)) continue;
     if (id.startsWith('unplanned:') && !linkOf.get(id.slice(10))) linkOf.set(id.slice(10), a.link ?? null);
     if (id.startsWith('cancelled:') && a.link && a.link !== GAVE_AWAY) linkOf.set(a.link, id.slice(10));
   }
@@ -499,10 +501,14 @@ function showSwaps(out, answers) {
     if (!a) continue;
     const linked = a.link && out.changes.find((x) => x.execId === a.link)?.exec;
     c.exec = a.value === 'voluntary_swap' ? (a.link === GAVE_AWAY ? GAVE_AWAY_LABEL : `החלפה מרצוני – ${linked ?? 'טיסה בחודש אחר'}`)
+      : a.value === 'replaced' ? `החלפה ביוזמת החברה – ${linked ?? 'טיסה בחודש אחר'}`
       : a.value === 'other' ? `סיבה אחרת${a.text ? `: ${a.text}` : ''}`
       : CANCELLED_OUTCOME[a.value] ?? a.value;
   }
 }
+
+/** תשובות שמקשרות בין סבב מתוכנן שלא בוצע לבין הטיסה שבוצעה במקומו בתאריכים אחרים. */
+const LINKED_VALUES = ['voluntary_swap', 'replaced'];
 
 /** קישור של החלפה מרצון על סבב שלא בוצע: הטיסה נמסרה בלי לקבל טיסה אחרת במקומה. */
 const GAVE_AWAY = 'none';
@@ -511,17 +517,18 @@ const GAVE_AWAY_LABEL = 'מסירת הטיסה ללא חלופה';
 /** מה קרה לסבב שלא בוצע, לפי התשובה לשאלה עליו. */
 const CANCELLED_OUTCOME = {
   cancelled: 'בוטל ללא פיצוי',
-  wet_lease: 'הועבר למטוס חכור',
-  trainee: 'הורדה בגלל חניך',
+  wet_lease: 'הורדה מהטיסה המקורית', // תשובה שנשמרה לפני שהאפשרויות אוחדו
+  trainee: 'הורדה מהטיסה המקורית',
   swap_777: 'הועבר ל-777 (לא כשיר MFF)',
-  replaced: 'הוחלף בטיסה אחרת', // תשובה שנשמרה לפני שהאפשרות הוסרה
+  replaced: 'הוחלף בטיסה אחרת', // בלי קישור: תשובה שנשמרה בגרסה ישנה
 };
 
 /**
- * לשאלה שמבקשת לקשר החלפה מרצון לסבב בצד השני: על פעילות לא מתוכננת – הסבבים
- * המתוכננים שלא בוצעו; על סבב שלא בוצע – הפעילויות הלא מתוכננות. תמיד אפשר גם
- * "טיסה בחודש אחר", כי ההחלפה יכולה להיות עם טיסה שאינה בקבצים של החודש, ועל סבב
- * שלא בוצע גם "מסירת הטיסה ללא חלופה".
+ * לשאלה שמבקשת לקשר החלפה לסבב בצד השני: על פעילות לא מתוכננת – הסבבים המתוכננים
+ * שלא בוצעו; על סבב שלא בוצע – הפעילויות הלא מתוכננות. תמיד אפשר גם "טיסה בחודש אחר",
+ * כי ההחלפה יכולה להיות עם טיסה שאינה בקבצים של החודש. "מסירת הטיסה ללא חלופה" היא רק
+ * בהחלפה מרצון: החלפה ביוזמת החברה בלי טיסה אחרת מכוסה באפשרות "הורדתי מהטיסה המקורית"
+ * (בעל המוצר, 23/09/2026).
  */
 function attachLinkCandidates(questions, matches, ctx) {
   const cancelled = matches.filter((m) => m.how === 'cancelled').map((m) => ({ id: m.plan.id, label: describePairing(m.plan) }));
@@ -534,7 +541,9 @@ function attachLinkCandidates(questions, matches, ctx) {
   for (const q of questions) {
     const onCancelled = q.id.startsWith('cancelled:');
     const pool = q.id.startsWith('unplanned:') ? cancelled : onCancelled ? unplanned : [];
-    for (const o of q.options ?? []) if (o.needsLink) o.linkCandidates = [...pool, otherMonth, ...(onCancelled ? [gaveAway] : [])];
+    for (const o of q.options ?? []) {
+      if (o.needsLink) o.linkCandidates = [...pool, otherMonth, ...(onCancelled && o.value === 'voluntary_swap' ? [gaveAway] : [])];
+    }
   }
 }
 
