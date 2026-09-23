@@ -423,9 +423,7 @@ function night_landings(ctx, params, rule) {
         id: `night_crew:${next.leg.date}:${next.leg.flight}`,
         date: next.leg.date,
         title: `נחיתת לילה: באיזה צוות מתוכננת ${next.leg.flight} ב-${ddmm(next.leg.date)} (נחיתה ${minToHhmm(next.clock)} שעון ישראל)?`,
-        body: `${planned}, ולפי התכנון מגיע ${minToHhmm(hours)} ב-${params.report_column} על ${names(unpaid)}, והדוח לא זיכה. ` +
-          `לפיצוי נספרות רק טיסות בצוות ${crews.map((c) => CREW_LABEL[c] ?? c).join(' או ')}, ` +
-          `מ-${params.min_planned_count} טיסות כאלה בחודש${open.length > 1 ? `. נשאלת הטיסה הארוכה ביותר מבין ${open.length} שעדיין לא נענו` : ''}.`,
+        body: `${planned}. על מנת לחשב אם מגיע פיצוי נדרשת תשובה על הרכב הצוות בכל אחת מהטיסות.`,
         options: Object.entries(CREW_LABEL).map(([value, label]) => ({
           value, label: `${label} (${CREW_PILOTS[value]} טייסים)`, hint: crews.includes(value) ? 'נספרת' : 'לא נספרת',
         })),
