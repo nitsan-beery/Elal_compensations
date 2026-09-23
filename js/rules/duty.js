@@ -708,26 +708,27 @@ function free_days_waived(ctx, params, rule) {
 }
 
 /**
- * שתי שבתות ברצף (2024 ס' 34): פעילות בשתי שבתות עוקבות. שבת עם פעילות = סבב שחופף לשבת
- * (כולל יציאה לפני שבת וחזרה בשבת או אחריה) או קוד פעילות בשבת. לפי הביצוע כשיש; סבב
- * מתוכנן שבוטל ביוזמת החברה נחשב ביצוע (ס' 40). בלי שאלת הסכמה (החלטת בעל המוצר, 21/09/2026).
+ * שתי שבתות ברצף (2024 ס' 34): פעילות טיסתית בשתי שבתות עוקבות. חלון השבת קבוע בשעון
+ * ישראל, משישי `shabbat_from` עד שבת `shabbat_to` (החלטת בעל המוצר, 23/09/2026). שבת עם
+ * פעילות = סבב שחופף לחלון: טיסה בתוך החלון, או יציאה לפניו וחזרה לארץ אחריו (טיסה חוצת
+ * שבת). פעילות קרקע בשבת, כמו לימוד עצמי בבית, אינה נספרת. לפי הביצוע כשיש; סבב מתוכנן
+ * שבוטל ביוזמת החברה נחשב ביצוע (ס' 40). בלי שאלת הסכמה (החלטת בעל המוצר, 21/09/2026).
  * שלוש שבתות ברצף הן שני זוגות.
  */
 function consecutive_saturdays(ctx, params, rule) {
   const key = keyFor(params.report_column);
   const planSpans = ctx.hasPlan ? spansOf(ctx, ctx.planPairings, (p) => planSpan(p, ctx.domicile, ctx.monthFirst)) : [];
   const execSpans = ctx.hasExec ? spansOf(ctx, ctx.execPairings, (p) => execSpan(p, ctx.domicile, false)) : [];
-  const dayOf = (date) => ctx.timeline.find((d) => d.date === date);
+  const inShabbat = (sp, date) =>
+    sp.start < at(date, parseClock(params.shabbat_to)) && sp.end > at(addDays(date, -1), parseClock(params.shabbat_from));
   const active = (date) => {
-    const day = dayOf(date);
     if (!ctx.hasExec) {
-      const sp = planSpans.find((s) => overlapsDay(s, date));
-      return sp ? { pairing: sp.p } : ctx.planActivityCodes(day).length ? { date } : null;
+      const sp = planSpans.find((s) => inShabbat(s, date));
+      return sp ? { pairing: sp.p } : null;
     }
-    const sp = execSpans.find((s) => overlapsDay(s, date));
+    const sp = execSpans.find((s) => inShabbat(s, date));
     if (sp) return { pairing: sp.p };
-    if (ctx.activityCodes(day).length) return { date };
-    const cancelled = planSpans.find((s) => overlapsDay(s, date) && cancelStatus(ctx, s.p) === 'company');
+    const cancelled = planSpans.find((s) => inShabbat(s, date) && cancelStatus(ctx, s.p) === 'company');
     return cancelled ? { date, cancelled: cancelled.p } : null;
   };
 
@@ -1418,7 +1419,7 @@ export const DUTY_PARAMS = {
   night_landings: ['fleet', 'window_from', 'window_to', 'min_planned_count', 'paid_from_count', 'hours', 'report_column', 'base_landings_only', 'counted_crews'],
   special_date_activity: ['occasions', 'flight_activity_only', 'hours', 'report_column', 'report_minutes_before_std'],
   free_days_waived: ['hours', 'report_column', 'paid_from_day', 'off_block_from', 'on_block_until', 'min_free_days'],
-  consecutive_saturdays: ['hours', 'report_column'],
+  consecutive_saturdays: ['hours', 'report_column', 'shabbat_from', 'shabbat_to'],
   consecutive_night_rounds: ['hours', 'report_column', 'more_than', 'window_from', 'window_to', 'legal_rest_hours', 'report_minutes_before_std'],
   white_flight: ['hours', 'report_column', 'report_minutes_before_std', 'report_after', 'report_until', 'min_block_hours'],
   ulh_flight: ['hours', 'report_column', 'min_block_hours', 'max_block_hours'],

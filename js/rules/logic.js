@@ -311,10 +311,16 @@ function noteUpgrade(ctx, params, rule, credit) {
  */
 const matchesCode = (day, params, ctx) => matchedCode(day, params, ctx) != null;
 
-/** הקוד שבגללו היום מזוכה, כדי שהסיכום יוכל למיין את הימים (HOME_RGT לעומת שאר אימון הקרקע). */
+/**
+ * הקוד שבגללו היום מזוכה, כדי שהסיכום יוכל למיין את הימים (HOME_RGT לעומת שאר אימון הקרקע).
+ *
+ * `exclude_codes` מוציא קוד מכלל הקידומת: VAC_NOC הוא חופשה ללא תשלום, ולכן קידומת VAC
+ * של חוקי החופשה אינה חלה עליו (בעל המוצר, 23/09/2026).
+ */
 function matchedCode(day, params, ctx) {
-  if (ctx.hasExec) return ctx.execCodes(day).find((c) => codeIn(c, params.report_codes, params.report_code_prefixes)) ?? null;
-  return (day.plan?.codes ?? []).find((c) => codeIn(c, params.plan_codes, params.plan_code_prefixes)) ?? null;
+  const ok = (c) => !(params.exclude_codes ?? []).includes(c);
+  if (ctx.hasExec) return ctx.execCodes(day).find((c) => ok(c) && codeIn(c, params.report_codes, params.report_code_prefixes)) ?? null;
+  return (day.plan?.codes ?? []).find((c) => ok(c) && codeIn(c, params.plan_codes, params.plan_code_prefixes)) ?? null;
 }
 
 const codeIn = (code, list = [], prefixes = []) => list.includes(code) || prefixes.some((p) => code.startsWith(p));
@@ -356,6 +362,18 @@ function vacation_credit_balance(ctx, params, rule) {
   if (max && total > max) {
     ctx.review(`איזון החופשה החודשי (${n} × ${rate}) עובר את התקרה של ${params.monthly_max_hours} שעות.`, rule);
   }
+}
+
+/**
+ * יום חופשה ללא תשלום (VAC_NOC, בדוח VAC_N): אינו מזכה בכלום, אינו יורד ממכסת החופשה
+ * ואינו נספר באיזון החופשה. ההערה מציינת כמה ימים כאלה היו בחודש, כדי שהיום לא ייעלם
+ * בשקט מהדוח (בקשת בעל המוצר, 23/09/2026).
+ */
+function unpaid_leave_days(ctx, params, rule) {
+  const days = ctx.timeline.filter((d) => matchesCode(d, params, ctx));
+  if (!days.length) return;
+  const what = days.length === 1 ? 'יום חופשה אחד ללא תשלום' : `${days.length} ימי חופשה ללא תשלום`;
+  ctx.note(null, `${what} (${days.map((d) => dayOf(d.date)).join(', ')}).`, rule);
 }
 
 /** בחודש שכולו היעדרות, סך הזיכויים מוגבל. */
@@ -763,8 +781,9 @@ function vacation_recall(ctx, params, rule) {
   const hours = H(params.hours);
   const key = params.report_column === 'S/C' ? 'sc' : 'com';
   const byPairing = new Map();
+  const ok = (c) => !(params.exclude_codes ?? []).includes(c);
   for (const day of ctx.timeline) {
-    if (!(day.plan?.codes ?? []).some((c) => codeIn(c, params.plan_codes, params.plan_code_prefixes))) continue;
+    if (!(day.plan?.codes ?? []).some((c) => ok(c) && codeIn(c, params.plan_codes, params.plan_code_prefixes))) continue;
     if (ctx.execCodes(day).some((c) => codeIn(c, params.report_codes, params.report_code_prefixes))) continue;
     const pairing = ctx.execPairings.find((p) => p.from <= day.date && day.date <= p.to);
     if (pairing) {
@@ -1009,6 +1028,7 @@ export const LOGIC = {
   min_slip_credit,
   absence_day_credit,
   vacation_credit_balance,
+  unpaid_leave_days,
   absence_month_cap,
   late_landing_home,
   long_flight_day,
@@ -1034,7 +1054,8 @@ export const LOGIC = {
 export const KNOWN_PARAMS = {
   credit_from_scheduled: [],
   min_slip_credit: ['min_credit_hours', 'per_fdp', 'legal_rest_hours', 'report_minutes_before_std'],
-  absence_day_credit: ['plan_codes', 'report_codes', 'plan_code_prefixes', 'report_code_prefixes', 'report_flag_column', 'credit_hours', 'tab_hours', 'requires_assigned_activity', 'flight_day_takes_higher', 'away_flag_on_pairing_start', 'confirm_code_prefixes', 'confirm_label', 'confirm_answer', 'note_code_upgrade'],
+  absence_day_credit: ['plan_codes', 'report_codes', 'plan_code_prefixes', 'report_code_prefixes', 'report_flag_column', 'credit_hours', 'tab_hours', 'requires_assigned_activity', 'flight_day_takes_higher', 'away_flag_on_pairing_start', 'confirm_code_prefixes', 'confirm_label', 'confirm_answer', 'note_code_upgrade', 'exclude_codes'],
+  unpaid_leave_days: ['plan_codes', 'report_codes', 'plan_code_prefixes', 'report_code_prefixes'],
   vacation_credit_balance: ['per_day_hours', 'days_full_rate', 'monthly_max_hours', 'yearly_cap_days', 'taper_table', 'taper_table_complete', 'taper_monthly_totals'],
   absence_month_cap: ['cap_hours'],
   late_landing_home: ['grace_minutes', 'step_minutes', 'hours_per_step'],
@@ -1044,7 +1065,7 @@ export const KNOWN_PARAMS = {
   lost_hours_credit: ['requires_user_answer', 'credit_column', 'include_min_slip_credit', 'answer_value', 'answer_label', 'fleets', 'plan_aircraft'],
   voluntary_swap: ['requires_user_answer'],
   cancelled_no_compensation: ['requires_user_answer'],
-  vacation_recall: ['plan_codes', 'plan_code_prefixes', 'report_codes', 'report_code_prefixes', 'hours', 'report_column'],
+  vacation_recall: ['plan_codes', 'plan_code_prefixes', 'report_codes', 'report_code_prefixes', 'hours', 'report_column', 'exclude_codes'],
   training_cancelled_flight: ['plan_codes', 'plan_code_prefixes', 'moved_ok_prefixes'],
   dh_activated: ['hours', 'report_column', 'report_dh_types'],
   standby_end_for_bid: ['requires_user_answer', 'plan_codes', 'plan_code_prefixes', 'last_days'],
@@ -1057,6 +1078,7 @@ export const KNOWN_PARAMS = {
 export const LOGIC_ORDER = [
   'absence_day_credit',
   'vacation_credit_balance',
+  'unpaid_leave_days',
   'credit_from_scheduled',
   'late_landing_home',
   'long_flight_day',
