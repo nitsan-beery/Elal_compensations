@@ -901,8 +901,8 @@ function resolveLinkConflict(ctx, planEntry, execEntry, rule) {
     title: `מה קרה ב${planLabel}?`,
     body: `יש שתי החלטות סותרות (תשובה, או הנחה מהדוח) על מה שקרה ב${planLabel}. מה נכון?`,
     options: [
-      { value: 'plan', label: claimLabel(ctx, planEntry, planLabel, execLabel, planMatch), hint: `${execLabel} לא נחשבת קשורה אליה` },
-      { value: 'exec', label: claimLabel(ctx, execEntry, planLabel, execLabel, planMatch), hint: `${planLabel} לא מקבלת תוספת בנפרד` },
+      { value: 'plan', label: claimLabel(ctx, planEntry, planLabel, execLabel, planMatch) },
+      { value: 'exec', label: claimLabel(ctx, execEntry, planLabel, execLabel, planMatch) },
     ],
     ruleId: rule.id,
   });
