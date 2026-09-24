@@ -408,13 +408,15 @@ function late_landing_home(ctx, params, rule) {
   const grace = params.grace_minutes ?? 60;
   const step = params.step_minutes ?? 60;
   const perStep = H(params.hours_per_step);
+  // איחור קטן אינו מעניין, גם כשאין עליו פיצוי (בעל המוצר, 24/09/2026).
+  const noteFrom = params.note_from_minutes ?? 0;
 
   for (const day of ctx.timeline) {
     for (const leg of day.exec?.legs ?? []) {
       if (leg.dst !== ctx.domicile || leg.sta == null || leg.ata == null) continue;
       const delay = wrapDelta(leg.ata - leg.sta);
       if (delay <= grace) {
-        if (delay > 0) ctx.note(day.date, `${leg.flight} נחתה באיחור של ${delay} דק', לא מעבר לסף של ${grace} דק'. אין פיצוי.`, rule);
+        if (delay >= noteFrom) ctx.note(day.date, `${leg.flight} נחתה באיחור של ${delay} דק', לא מעבר לסף של ${grace} דק'. אין פיצוי.`, rule);
         continue;
       }
       const steps = Math.ceil((delay - grace) / step);
@@ -1096,7 +1098,7 @@ export const KNOWN_PARAMS = {
   unpaid_leave_days: ['plan_codes', 'report_codes', 'plan_code_prefixes', 'report_code_prefixes'],
   vacation_credit_balance: ['per_day_hours', 'days_full_rate', 'monthly_max_hours', 'yearly_cap_days', 'taper_table', 'taper_table_complete', 'taper_monthly_totals'],
   absence_month_cap: ['cap_hours'],
-  late_landing_home: ['grace_minutes', 'step_minutes', 'hours_per_step'],
+  late_landing_home: ['grace_minutes', 'step_minutes', 'hours_per_step', 'note_from_minutes'],
   long_flight_day: ['over_flight_hours', 'hours'],
   special_call: ['hours', 'report_column', 'second_day_min_gap_hours', 'second_day_min_hours', 'ask_user_if_no_sc'],
   higher_of_planned_performed: ['requires_user_answer', 'excluded_when_special_call', 'excluded_when_voluntary_swap', 'shortfall_column'],
