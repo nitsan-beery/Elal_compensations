@@ -625,7 +625,7 @@ function higher_of_planned_performed(ctx, params, rule) {
     if (!answer && (params.requires_user_answer || match.how !== 'dates')) continue;
     if (ctx.pairingHandledBy(match.plan, 'lost_hours_credit')) continue;
     if (ctx.pairingHandledBy(match.plan, 'cancelled_no_compensation')) continue;
-    // סתירה עם החלפה מרצון שנפתרה נגד הסבב הזה (`resolveSwapConflict`).
+    // סתירה עם החלפה מרצון שנפתרה נגד הסבב הזה (`resolveLinkConflict`).
     if (ctx.pairingHandledBy(match.plan, 'swap_conflict_void')) continue;
 
     // תשובה ישנה נשמרה בלי קישור, ואז ההחלפה היא הסבב שבוצע באותם ימים.
@@ -640,13 +640,24 @@ function higher_of_planned_performed(ctx, params, rule) {
     const diff = plannedMinusPerformed(ctx, match.plan, exec);
     if (diff == null || diff <= 0) continue;
 
+    // "הגבוה מבין השתיים" הוא סך הכול, לא תוספת על ההשלמה למינימום שהסבב שבוצע מקבל בזכות
+    // עצמו: כשהמתוכנן גבוה גם מהמינימום, הנוסף הוא רק ההפרש שמעבר להשלמה שכבר צפויה
+    // (`min_slip_credit` רץ קודם); כשההשלמה למינימום כבר גבוהה מההפרש, אין תוספת נוספת
+    // (יוני 2025: ZRH מתוכנן מול LCA שבוצע, בעל המוצר 24/09/2026).
+    const alreadyMinSlip = column === 'rig' ? minSlipTopUp(ctx, exec) : 0;
+    const extra = diff - alreadyMinSlip;
+    if (extra <= 0) continue;
+
     // לפעמים ההשלמה נרשמת על סבב סמוך ולא על המחליף עצמו (10/06/2026: LTN 11–12 → OTP 11,
     // ה-Rig 05:10 נרשם על OTP של 10/06).
     const m = { ...match, exec };
-    const paidOn = findShortfallPaid(ctx, m, diff, column, reportColumn) ?? findShortfallPaid(ctx, m, diff, column, reportColumn, true);
+    const paidOn = findShortfallPaid(ctx, m, extra, column, reportColumn) ?? findShortfallPaid(ctx, m, extra, column, reportColumn, true);
     const where = paidOn && paidOn !== exec ? `, ונרשם על ${describePairing(paidOn)}` : '';
-    ctx.expectPairing(paidOn ?? exec, column, diff, rule,
-      `המתוכנן (${describePairing(match.plan)}) גבוה מהמבוצע. ההפרש לפי "הגבוה מבין השתיים"${where}.`);
+    const why = alreadyMinSlip
+      ? `ההפרש הכולל לפי "הגבוה מבין השתיים" הוא ${minToHhmm(diff)}, ומתוכו ${minToHhmm(alreadyMinSlip)} כבר בהשלמה למינימום שמוצגת בנפרד; הנוסף כאן ${minToHhmm(extra)}`
+      : 'ההפרש לפי "הגבוה מבין השתיים"';
+    ctx.expectPairing(paidOn ?? exec, column, extra, rule,
+      `המתוכנן (${describePairing(match.plan)}) גבוה מהמבוצע. ${why}${where}.`);
   }
 }
 
