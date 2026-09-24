@@ -428,8 +428,16 @@ function unexplained_report_amount(ctx, params, rule) {
  * עד `grace_minutes` אין פיצוי, ומעבר לכך מדרגה לכל שעה או חלק ממנה.
  *
  * כל איחור מ-`note_from_minutes` ומעלה נרשם כהערה, גם כשמגיע עליו פיצוי: ההערה מפרטת
- * את החישוב, כמה דקות נותרו מעבר לסף וכמה מדרגות הן (בעל המוצר, 24/09/2026).
+ * את משך האיחור, כמה מדרגות הן וכמה פיצוי יוצא מהן. משך האיחור בדקות עד שעה, ובשעות
+ * (H:MM) מעבר לשעה (בעל המוצר, 24/09/2026).
  */
+
+/** משך איחור בהערה: בדקות עד שעה, אחרת H:MM שעות (בעל המוצר, 24/09/2026). */
+function delayText(min) {
+  if (min <= 60) return `${min} דק'`;
+  return `${Math.floor(min / 60)}:${String(min % 60).padStart(2, '0')} שעות`;
+}
+
 function late_landing_home(ctx, params, rule) {
   const grace = params.grace_minutes ?? 60;
   const step = params.step_minutes ?? 60;
@@ -442,7 +450,7 @@ function late_landing_home(ctx, params, rule) {
       if (leg.dst !== ctx.domicile || leg.sta == null || leg.ata == null) continue;
       const delay = wrapDelta(leg.ata - leg.sta);
       if (delay <= grace) {
-        if (delay >= noteFrom) ctx.note(day.date, `${leg.flight} נחתה באיחור של ${delay} דק', לא מעבר לסף של ${grace} דק'. אין פיצוי.`, rule);
+        if (delay >= noteFrom) ctx.note(day.date, `${leg.flight} נחתה באיחור של ${delayText(delay)}, לא מעבר לסף של ${grace} דק'. אין פיצוי.`, rule);
         continue;
       }
       const steps = Math.ceil((delay - grace) / step);
@@ -451,8 +459,7 @@ function late_landing_home(ctx, params, rule) {
         const stepsWord = steps === 1 ? 'מדרגה אחת' : `${steps} מדרגות`;
         ctx.note(
           day.date,
-          `${leg.flight} נחתה באיחור של ${delay} דק'. מעבר לסף של ${grace} דק' נותרו ${delay - grace} דק' → ` +
-            `${stepsWord} (כל ${step} דק' או חלק מהן), פיצוי של ${minToHhmm(steps * perStep)}.`,
+          `${leg.flight} נחתה באיחור של ${delayText(delay)}. ${stepsWord} (כל ${step} דק' או חלק מהן), פיצוי של ${minToHhmm(steps * perStep)}.`,
           rule,
         );
       }
