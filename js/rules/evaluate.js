@@ -494,6 +494,13 @@ function showSwaps(out, answers) {
   }
   out.changes = out.changes.filter((c) => !drop.has(c));
 
+  // סבב שבמקומו בוצע סבב אחר באותם ימים: אחרי התשובה, השורה אומרת מה קרה ולא רק מה הוחלף.
+  for (const c of out.changes) {
+    if (c.how !== 'dates') continue;
+    const a = answers[`cancelled:${c.planId}`] ?? answers[`replaced:${c.planId}`];
+    if (a) c.label = DATES_OUTCOME[a.value] ?? c.label;
+  }
+
   // סבב שלא בוצע: אחרי התשובה, בצד הביצוע מה שקרה לפיה. ריק רק עד שעונים.
   for (const c of out.changes) {
     if (c.how !== 'cancelled' || c.exec) continue;
@@ -514,6 +521,17 @@ const LINKED_VALUES = ['voluntary_swap', 'replaced'];
 const GAVE_AWAY = 'none';
 const GAVE_AWAY_LABEL = 'מסירת הטיסה ללא חלופה';
 
+/** מה קרה לסבב שבמקומו בוצע סבב אחר באותם ימים, לפי התשובה לשאלה עליו. */
+const DATES_OUTCOME = {
+  replaced: 'החלפה ביוזמת החברה',
+  voluntary_swap: 'החלפה מרצוני',
+  cancelled: 'המתוכנן בוטל, ומה שבוצע לא היה מתוכנן',
+  wet_lease: 'הורדה מהטיסה המקורית',
+  trainee: 'הורדה מהטיסה המקורית',
+  swap_777: 'הועבר ל-777 (לא כשיר MFF)',
+  other: 'סיבה אחרת',
+};
+
 /** מה קרה לסבב שלא בוצע, לפי התשובה לשאלה עליו. */
 const CANCELLED_OUTCOME = {
   cancelled: 'בוטל ללא פיצוי',
@@ -525,9 +543,11 @@ const CANCELLED_OUTCOME = {
 
 /**
  * לשאלה שמבקשת לקשר החלפה לסבב בצד השני: על פעילות לא מתוכננת – הסבבים המתוכננים
- * שלא בוצעו; על סבב שלא בוצע – הפעילויות הלא מתוכננות. תמיד אפשר גם "טיסה בחודש אחר",
- * כי ההחלפה יכולה להיות עם טיסה שאינה בקבצים של החודש. "מסירת הטיסה ללא חלופה" היא רק
- * בהחלפה מרצון: החלפה ביוזמת החברה בלי טיסה אחרת מכוסה באפשרות "הורדתי מהטיסה המקורית"
+ * שלא בוצעו; על סבב שלא בוצע – הפעילויות הלא מתוכננות. כשבמקום הסבב המתוכנן בוצע סבב אחר
+ * באותם ימים, הוא האפשרות הראשונה, אבל ההחלפה יכולה להיות גם עם כל טיסה אחרת שלא תוכננה
+ * (בקשת בעל המוצר, 24/09/2026). תמיד אפשר גם "טיסה בחודש אחר", כי ההחלפה יכולה להיות עם
+ * טיסה שאינה בקבצים של החודש. "מסירת הטיסה ללא חלופה" היא רק בהחלפה מרצון על סבב שלא בוצע
+ * כלל: החלפה ביוזמת החברה בלי טיסה אחרת מכוסה באפשרות "הורדתי מהטיסה המקורית"
  * (בעל המוצר, 23/09/2026).
  */
 function attachLinkCandidates(questions, matches, ctx) {
@@ -538,11 +558,13 @@ function attachLinkCandidates(questions, matches, ctx) {
     .map((m) => ({ id: m.exec.id, label: describePairing(m.exec) }));
   const otherMonth = { id: null, label: 'טיסה בחודש אחר' };
   const gaveAway = { id: GAVE_AWAY, label: GAVE_AWAY_LABEL };
+  const execLabel = new Map(matches.filter((m) => m.exec).map((m) => [m.exec.id, describePairing(m.exec)]));
   for (const q of questions) {
     const onCancelled = q.id.startsWith('cancelled:');
-    const pool = q.id.startsWith('unplanned:') ? cancelled : onCancelled ? unplanned : [];
+    const own = onCancelled && q.execId ? [{ id: q.execId, label: execLabel.get(q.execId) ?? q.execId }] : [];
+    const pool = q.id.startsWith('unplanned:') ? cancelled : onCancelled ? [...own, ...unplanned] : [];
     for (const o of q.options ?? []) {
-      if (o.needsLink) o.linkCandidates = [...pool, otherMonth, ...(onCancelled && o.value === 'voluntary_swap' ? [gaveAway] : [])];
+      if (o.needsLink) o.linkCandidates = [...pool, otherMonth, ...(onCancelled && !own.length && o.value === 'voluntary_swap' ? [gaveAway] : [])];
     }
   }
 }

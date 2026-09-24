@@ -649,7 +649,8 @@ const overlapsDay = (sp, date) => sp.start < at(date, 1440) && sp.end > at(date,
 /**
  * ימים ללא פעילות בתכנון (2018 ס' 71.1–71.2): יממה קלנדרית בלי פעילות. חופשה, מחלה מתוכננת,
  * DUM ו-X אינם פעילות. יום שיש בו רק Off block מ-`off_block_from` או רק On block בבסיס עד
- * `on_block_until` (כולל) נחשב פנוי. המינימום לפי הקרדיט המתוכנן (Sum בסיכום התכנון) והצי
+ * `on_block_until` (כולל) נחשב פנוי. סבב שבוטל ללא קרדיט אינו חוסם את ימיו, גם כשבוצע בהם
+ * סבב אחר: הם נספרים כימים ללא פעילות (בעל המוצר, 24/09/2026). המינימום לפי הקרדיט המתוכנן (Sum בסיכום התכנון) והצי
  * (ס' 71.3, `min_free_days`). חסרים ימים – 2.5 ש' לכל יום מהיום השני (2024 ס' 33), אם
  * הוויתור היה לבקשת החברה. ויתור בבקשות (2018 ס' 61) אינו מזכה, ולכן שואלים.
  */
@@ -665,7 +666,8 @@ function free_days_waived(ctx, params, rule) {
   if (due == null) return;
   const offFrom = parseClock(params.off_block_from);
   const onUntil = parseClock(params.on_block_until);
-  const spans = spansOf(ctx, ctx.planPairings, (p) => planSpan(p, ctx.domicile, ctx.monthFirst));
+  const dropped = ctx.planPairings.filter((p) => ctx.pairingHandledBy(p, 'cancelled_no_compensation'));
+  const spans = spansOf(ctx, ctx.planPairings.filter((p) => !dropped.includes(p)), (p) => planSpan(p, ctx.domicile, ctx.monthFirst));
   const free = ctx.timeline.filter((day) => {
     if (ctx.planActivityCodes(day).length) return false;
     const d0 = at(day.date, 0);
@@ -709,6 +711,7 @@ function free_days_waived(ctx, params, rule) {
   const paidDays = missing - (params.paid_from_day - 1);
   const what = `בתכנון ${free.length} ימים ללא פעילות` +
     (pendingFirst ? ` (${free.length + 1} אם ב-${ddmm(ctx.monthFirst)} לא נחתת)` : '') +
+    (dropped.length ? ` (כולל ימי ${dropped.map(describePairing).join(', ')}, שבוטלו ללא קרדיט)` : '') +
     `, והמינימום לקרדיט מתוכנן ${minToHhmm(credit)} הוא ${due}`;
   if (paidDays <= 0) {
     ctx.note(null, `${what}. ${pendingFirst ? 'גם אם נחתת, חסר יום אחד בלבד' : 'חסר יום אחד'}, ` +
