@@ -67,7 +67,7 @@ export async function parseExec(data) {
 
   const present = dayCols ? Object.keys(dayCols) : [];
   const missing = REQUIRED_COLUMNS.filter((c) => !present.includes(c));
-  if (!dayCols) throw new Error('לא נמצאה טבלת הימים בדוח הביצוע.');
+  if (!dayCols) throw new Error('לא נמצאה טבלת הימים ברומת הביצוע.');
   // האזהרה על עמודות חסרות נבנית ב-evaluate, לפי missingColumns, כדי שגם חודש שנשמר לפני שינוי בכלל יוצג נכון.
   if (header.status && !/closed/i.test(header.status)) {
     warnings.push(`סטטוס החודש הוא "${header.status}" ולא Closed. הנתונים אינם סופיים.`);
@@ -92,7 +92,7 @@ export async function parseExec(data) {
 function parseHeader(pages, warnings) {
   const text = pages.map((p) => toRows(p.items).map((r) => r.map((i) => i.s).join(' ')).join(' \n ')).join(' \n ');
   const period = text.match(/Period:\s*(\d{4})(\d{2})/);
-  if (!period) throw new Error('לא נמצאה שורת Period בדוח הביצוע.');
+  if (!period) throw new Error('לא נמצאה שורת Period ברומת הביצוע.');
 
   const employee = text.match(/Employee:\s*([^\n(]+?)\s*\((\d+)\)/);
   // ערך של שדה בכותרת, עד התווית הבאה. תווית עשויה להיות דו-מילית ("Line Type:").

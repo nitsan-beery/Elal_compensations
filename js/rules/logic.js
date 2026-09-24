@@ -29,7 +29,7 @@ function credit_from_scheduled(ctx, params, rule) {
   const monthEnd = ctx.timeline.at(-1).date;
   for (const pairing of ctx.execPairings) {
     if (sumLegs(pairing) == null) {
-      ctx.review(`${describePairing(pairing)}: חסרות שעות מתוכננות (SkdDur) בדוח, ולא ניתן לחשב קרדיט.`, rule);
+      ctx.review(`${describePairing(pairing)}: חסרות שעות מתוכננות (SkdDur) ברומה, ולא ניתן לחשב קרדיט.`, rule);
       continue;
     }
     const days = new Map(); // date → {min, why[]}
@@ -294,7 +294,7 @@ function askUnconfirmedCodes(ctx, params, rule) {
         id: confirmId(c.code),
         date: c.dates[0],
         title: `קוד ${c.code}: האם זה ${params.confirm_label}?`,
-        body: `הקוד מופיע ב-${days}${credits ? `, ובדוח Credit ${credits}` : ''}. הוא עוד לא נראה בקבצים, ` +
+        body: `הקוד מופיע ב-${days}${credits ? `, וברומה Credit ${credits}` : ''}. הוא עוד לא נראה בקבצים, ` +
           `והאפליקציה לא מנחשת את הזיכוי שלו. ${params.confirm_label} מזכה ב-${value} ליום.`,
         options: [
           { value: params.confirm_answer, label: `כן, ${params.confirm_label}`, hint: `${value} ליום` },
@@ -1067,7 +1067,7 @@ function standby_activation(ctx, params, rule) {
           `אין חוק שקובע את ערך הכוננות לקוד ${planCode}. דורש בדיקה ידנית.`, rule);
       } else if (credit == null || credit < value.min * flown.length) {
         ctx.review(`${describePairing(pairing)}: על ${what} מגיע הגבוה מבין קרדיט הטיסה (${credit == null ? 'לא ידוע' : minToHhmm(credit)}) ` +
-          `לבין ${flown.length} × ${minToHhmm(value.min)} (${value.rule.title}; 2018 ס' 98). הכוננות גבוהה יותר, ועוד לא ראינו איך זה נרשם בדוח. דורש בדיקה ידנית.`, rule);
+          `לבין ${flown.length} × ${minToHhmm(value.min)} (${value.rule.title}; 2018 ס' 98). הכוננות גבוהה יותר, ועוד לא ראינו איך זה נרשם ברומה. דורש בדיקה ידנית.`, rule);
       } else {
         ctx.note(pairing.from, `${describePairing(pairing)}: קרדיט הטיסה (${minToHhmm(credit)}) גבוה מערך ${what} (${flown.length} × ${minToHhmm(value.min)}), ולכן אין תוספת (2018 ס' 98).`, rule);
       }

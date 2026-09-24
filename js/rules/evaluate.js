@@ -753,12 +753,12 @@ function warnMissingColumns(out, exec) {
   const missing = (exec.missingColumns ?? []).filter((c) => OPTIONAL_COLUMNS.includes(c));
   for (const column of missing) {
     if (out.totals.find((t) => t.column === column)?.ok !== false) continue;
-    out.warnings.push(`יש פער ב-${column}, והעמודה לא מופיעה בדוח. ` +
+    out.warnings.push(`יש פער ב-${column}, והעמודה לא מופיעה ברומה. ` +
       'בדרך כלל זה אומר שלא היה פיצוי כזה בחודש, אבל ייתכן שהעמודה נחתכה בהדפסה.');
   }
 }
 
-const MISSING_COLUMNS_PREFIX = 'עמודות חסרות בדוח';
+const MISSING_COLUMNS_PREFIX = 'עמודות חסרות ברומה';
 // אזהרה שהייתה נשמרת בחודשים שחולצו לפני שהוסרה (קובץ שהודפס מ-iPad).
 const IPAD_WARNING_PREFIX = 'הקובץ הודפס מ-iPad';
 
@@ -775,10 +775,10 @@ function checkMissingData(plan, exec, warnings) {
   const dm = (iso) => `${iso.slice(8, 10)}/${iso.slice(5, 7)}`;
   if (exec) {
     const absent = Object.values(exec.days ?? {}).filter((d) => d.absent).map((d) => dm(d.date));
-    if (absent.length) warnings.push(`בדוח הביצוע לא נמצאו שורות ${absent.length === 1 ? 'ליום' : 'לימים'} ${list(absent)}. ייתכן שעמוד חסר או נחתך. ${absent.length === 1 ? 'היום נבדק' : 'הימים נבדקים'} כאילו לא הייתה בהם פעילות.`);
+    if (absent.length) warnings.push(`ברומת הביצוע לא נמצאו שורות ${absent.length === 1 ? 'ליום' : 'לימים'} ${list(absent)}. ייתכן שעמוד חסר או נחתך. ${absent.length === 1 ? 'היום נבדק' : 'הימים נבדקים'} כאילו לא הייתה בהם פעילות.`);
     if (exec.legColumns?.length) {
       const cols = Object.keys(EXEC_LEG_FIELDS).filter((c) => !exec.legColumns.includes(c));
-      if (cols.length) warnings.push(`בטבלת הרגליים בדוח הביצוע ${cols.length === 1 ? 'חסרה העמודה' : 'חסרות העמודות'} ${cols.join(', ')}. ייתכן ש${cols.length === 1 ? 'היא נחתכה' : 'הן נחתכו'} בהדפסה. חוקים שתלויים בזמני הטיסות לא ייבדקו כראוי.`);
+      if (cols.length) warnings.push(`בטבלת הרגליים ברומת הביצוע ${cols.length === 1 ? 'חסרה העמודה' : 'חסרות העמודות'} ${cols.join(', ')}. ייתכן ש${cols.length === 1 ? 'היא נחתכה' : 'הן נחתכו'} בהדפסה. חוקים שתלויים בזמני הטיסות לא ייבדקו כראוי.`);
     }
     const incomplete = [];
     for (const d of Object.values(exec.days ?? {})) {
@@ -790,8 +790,8 @@ function checkMissingData(plan, exec, warnings) {
         if (gaps.length) incomplete.push(`${dm(d.date)} ${l.flight ?? ''} (${gaps.join(', ')})`.replace('  ', ' '));
       }
     }
-    if (incomplete.length) warnings.push(`בדוח הביצוע חסרים ערכים ברגליים: ${list(incomplete)}. החישובים של הרגליים האלה עלולים להיות שגויים.`);
-    if (!Object.keys(exec.totals ?? {}).length) warnings.push('לא נמצאה שורת הסיכום של טבלת הימים בדוח הביצוע, ולכן אין השוואה של הסיכומים.');
+    if (incomplete.length) warnings.push(`ברומת הביצוע חסרים ערכים ברגליים: ${list(incomplete)}. החישובים של הרגליים האלה עלולים להיות שגויים.`);
+    if (!Object.keys(exec.totals ?? {}).length) warnings.push('לא נמצאה שורת הסיכום של טבלת הימים ברומת הביצוע, ולכן אין השוואה של הסיכומים.');
   }
   if (plan) {
     const incomplete = Object.values(plan.days ?? {}).flatMap((d) => (d.legs ?? [])

@@ -337,8 +337,8 @@ const whereOf = (u) => (u.where === 'both' ? 'בתכנון ובביצוע' : u.w
 function unknownCodeLines(u) {
   const lines = [];
   const texts = [...new Set((u.report ?? []).map((r) => r.text))];
-  if (texts.length === 1) lines.push(`בדוח: ${texts[0]}`);
-  else for (const r of u.report ?? []) lines.push(`בדוח ${ddmm(r.date)}: ${r.text}`);
+  if (texts.length === 1) lines.push(`ברומה: ${texts[0]}`);
+  else for (const r of u.report ?? []) lines.push(`ברומה ${ddmm(r.date)}: ${r.text}`);
   lines.push(u.answer ? `לפי תשובתך: ${u.answer}` : 'האפליקציה לא יודעת מה מגיע עליו, ולא ניחשה.');
   return lines;
 }
@@ -407,7 +407,7 @@ function renderTotals(res) {
       <div class="total ${t.ok === true ? 'ok' : t.ok === false && !pending ? gapClass(t.reported - t.expected) : ''}">
         <div class="label">${esc(t.column)}</div>
         <div class="val num">${minToHhmm(t.expected)}</div>
-        <div class="rep">בדוח <span class="num">${minToHhmm(t.reported)}</span> ${status}</div>
+        <div class="rep">ברומה <span class="num">${minToHhmm(t.reported)}</span> ${status}</div>
       </div>`;
     }).join('')}${fd ? `
       <div class="total free ${fd.free >= fd.due ? 'ok' : 'bad'}">
@@ -441,7 +441,7 @@ function renderComparison(res) {
     <h2>פירוט</h2>
     <div class="filters">${chip('comp', 'רק פיצויים')}${chip('all', 'הכול')}${chip('bad', 'פערים')}${chip('pending', 'ממתין לתשובה')}</div>
     <div class="table-wrap"><table>
-      <thead><tr><th>ימים</th><th>עמודה</th><th>צפוי</th><th>בדוח</th><th>פער</th><th></th></tr></thead>
+      <thead><tr><th>ימים</th><th>פיצוי / קרדיט</th><th>צפוי</th><th>ברומה</th><th>פער</th><th></th></tr></thead>
       <tbody>${rows.map((c) => {
         const gap = c.ok === false ? gapClass(c.diff) : c.marks.length ? 'bad' : '';
         const cls = gap || (c.pending ? 'pending' : '');
@@ -450,7 +450,7 @@ function renderComparison(res) {
           // שורה תקינה מציגה רק הערה שמסבירה פיצוי בלי ודאות (hint).
           ...c.items.filter((e) => (c.ok !== true || e.hint) && (e.ruleTitle || e.note))
             .map((e) => `${esc(e.ruleTitle ?? '')}${e.note ? `: ${esc(e.note)}` : ''}${e.min != null && c.unit !== 'count' ? ` <span class="num">${minToHhmm(e.min)}</span>` : ''}`),
-          ...c.marks.map((m) => `${esc(m.column)}: צפוי <span class="num">${hm(m.expected, m.unit)}</span>, בדוח <span class="num">${hm(m.reported, m.unit)}</span>`),
+          ...c.marks.map((m) => `${esc(m.column)}: צפוי <span class="num">${hm(m.expected, m.unit)}</span>, ברומה <span class="num">${hm(m.reported, m.unit)}</span>`),
         ].join('<br>');
         return `<tr class="${cls}">
           <td>${esc(c.label)}</td><td class="col">${esc(c.column)}${reasonOf(c)}</td>
