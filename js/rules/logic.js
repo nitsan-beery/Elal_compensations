@@ -852,10 +852,10 @@ function checkLinkConflicts(ctx, rule) {
     else if (!a && ctx.reportedOn(m.exec, scColumn) > 0) execResolution.set(m.exec.id, { match: m, value: 'special_call', link: null });
   }
 
-  const conflicts = new Map(); // "planId|execId" -> {planMatch, execMatch}
+  const conflicts = new Map(); // "planId|execId" -> {planEntry, execEntry}
   const addConflict = (planEntry, execEntry) => {
     const key = planEntry.match.plan.id + '|' + execEntry.match.exec.id;
-    if (!conflicts.has(key)) conflicts.set(key, { planMatch: planEntry.match, execMatch: execEntry.match });
+    if (!conflicts.has(key)) conflicts.set(key, { planEntry, execEntry });
   };
 
   // סבב מתוכנן עם קישור, מול מה שכבר סומן על הטיסה שהוא מצביע עליה.
@@ -874,35 +874,57 @@ function checkLinkConflicts(ctx, rule) {
     if (plan && plan.value !== 'voluntary_swap') addConflict(plan, entry);
   }
 
-  for (const { planMatch, execMatch } of conflicts.values()) resolveLinkConflict(ctx, planMatch, execMatch, rule);
+  for (const { planEntry, execEntry } of conflicts.values()) resolveLinkConflict(ctx, planEntry, execEntry, rule);
 }
 
 /**
- * שואלים מי משתי ההחלטות הסותרות נכונה, ומקפיאים את שני הצדדים (`swap_conflict_void`) עד
- * לתשובה: הסבב המתוכנן אינו מקבל את מה שהתשובה עליו קובעת (`lost_hours_credit`,
- * `higher_of_planned_performed`, `cancelled_no_compensation`), והטיסה שקושרה אליו אינה
- * מקבלת את מה שכבר סומן עליה (`voluntary_swap`, `special_call`). אחרי התשובה, רק הצד
- * שנבחר חל.
+ * השאלה ממוקדת בסבב המתוכנן עצמו, כי שתי ההחלטות הסותרות הן שתי גרסאות של "מה קרה" לו, לא
+ * שתי החלטות נפרדות שיש לבחור ביניהן בלשון מופשטת (בעל המוצר, 24/09/2026): כל אפשרות
+ * מתוארת באותה לשון שהשאלה הרגילה (`whatHappenedOptions`, דרך `claimLabel`) הייתה
+ * משתמשת בה, עם שם הטיסה הספציפית שקושרה אליה. מקפיאים את שני הצדדים
+ * (`swap_conflict_void`) עד לתשובה: הסבב המתוכנן אינו מקבל את מה שהתשובה עליו קובעת
+ * (`lost_hours_credit`, `higher_of_planned_performed`, `cancelled_no_compensation`),
+ * והטיסה שקושרה אליו אינה מקבלת את מה שכבר סומן עליה (`voluntary_swap`, `special_call`).
  */
-function resolveLinkConflict(ctx, planMatch, execMatch, rule) {
-  const resolved = ctx.answer(`swap_conflict:${planMatch.plan.id}:${execMatch.exec.id}`)?.value;
+function resolveLinkConflict(ctx, planEntry, execEntry, rule) {
+  const planMatch = planEntry.match, execMatch = execEntry.match;
+  const id = `swap_conflict:${planMatch.plan.id}:${execMatch.exec.id}`;
+  const resolved = ctx.answer(id)?.value;
   if (resolved !== 'plan') ctx.markPairing(planMatch.plan, 'swap_conflict_void');
   if (resolved !== 'exec') ctx.markPairing(execMatch.exec, 'swap_conflict_void');
   if (resolved) return;
   const planLabel = describePairing(planMatch.plan);
   const execLabel = describePairing(execMatch.exec);
   ctx.ask({
-    id: `swap_conflict:${planMatch.plan.id}:${execMatch.exec.id}`,
+    id,
     date: planMatch.plan.from,
-    title: `סתירה בין שתי תשובות: ${planLabel} מול ${execLabel}`,
-    body: `יש החלטה (תשובה, או הנחה מהדוח) על ${planLabel} עצמה, ובנפרד החלטה על ${execLabel} שקושרה אליה. ` +
-      'שתי ההחלטות לא יכולות להיות נכונות יחד. מה נכון?',
+    title: `מה קרה ב${planLabel}?`,
+    body: `יש שתי החלטות סותרות (תשובה, או הנחה מהדוח) על מה שקרה ב${planLabel}. מה נכון?`,
     options: [
-      { value: 'plan', label: `ההחלטה על ${planLabel} נכונה`, hint: `ההחלטה על ${execLabel} לא תיספר` },
-      { value: 'exec', label: `ההחלטה על ${execLabel} נכונה`, hint: `ההחלטה על ${planLabel} לא תיספר` },
+      { value: 'plan', label: claimLabel(ctx, planEntry, planLabel, execLabel, planMatch), hint: `${execLabel} לא נחשבת קשורה אליה` },
+      { value: 'exec', label: claimLabel(ctx, execEntry, planLabel, execLabel, planMatch), hint: `${planLabel} לא מקבלת תוספת בנפרד` },
     ],
     ruleId: rule.id,
   });
+}
+
+/**
+ * הלשון שמתארת מה קרה בסבב המתוכנן, לפי ערך ההחלטה (תשובה או הנחה): אותה לשון בדיוק
+ * שהשאלה הרגילה הייתה משתמשת בה (`whatHappenedOptions`), עם שם הטיסה הספציפית שקושרה
+ * אליה במקום ניסוח כללי. `entry` יכול להיות מהצד המתוכנן או מהצד שבוצע.
+ */
+function claimLabel(ctx, entry, planLabel, execLabel, planMatch) {
+  const { value, match } = entry;
+  if (value === 'assumed') {
+    return match.exec
+      ? `לפי הדוח, ${planLabel} בוטלה ללא קרדיט נוסף (מה שבוצע באותם ימים נחשב קריאה מיוחדת)`
+      : `לפי הדוח, מגיעות על ${planLabel} השעות שהפסיד`;
+  }
+  if (value === 'special_call') return `${execLabel} היא קריאה מיוחדת עצמאית, ולא קשורה ל${planLabel}`;
+  if (value === 'voluntary_swap') return `${planLabel} הוחלפה מרצון עם ${execLabel}`;
+  if (value === 'other') return ctx.answerFor(match)?.text || 'סיבה אחרת';
+  const opt = whatHappenedOptions(ctx, planMatch.plan, planMatch.exec).find((o) => o.value === value);
+  return opt ? opt.label : value;
 }
 
 /**
@@ -928,16 +950,32 @@ function noteCancelled(ctx, match, rule, why) {
 }
 
 /**
- * השאלה על סבב מתוכנן שלא בוצע כמתוכנן. הרמזים מתארים מה מגיע לפי כל תשובה, לפי החוקים
- * שבתוקף בחודש. `execId` הוא הסבב שבוצע באותם ימים, והוא האפשרות הראשונה בקישור שבהחלפה.
+ * אפשרויות "מה קרה" לסבב מתוכנן שלא בוצע כמתוכנן, בלי "סיבה אחרת": משותפות לשאלה הרגילה
+ * (`askWhatHappened`) ולשאלת הסתירה (`resolveLinkConflict`, דרך `claimLabel`), כדי שאותו
+ * ערך תמיד יתואר באותה לשון.
  */
-function askWhatHappened(ctx, match, rule) {
-  const { plan, exec } = match;
+function whatHappenedOptions(ctx, plan, exec) {
   const diff = plannedMinusPerformed(ctx, plan, exec);
   const shortfall = ctx.rulesWithLogic('higher_of_planned_performed')[0]?.logic?.params?.shortfall_column ?? 'COM';
   const higher = 'מגיע הגבוה מבין שתי הטיסות' + (diff == null ? ''
     : diff > 0 ? `: ${amountWord(shortfall)} של ${minToHhmm(diff)}`
     : '; מה שבוצע אינו קצר מהמתוכנן, ולכן אין הפרש לתשלום');
+  return [
+    { value: 'replaced', label: 'החלפה ביוזמת החברה (כולל זכיה במכרז)', hint: higher, needsLink: true },
+    { value: 'voluntary_swap', label: 'החלפה מרצוני', hint: 'רק הקרדיט של הטיסה שבוצעה', needsLink: true },
+    { value: 'cancelled', label: 'הטיסה המקורית בוטלה ללא קרדיט',
+      hint: exec ? 'מגיע פיצוי של קריאה מיוחדת על הטיסה שבוצעה' : 'לא מגיע כלום' },
+    ...lostHoursOptions(ctx, plan, exec ? 'בנוסף לקרדיט של הטיסה שבוצעה' : undefined),
+  ];
+}
+
+/**
+ * השאלה על סבב מתוכנן שלא בוצע כמתוכנן. `execId` הוא הסבב שבוצע באותם ימים, והוא האפשרות
+ * הראשונה בקישור שבהחלפה.
+ */
+function askWhatHappened(ctx, match, rule) {
+  const { plan, exec } = match;
+  const diff = plannedMinusPerformed(ctx, plan, exec);
   ctx.ask({
     id: `cancelled:${plan.id}`,
     date: plan.from,
@@ -948,11 +986,7 @@ function askWhatHappened(ctx, match, rule) {
     body: (diff != null && diff > 0 ? `המתוכנן ארוך ממה שבוצע ב-${minToHhmm(diff)}. ` : '') +
       'הסיבה אינה בקבצים, והיא קובעת מה מגיע. מה קרה?',
     options: [
-      { value: 'replaced', label: 'החלפה ביוזמת החברה (כולל זכיה במכרז)', hint: higher, needsLink: true },
-      { value: 'voluntary_swap', label: 'החלפה מרצוני', hint: 'רק הקרדיט של הטיסה שבוצעה', needsLink: true },
-      { value: 'cancelled', label: 'הטיסה המקורית בוטלה ללא קרדיט',
-        hint: exec ? 'מגיע פיצוי של קריאה מיוחדת על הטיסה שבוצעה' : 'לא מגיע כלום' },
-      ...lostHoursOptions(ctx, plan, exec ? 'בנוסף לקרדיט של הטיסה שבוצעה' : undefined),
+      ...whatHappenedOptions(ctx, plan, exec),
       { value: 'other', label: 'סיבה אחרת', needsText: true },
     ],
     ruleId: rule.id,
