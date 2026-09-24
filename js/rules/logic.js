@@ -120,18 +120,43 @@ const sumLegs = (pairing) =>
  */
 function min_slip_credit(ctx, params, rule) {
   const min = H(params.min_credit_hours);
+  for (const group of minSlipGroups(ctx, params)) expectMinSlip(ctx, group, min, params, rule);
+}
+
+/** הקבוצות שההשלמה נבדקת עליהן: FDP שלם, או כל סבב בנפרד כשחלק מה-FDP אינו נבדק. */
+function minSlipGroups(ctx, params) {
   const groups = params.per_fdp
     ? execFdpGroups(ctx.execPairings, ctx.domicile, H(params.legal_rest_hours), params.report_minutes_before_std ?? 0)
     : ctx.execPairings.map((p) => [p]);
+  const out = [];
   for (const group of groups) {
     const slips = group.filter((p) => !ctx.pairingHandledBy(p, 'lost_hours_credit') && !p.cutAtStart && !p.cutAtEnd);
-    if (slips.length !== group.length) {
-      // סבב חתוך או סבב שבוטל בגלל מטוס חכור: שאר ה-FDP נבדק לבד, כל סבב בנפרד.
-      for (const p of slips) expectMinSlip(ctx, [p], min, params, rule);
-      continue;
-    }
-    expectMinSlip(ctx, group, min, params, rule);
+    // סבב חתוך או סבב שבוטל בגלל מטוס חכור: שאר ה-FDP נבדק לבד, כל סבב בנפרד.
+    if (slips.length !== group.length) out.push(...slips.map((p) => [p]));
+    else out.push(group);
   }
+  return out;
+}
+
+/** ההשלמה שמגיעה לקבוצה, או 0 כשהקרדיט מגיע למינימום או שאינו ידוע. */
+function minSlipShortfall(group, min) {
+  const credits = group.map(sumLegs);
+  if (credits.some((c) => c == null)) return 0;
+  const credit = credits.reduce((s, c) => s + c, 0);
+  if (credit === 0 || credit >= min * group.length) return 0;
+  return min * group.length - credit;
+}
+
+/**
+ * ההשלמה לסליפ קצר שצפויה על סבב ביצוע. `min_slip_credit` רץ אחרי חוקי ההחלפה, ולכן
+ * ההערה שם אינה יכולה לקרוא את הציפייה והחישוב חוזר כאן.
+ */
+function minSlipTopUp(ctx, execPairing) {
+  const rule = execPairing ? ctx.rulesWithLogic('min_slip_credit')[0] : null;
+  if (!rule) return 0;
+  const params = rule.logic.params ?? {};
+  const group = minSlipGroups(ctx, params).find((g) => g.some((p) => p.id === execPairing.id));
+  return group ? minSlipShortfall(group, H(params.min_credit_hours)) : 0;
 }
 
 /**
@@ -139,14 +164,12 @@ function min_slip_credit(ctx, params, rule) {
  * (25/11/2025: BUS 05:04 ו-LCA 02:15 → Rig 02:41 = 2 × 5:00 − 07:19, ולא 02:45).
  */
 function expectMinSlip(ctx, group, min, params, rule) {
-  const credits = group.map(sumLegs);
-  if (credits.some((c) => c == null)) return;
-  const credit = credits.reduce((s, c) => s + c, 0);
-  if (credit === 0 || credit >= min * group.length) return;
+  const shortfall = minSlipShortfall(group, min);
+  if (!shortfall) return;
   const note = group.length === 1
     ? `השלמה ל-${params.min_credit_hours} שעות`
     : `השלמה ל-${group.length} × ${params.min_credit_hours} שעות על ${group.length} סבבים באותו FDP (${group.map(describePairing).join(', ')})`;
-  ctx.expectPairing(group.at(-1), 'rig', min * group.length - credit, rule, note,
+  ctx.expectPairing(group.at(-1), 'rig', shortfall, rule, note,
     { reason: `השלמה ל-${params.min_credit_hours} שעות` });
 }
 
@@ -403,12 +426,15 @@ function unexplained_report_amount(ctx, params, rule) {
 /**
  * נחיתה מאוחרת בארץ: משווים ATA מול STA של הנחיתה בבסיס, כולל רגל DHO.
  * עד `grace_minutes` אין פיצוי, ומעבר לכך מדרגה לכל שעה או חלק ממנה.
+ *
+ * כל איחור מ-`note_from_minutes` ומעלה נרשם כהערה, גם כשמגיע עליו פיצוי: ההערה מפרטת
+ * את החישוב, כמה דקות נותרו מעבר לסף וכמה מדרגות הן (בעל המוצר, 24/09/2026).
  */
 function late_landing_home(ctx, params, rule) {
   const grace = params.grace_minutes ?? 60;
   const step = params.step_minutes ?? 60;
   const perStep = H(params.hours_per_step);
-  // איחור קטן אינו מעניין, גם כשאין עליו פיצוי (בעל המוצר, 24/09/2026).
+  // איחור קטן מזה אינו מעניין (בעל המוצר, 24/09/2026).
   const noteFrom = params.note_from_minutes ?? 0;
 
   for (const day of ctx.timeline) {
@@ -421,6 +447,15 @@ function late_landing_home(ctx, params, rule) {
       }
       const steps = Math.ceil((delay - grace) / step);
       ctx.expect(day.date, 'com', steps * perStep, rule, `${leg.flight}: איחור ${delay} דק' → ${steps} מדרגות`);
+      if (delay >= noteFrom) {
+        const stepsWord = steps === 1 ? 'מדרגה אחת' : `${steps} מדרגות`;
+        ctx.note(
+          day.date,
+          `${leg.flight} נחתה באיחור של ${delay} דק'. מעבר לסף של ${grace} דק' נותרו ${delay - grace} דק' → ` +
+            `${stepsWord} (כל ${step} דק' או חלק מהן), פיצוי של ${minToHhmm(steps * perStep)}.`,
+          rule,
+        );
+      }
     }
   }
 }
@@ -716,16 +751,24 @@ function lostHoursOptions(ctx, planPairing, extra) {
   });
 }
 
-/** החלפה מרצון: רק הקרדיט של הטיסה שבוצעה. אין קריאה מיוחדת ואין "הגבוה". */
+/**
+ * החלפה מרצון: רק הקרדיט של הטיסה שבוצעה. אין קריאה מיוחדת ואין "הגבוה".
+ * ההשלמה לסליפ קצר מוזכרת בהערה רק כשהיא באמת מגיעה (בעל המוצר, 24/09/2026).
+ */
 function voluntary_swap(ctx, params, rule) {
   for (const match of ctx.matches) {
     const answer = ctx.answerFor(match);
     if (answer?.value !== 'voluntary_swap') continue;
     const target = match.exec ?? match.plan;
     ctx.markPairing(target, 'voluntary_swap');
-    ctx.note((match.plan ?? match.exec).from, answer.link === 'none'
-      ? `${describePairing(match.plan)}: הטיסה נמסרה ללא חלופה. אין עליה קרדיט ואין פיצוי.`
-      : 'החלפה מרצון: רק הקרדיט של הטיסה שבוצעה, כולל השלמה לסליפ קצר. אין פיצוי נוסף.', rule);
+    const date = (match.plan ?? match.exec).from;
+    if (answer.link === 'none') {
+      ctx.note(date, `${describePairing(match.plan)}: הטיסה נמסרה ללא חלופה. אין עליה קרדיט ואין פיצוי.`, rule);
+      continue;
+    }
+    const flown = match.exec ?? (answer.link ? ctx.pairingById(answer.link) : null);
+    const slip = minSlipTopUp(ctx, flown) ? ', כולל השלמה לסליפ קצר' : '';
+    ctx.note(date, `החלפה מרצון: רק הקרדיט של הטיסה שבוצעה${slip}. אין פיצוי נוסף.`, rule);
   }
 }
 
