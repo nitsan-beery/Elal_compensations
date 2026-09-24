@@ -503,6 +503,8 @@ function special_call(ctx, params, rule) {
     if (!match.exec || ctx.pairingHandledBy(match.exec, 'stay_extension')) continue;
     // הופעל מכוננות (לפי תשובתו): אין קריאה מיוחדת, גם כשהדוח רשם S/C.
     if (ctx.pairingHandledBy(match.exec, 'standby_activated')) continue;
+    // סתירה עם סבב מתוכנן שנפתרה נגד הטיסה הזאת (`resolveLinkConflict`).
+    if (ctx.pairingHandledBy(match.exec, 'swap_conflict_void')) continue;
     const reported = ctx.reportedOn(match.exec, column);
     const answer = ctx.answerFor(match);
 
@@ -623,6 +625,8 @@ function higher_of_planned_performed(ctx, params, rule) {
     if (!answer && (params.requires_user_answer || match.how !== 'dates')) continue;
     if (ctx.pairingHandledBy(match.plan, 'lost_hours_credit')) continue;
     if (ctx.pairingHandledBy(match.plan, 'cancelled_no_compensation')) continue;
+    // סתירה עם החלפה מרצון שנפתרה נגד הסבב הזה (`resolveSwapConflict`).
+    if (ctx.pairingHandledBy(match.plan, 'swap_conflict_void')) continue;
 
     // תשובה ישנה נשמרה בלי קישור, ואז ההחלפה היא הסבב שבוצע באותם ימים.
     const exec = answer && 'link' in answer ? (answer.link ? ctx.pairingById(answer.link) : null) : match.exec;
@@ -680,6 +684,8 @@ function lost_hours_credit(ctx, params, rule) {
     // `merged_answer_values`: תשובה שנשמרה לפני שהאפשרויות אוחדו (wet_lease) ממשיכה לעבוד.
     const values = [params.answer_value, ...(params.merged_answer_values ?? [])];
     if (!values.includes(answer?.value) && assumed?.rule !== rule) continue;
+    // סתירה עם החלפה מרצון שנפתרה נגד הסבב הזה (`resolveSwapConflict`).
+    if (ctx.pairingHandledBy(match.plan, 'swap_conflict_void')) continue;
     if (!lostHoursApplies(ctx, match.plan, params)) {
       ctx.review(`${describePairing(match.plan)}: התשובה "${params.answer_label}" אינה מתאימה לצי או לסוג המטוס בתכנון. דורש בדיקה ידנית.`, rule);
       continue;
@@ -767,6 +773,8 @@ function voluntary_swap(ctx, params, rule) {
     const answer = ctx.answerFor(match);
     if (answer?.value !== 'voluntary_swap') continue;
     const target = match.exec ?? match.plan;
+    // הסתירה עם תשובה סותרת על הסבב המתוכנן נפתרה נגד ההחלפה מרצון (`resolveSwapConflict`).
+    if (ctx.pairingHandledBy(target, 'swap_conflict_void')) continue;
     ctx.markPairing(target, 'voluntary_swap');
     const date = (match.plan ?? match.exec).from;
     if (answer.link === 'none') {
@@ -791,8 +799,10 @@ function voluntary_swap(ctx, params, rule) {
  * בשתי ההחלפות נבחרת הטיסה שבוצעה במקום: קודם זו שבאותם ימים, ואחריה כל פעילות שלא תוכננה.
  */
 function cancelled_no_compensation(ctx, params, rule) {
+  checkLinkConflicts(ctx, rule);
   for (const match of ctx.matches) {
     if (!match.plan || (match.how !== 'cancelled' && match.how !== 'dates')) continue;
+    if (ctx.pairingHandledBy(match.plan, 'swap_conflict_void')) continue;
     const answer = ctx.answerFor(match);
     if (!answer) {
       if (!assumeCancelled(ctx, match, rule)) askWhatHappened(ctx, match, rule);
@@ -803,6 +813,96 @@ function cancelled_no_compensation(ctx, params, rule) {
       ctx.review(`${describePairing(match.plan)}: ${answer.text || 'סיבה אחרת'}. דורש בדיקה ידנית.`, rule);
     }
   }
+}
+
+/**
+ * ההנחה שחוק `assumeCancelled` היה עושה, בלי תופעות לוואי: אין תשובה, אבל הדוח כבר מזכה
+ * את מה שמתאים (השעות שהפסיד על סבב שלא בוצע, או קריאה מיוחדת על סבב באותם ימים).
+ */
+function wouldAssumeCancelled(ctx, match) {
+  if (!match.exec) return !!paidLostHours(ctx, match.plan);
+  const sc = ctx.rulesWithLogic('special_call')[0]?.logic?.params?.report_column ?? 'S/C';
+  return ctx.reportedOn(match.exec, sc) > 0;
+}
+
+/**
+ * סתירה בין ההחלטה (תשובה של המשתמש, או הנחה מהדוח) על סבב מתוכנן שלא בוצע כמתוכנן לבין
+ * ההחלטה על טיסה אחרת שקושרה אליו מהצד השני, לפני שמישהו מהחוקים משלם על פיהן. בודקים בשני
+ * הכיוונים: סבב עם תשובה "החלפה ביוזמת החברה" או "החלפה מרצוני" שהקישור שלה מצביע על טיסה
+ * שכבר סומנה אחרת (למשל קריאה מיוחדת עצמאית, או החלפה מרצוני של סבב אחר), וטיסה עם תשובה
+ * "החלפה מרצוני" שהקישור שלה מצביע על סבב שכבר סומן אחרת. כשיש סתירה שואלים מי מהשתיים
+ * נכונה, ומקפיאים את שני הצדדים עד לתשובה כדי לא לשלם על שניהם (בעל המוצר, 24/09/2026).
+ */
+function checkLinkConflicts(ctx, rule) {
+  const scColumn = ctx.rulesWithLogic('special_call')[0]?.logic?.params?.report_column ?? 'S/C';
+
+  const planResolution = new Map(); // plan.id -> {match, value, link}
+  for (const m of ctx.matches) {
+    if (!m.plan || (m.how !== 'cancelled' && m.how !== 'dates')) continue;
+    const a = ctx.answerFor(m);
+    if (a && !('via' in a)) planResolution.set(m.plan.id, { match: m, value: a.value, link: a.link ?? null });
+    else if (!a && wouldAssumeCancelled(ctx, m)) planResolution.set(m.plan.id, { match: m, value: 'assumed', link: null });
+  }
+
+  const execResolution = new Map(); // exec.id -> {match, value, link}
+  for (const m of ctx.matches) {
+    if (!m.exec || m.how !== 'unplanned') continue;
+    const a = ctx.answerFor(m);
+    if (a && !('via' in a)) execResolution.set(m.exec.id, { match: m, value: a.value, link: a.link ?? null });
+    else if (!a && ctx.reportedOn(m.exec, scColumn) > 0) execResolution.set(m.exec.id, { match: m, value: 'special_call', link: null });
+  }
+
+  const conflicts = new Map(); // "planId|execId" -> {planMatch, execMatch}
+  const addConflict = (planEntry, execEntry) => {
+    const key = planEntry.match.plan.id + '|' + execEntry.match.exec.id;
+    if (!conflicts.has(key)) conflicts.set(key, { planMatch: planEntry.match, execMatch: execEntry.match });
+  };
+
+  // סבב מתוכנן עם קישור, מול מה שכבר סומן על הטיסה שהוא מצביע עליה.
+  for (const entry of planResolution.values()) {
+    if (!['replaced', 'voluntary_swap'].includes(entry.value) || !entry.link || entry.link === 'none') continue;
+    const exec = execResolution.get(entry.link);
+    if (!exec) continue;
+    const compatible = entry.value === 'voluntary_swap' && exec.value === 'voluntary_swap' && exec.link === entry.match.plan.id;
+    if (!compatible) addConflict(entry, exec);
+  }
+
+  // פעילות עם קישור "החלפה מרצוני", מול מה שכבר סומן על הסבב שהיא מצביעה עליו.
+  for (const entry of execResolution.values()) {
+    if (entry.value !== 'voluntary_swap' || !entry.link || entry.link === 'none') continue;
+    const plan = planResolution.get(entry.link);
+    if (plan && plan.value !== 'voluntary_swap') addConflict(plan, entry);
+  }
+
+  for (const { planMatch, execMatch } of conflicts.values()) resolveLinkConflict(ctx, planMatch, execMatch, rule);
+}
+
+/**
+ * שואלים מי משתי ההחלטות הסותרות נכונה, ומקפיאים את שני הצדדים (`swap_conflict_void`) עד
+ * לתשובה: הסבב המתוכנן אינו מקבל את מה שהתשובה עליו קובעת (`lost_hours_credit`,
+ * `higher_of_planned_performed`, `cancelled_no_compensation`), והטיסה שקושרה אליו אינה
+ * מקבלת את מה שכבר סומן עליה (`voluntary_swap`, `special_call`). אחרי התשובה, רק הצד
+ * שנבחר חל.
+ */
+function resolveLinkConflict(ctx, planMatch, execMatch, rule) {
+  const resolved = ctx.answer(`swap_conflict:${planMatch.plan.id}:${execMatch.exec.id}`)?.value;
+  if (resolved !== 'plan') ctx.markPairing(planMatch.plan, 'swap_conflict_void');
+  if (resolved !== 'exec') ctx.markPairing(execMatch.exec, 'swap_conflict_void');
+  if (resolved) return;
+  const planLabel = describePairing(planMatch.plan);
+  const execLabel = describePairing(execMatch.exec);
+  ctx.ask({
+    id: `swap_conflict:${planMatch.plan.id}:${execMatch.exec.id}`,
+    date: planMatch.plan.from,
+    title: `סתירה בין שתי תשובות: ${planLabel} מול ${execLabel}`,
+    body: `יש החלטה (תשובה, או הנחה מהדוח) על ${planLabel} עצמה, ובנפרד החלטה על ${execLabel} שקושרה אליה. ` +
+      'שתי ההחלטות לא יכולות להיות נכונות יחד. מה נכון?',
+    options: [
+      { value: 'plan', label: `ההחלטה על ${planLabel} נכונה`, hint: `ההחלטה על ${execLabel} לא תיספר` },
+      { value: 'exec', label: `ההחלטה על ${execLabel} נכונה`, hint: `ההחלטה על ${planLabel} לא תיספר` },
+    ],
+    ruleId: rule.id,
+  });
 }
 
 /**
