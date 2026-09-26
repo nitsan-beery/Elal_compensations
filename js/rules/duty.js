@@ -387,30 +387,30 @@ function night_landings(ctx, params, rule) {
   const unsettled = pool.filter((n) => n.status === 'unknown' || n.status === 'review');
   if (counted.length + unsettled.length < threshold) {
     const missed = pool.filter((n) => !counted.includes(n));
-    ctx.note(null, `${rule.title}: ${planned}, נספרות כבוצעות: ${counted.length}${counted.length ? ` (${list(counted)})` : ''}` +
-      `${missed.length ? `; לא בוצעו: ${list(missed)}` : ''}. הפיצוי הוא מהטיסה ה-${threshold} שבוצעה, ולכן אין פיצוי.`, rule);
+    ctx.note(null, `${rule.title}: ${planned}, נספרות: ${counted.length}${counted.length ? ` (${list(counted)})` : ''}` +
+      `${missed.length ? `; לא בוצעו (בוטלו או הוחלפו שלא ביוזמת החברה): ${list(missed)}` : ''}. הפיצוי הוא מהטיסה ה-${threshold} שבוצעה, ולכן אין פיצוי.`, rule);
     return;
   }
   // הספירה אינה סגורה כל עוד לא ידוע למה סבב לא בוצע. השאלה על כך כבר נשאלה בחוק הסבב
   // שלא בוצע, ולכן כאן לא שואלים שוב (החלטת בעל המוצר, 23/09/2026), אלא מסבירים במה זה תלוי.
   // גם על הרכב הצוות לא שואלים עד שהיא תיסגר: עד אז לא ידוע אם בכלל מגיע פיצוי.
   if (counted.length < threshold) {
-    const why = `${rule.title}: נספרות כבוצעות ${counted.length} טיסות מתוך ${pool.length} מתוכננות עם נחיתה בין ` +
+    const why = `${rule.title}: נספרות ${counted.length} טיסות מתוך ${pool.length} מתוכננות עם נחיתה בין ` +
       `${params.window_from} ל-${params.window_to}, והפיצוי הוא מהטיסה ה-${threshold} שבוצעה`;
     const reviewed = unsettled.filter((x) => x.status === 'review');
     for (const n of reviewed) {
       ctx.review(`${ddmm(n.leg.date)} ${n.leg.flight} לא בוצעה, והסיבה שנרשמה עליה היא "סיבה אחרת", כך שלא ידוע אם זה היה ביוזמת ` +
-        `החברה – ורק אז היא נספרת כבוצעה (ס' 40). ${why}. דורש בדיקה ידנית.`, rule);
+        `החברה – ורק אז היא נספרת (ס' 40). ${why}. דורש בדיקה ידנית.`, rule);
     }
     const pending = unsettled.filter((x) => x.status === 'unknown');
     if (pending.length) {
       const many = pending.length > 1;
-      ctx.note(null, `${why}. ${list(pending)} לא ${many ? 'בוצעו' : 'בוצעה'}, וביטול או שינוי הצבה ביוזמת החברה ` +
+      ctx.note(null, `${why}. ${list(pending)} ${many ? 'לא בוצעו (בוטלו או הוחלפו שלא ביוזמת החברה)' : 'לא בוצעה (בוטלה או הוחלפה שלא ביוזמת החברה)'}, וביטול או שינוי הצבה ביוזמת החברה ` +
         `נחשב ביצוע (ס' 40). הספירה תיסגר לפי התשובה על ${many ? 'הסבבים שלא בוצעו' : 'הסבב שלא בוצע'}.`, rule);
     } else {
       const many = reviewed.length > 1;
       ctx.note(null, `${why}. ${list(reviewed)} לא ${many ? 'בוצעו' : 'בוצעה'}, והסיבה שנרשמה ` +
-        `${many ? 'עליהן' : 'עליה'} היא "סיבה אחרת", ולכן לא ידוע אם ${many ? 'הן נספרות כבוצעות' : 'היא נספרת כבוצעה'} ` +
+        `${many ? 'עליהן' : 'עליה'} היא "סיבה אחרת", ולכן לא ידוע אם ${many ? 'הן נספרות' : 'היא נספרת'} ` +
         `(ס' 40). הספירה תיסגר אחרי הבדיקה הידנית.`, rule);
     }
     return;
@@ -451,7 +451,7 @@ function night_landings(ctx, params, rule) {
   // כשכל מה שתוכנן נספר כבוצע, מספר אחד מספיק לשניהם.
   const counts = counted.length === night.length
     ? `תוכננו ונספרות ${night.length} טיסות עם נחיתה בין ${params.window_from} ל-${params.window_to}`
-    : `${planned}, ונספרות כבוצעות ${counted.length}`;
+    : `${planned}, ונספרות ${counted.length}`;
   ctx.note(null, `${rule.title}: ${counts} (${list(counted)}). הפיצוי הוא מהטיסה ה-${threshold} שבוצעה, ` +
     `ולכן מגיע פיצוי של ${minToHhmm(hours)} על ${names(paying)}.`, rule);
   paying.forEach((n) => {
