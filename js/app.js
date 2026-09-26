@@ -428,19 +428,17 @@ function renderComparison(res) {
     comp: (c) => COMP_COLUMNS.has(c.column),
     all: () => true,
     bad: isGap,
-    pending: (c) => c.pending,
   };
   const counts = {
     comp: all.filter(FILTERS.comp).length,
     all: all.length,
     bad: all.filter(isGap).length,
-    pending: all.filter((c) => c.pending).length,
   };
   const rows = all.filter(FILTERS[state.filter] ?? FILTERS.all);
   const chip = (id, label) => `<button class="chip" data-filter="${id}" aria-pressed="${state.filter === id}">${label} (${counts[id]})</button>`;
   return `<details class="card" open>
     <summary><h2 style="display:inline">פירוט</h2></summary>
-    <div class="filters">${chip('comp', 'רק פיצויים')}${chip('all', 'הכול')}${chip('bad', 'פערים')}${chip('pending', 'ממתין לתשובה')}</div>
+    <div class="filters">${chip('comp', 'רק פיצויים')}${chip('all', 'הכול')}${chip('bad', 'פערים')}</div>
     <div class="table-wrap"><table>
       <thead><tr><th>ימים</th><th>פיצוי / קרדיט</th><th>צפוי</th><th>ברומה</th><th>פער</th><th></th></tr></thead>
       <tbody>${rows.map((c) => {
