@@ -157,8 +157,8 @@ async function handleFile(file, expected) {
         parsed = await PARSERS[other](bytes.slice());
         kind = other;
         state.notices.push({ kind: 'info', text: `הקובץ "${file.name}" הוא ${KIND_LABEL[other]}, והוא נקלט ככזה.` });
-      } catch {
-        throw first;
+      } catch (second) {
+        throw second.exact ? second : first;
       }
     }
 
@@ -180,7 +180,8 @@ async function handleFile(file, expected) {
     await runAndSave();
   } catch (err) {
     console.error(err);
-    state.notices.push({ kind: 'bad', text: `לא ניתן לקרוא את "${file.name}": ${err.message}` });
+    if (err.exact) state.result = null;
+    state.notices.push({ kind: 'bad', text: err.exact ? err.message : `לא ניתן לקרוא את "${file.name}": ${err.message}` });
     renderResults();
   } finally {
     zone.classList.remove('busy');
