@@ -438,8 +438,8 @@ function renderComparison(res) {
   };
   const rows = all.filter(FILTERS[state.filter] ?? FILTERS.all);
   const chip = (id, label) => `<button class="chip" data-filter="${id}" aria-pressed="${state.filter === id}">${label} (${counts[id]})</button>`;
-  return `<div class="card">
-    <h2>פירוט</h2>
+  return `<details class="card" open>
+    <summary><h2 style="display:inline">פירוט</h2></summary>
     <div class="filters">${chip('comp', 'רק פיצויים')}${chip('all', 'הכול')}${chip('bad', 'פערים')}${chip('pending', 'ממתין לתשובה')}</div>
     <div class="table-wrap"><table>
       <thead><tr><th>ימים</th><th>פיצוי / קרדיט</th><th>צפוי</th><th>ברומה</th><th>פער</th><th></th></tr></thead>
@@ -460,7 +460,7 @@ function renderComparison(res) {
           ${why ? `<tr class="detail"><td colspan="6">${why}</td></tr>` : ''}`;
       }).join('') || '<tr><td colspan="6" class="muted">אין שורות בסינון הזה.</td></tr>'}</tbody>
     </table></div>
-  </div>`;
+  </details>`;
 }
 
 // בתכנון לבד בלבד. עם דוח ביצוע ספירת הימים מוצגת בסיכום החודשי מול הדוח.
