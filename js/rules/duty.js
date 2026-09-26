@@ -306,14 +306,32 @@ function base_rest_shortfall(ctx, params, rule) {
 // ---------- נחיתות לילה (2024 ס' 39–40) ----------
 
 /**
- * טיסות בצי `fleet` שהנחיתה המתוכננת שלהן, בשעון ישראל, בין `window_from` ל-`window_to`.
+ * טיסות בצי `fleet` שהנחיתה המתוכננת שלהן, בשעון ישראל, בין `window_from` ל-`window_to`,
+ * ומסיימת FDP (`legEndsFdp`): הרגל האחרונה בסבב, או רגל שאחריה מנוחה חוקית ביעד. רגל
+ * מחברת שממשיכה לרגל הבאה בלי מנוחה לא נבדקת, גם אם זמן נחיתתה בחלון – בסבב סגור בלי
+ * מנוחה בדרך רק הנחיתה בבסיס בסוף הסבב רלוונטית (בעל המוצר, 26/09/2026).
  * כשתוכננו לפחות `min_planned_count` כאלה בחודש, מגיע פיצוי על כל טיסה כזאת שבוצעה, החל
  * מה-`paid_from_count`. ביטול או שינוי הצבה ביוזמת החברה נחשב ביצוע (ס' 40).
- * `base_landings_only`: רק נחיתות בבסיס. אחרת גם נחיתה בחו"ל, אחרי המרה לשעון ישראל.
+ * `base_landings_only`: רק נחיתות בבסיס. אחרת גם נחיתה בחו"ל שמסיימת FDP, אחרי המרה לשעון ישראל.
  * `counted_crews`: הרכבי הצוות שנספרים (single = 2 טייסים, augmented = 3, double = 4). נשאל על כל טיסה.
  */
 const CREW_LABEL = { single: 'בודד', augmented: 'מוגבר', double: 'כפול' };
 const CREW_PILOTS = { single: 2, augmented: 3, double: 4 };
+
+/**
+ * רגל i בסבב מסיימת FDP אם היא האחרונה בסבב, או שיש מנוחה חוקית (לפחות `legal`) בין
+ * הנחיתה שלה לבין המראת הרגל הבאה. חסר מידע לא נדלג בשקט: נספרת כמסיימת FDP.
+ */
+function legEndsFdp(p, i, legal) {
+  if (i === p.legs.length - 1) return true;
+  const leg = p.legs[i];
+  const next = p.legs[i + 1];
+  const dur = planBlock(leg);
+  if (dur == null || !next.dep) return true;
+  const arr = at(leg.date, leg.dep.min) + dur;
+  const dep = at(next.date, next.dep.min);
+  return dep - arr >= legal;
+}
 
 function night_landings(ctx, params, rule) {
   if (!ctx.hasPlan) {
@@ -323,22 +341,24 @@ function night_landings(ctx, params, rule) {
   const from = parseClock(params.window_from);
   const to = parseClock(params.window_to);
   const inWindow = (clock) => clock >= from && clock <= to;
+  const legal = H(params.legal_rest_hours);
 
   const night = [];
   const unsure = []; // נחיתה בחו"ל שאי אפשר להמיר לשעון ישראל, ושבטווח ההפרשים האפשרי עשויה להיות בחלון
   for (const p of ctx.planPairings) {
-    for (const leg of p.legs) {
-      if (leg.dh || !leg.arr) continue;
-      if (params.base_landings_only && leg.dst !== ctx.domicile) continue;
-      if (params.fleet && (leg.ac ?? ctx.fleet) !== params.fleet) continue;
+    p.legs.forEach((leg, i) => {
+      if (leg.dh || !leg.arr) return;
+      if (!legEndsFdp(p, i, legal)) return;
+      if (params.base_landings_only && leg.dst !== ctx.domicile) return;
+      if (params.fleet && (leg.ac ?? ctx.fleet) !== params.fleet) return;
       const clock = arrivalAtBaseClock(ctx, leg);
       if (clock == null) {
         const local = leg.arr.min;
         if ([-180, 0, 180].some((d) => inWindow(mod(local + d, 1440)))) unsure.push(leg);
-        continue;
+        return;
       }
       if (inWindow(clock)) night.push({ pairing: p, leg, clock });
-    }
+    });
   }
   // נחיתה לא ודאית נשלחת לבדיקה רק כשהיא יכולה לשנות את התוצאה.
   if (unsure.length && night.length + unsure.length >= params.min_planned_count) {
@@ -1451,7 +1471,7 @@ export const DUTY_PARAMS = {
   second_unplanned_activity: ['legal_rest_hours', 'report_minutes_before_std', 'hours', 'report_column', 'sim_report_codes', 'sim_plan_codes', 'sim_plan_code_prefixes'],
   base_rest_shortfall: ['answer_value', 'hours', 'report_column', 'report_minutes_before_std', 'rest_buffer_minutes', 'legal_rest_hours',
     'short_stay_max_hours', 'short_stay_factor', 'long_stay_share', 'long_stay_min_hours', 'long_stay_max_hours'],
-  night_landings: ['fleet', 'window_from', 'window_to', 'min_planned_count', 'paid_from_count', 'hours', 'report_column', 'base_landings_only', 'counted_crews'],
+  night_landings: ['fleet', 'window_from', 'window_to', 'min_planned_count', 'paid_from_count', 'hours', 'report_column', 'base_landings_only', 'counted_crews', 'legal_rest_hours'],
   special_date_activity: ['occasions', 'flight_activity_only', 'hours', 'report_column', 'report_minutes_before_std'],
   free_days_waived: ['hours', 'report_column', 'paid_from_day', 'off_block_from', 'on_block_until', 'min_free_days'],
   consecutive_saturdays: ['hours', 'report_column', 'shabbat_from', 'shabbat_to'],
