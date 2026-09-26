@@ -29,7 +29,7 @@ export function looksLikeExec(pages) {
 export async function parseExec(data) {
   const pages = await extractPages(data);
   if (!looksLikeExec(pages)) {
-    throw new Error('הקובץ אינו נראה כמו דוח "Rainmaker – CrewPayDetails". ודא שהעלית את קובץ הביצוע.');
+    throw new Error('הקובץ אינו נראה כמו דוח "Rainmaker – CrewPayDetails". ודא שהעלית את קובץ הביצוע מהרומה.');
   }
 
   const warnings = [];
