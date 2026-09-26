@@ -808,6 +808,9 @@ function voluntary_swap(ctx, params, rule) {
  * כלומר מגיעה עליו קריאה מיוחדת (`special_call`);
  * הורדה מהטיסה המקורית – השעות שהפסיד, בנוסף לקרדיט של מה שבוצע (`lost_hours_credit`).
  * בשתי ההחלפות נבחרת הטיסה שבוצעה במקום: קודם זו שבאותם ימים, ואחריה כל פעילות שלא תוכננה.
+ *
+ * סטיה לשדה משנה (הסבב שבוצע כולל, לצד היעד המתוכנן, יעד נוסף יחיד) אינה נשאלת: מניחים
+ * החלפה ביוזמת החברה בלי שאלה, כי הקרדיט כבר כולל את כל מה שבוצע (`assumeDiversion`).
  */
 function cancelled_no_compensation(ctx, params, rule) {
   checkLinkConflicts(ctx, rule);
@@ -816,6 +819,7 @@ function cancelled_no_compensation(ctx, params, rule) {
     if (ctx.pairingHandledBy(match.plan, 'swap_conflict_void')) continue;
     const answer = ctx.answerFor(match);
     if (!answer) {
+      if (assumeDiversion(ctx, match, rule)) continue;
       if (!assumeCancelled(ctx, match, rule)) askWhatHappened(ctx, match, rule);
       continue;
     }
@@ -952,6 +956,37 @@ function assumeCancelled(ctx, match, rule) {
   return true;
 }
 
+/**
+ * סטיה לשדה משנה: הסבב המתוכנן היה ליעד יחיד X, והסבב שבוצע כולל את X ועוד יעד אחד בלבד –
+ * לפני X (סטיה ביציאה: "טיסה ל-X" הופכת ל"טיסה ל-Y ומ-Y ל-X") או אחריו (סטיה בחזרה: "טיסה
+ * מ-X" הופכת ל"טיסה מ-X ל-G ומ-G"). מחזיר את היעד הנוסף, או null כשזה לא המקרה.
+ */
+function diversionExtraDestination(plan, exec) {
+  if (plan.destinations.length !== 1 || exec.destinations.length !== 2) return null;
+  const [x] = plan.destinations;
+  if (!exec.destinations.includes(x)) return null;
+  return exec.destinations.find((d) => d !== x) ?? null;
+}
+
+/**
+ * סטיה לשדה משנה במהלך הטיסה, למשל בגלל מזג אוויר: לא החלפה בסבב אחר, אלא אותה טיסה עם רגל
+ * נוספת. הקרדיט כבר כולל את כל מה שבוצע (`credit_from_scheduled` סופר את כל רגלי הסבב, כולל
+ * הרגל הנוספת), ולכן מניחים ולא שואלים – חוץ ממקרה לא צפוי שבו המבוצע יוצא קצר מהמתוכנן
+ * למרות הרגל הנוספת, ואז בודקים ידנית כמו בהחלפה רגילה (בקשת בעל המוצר, 26/09/2026).
+ */
+function assumeDiversion(ctx, match, rule) {
+  if (!match.exec) return false;
+  const extra = diversionExtraDestination(match.plan, match.exec);
+  if (!extra) return false;
+  const diff = plannedMinusPerformed(ctx, match.plan, match.exec);
+  if (diff == null || diff > 0) return false;
+  ctx.markPairing(match.plan, 'diversion');
+  ctx.markPairing(match.exec, 'diversion');
+  ctx.note(match.plan.from, `${describePairing(match.plan)}: בביצוע יש גם נחיתה ב-${extra} (${describePairing(match.exec)}) – ` +
+    'סטיה לשדה משנה. הקרדיט כבר כולל את כל מה שבוצע, ואין פער לתשלום.', rule);
+  return true;
+}
+
 /** סבב שבוטל ללא קרדיט: ימיו נספרים כימים ללא פעילות, ומה שבוצע בהם לא היה מתוכנן. */
 function noteCancelled(ctx, match, rule, why) {
   ctx.markPairing(match.plan, 'cancelled_no_compensation');
@@ -972,7 +1007,7 @@ function whatHappenedOptions(ctx, plan, exec) {
     : diff > 0 ? `: ${amountWord(shortfall)} של ${minToHhmm(diff)}`
     : '; מה שבוצע אינו קצר מהמתוכנן, ולכן אין הפרש לתשלום');
   return [
-    { value: 'replaced', label: 'החלפה ביוזמת החברה (כולל זכיה במכרז)', hint: higher, needsLink: true },
+    { value: 'replaced', label: 'החלפה ביוזמת החברה (כולל זכיה במכרז או סטיה לשדה משנה)', hint: higher, needsLink: true },
     { value: 'voluntary_swap', label: 'החלפה מרצוני', hint: 'רק הקרדיט של הטיסה שבוצעה', needsLink: true },
     { value: 'cancelled', label: 'הטיסה המקורית בוטלה ללא קרדיט',
       hint: exec ? 'מגיע פיצוי של קריאה מיוחדת על הטיסה שבוצעה' : 'לא מגיע כלום' },
