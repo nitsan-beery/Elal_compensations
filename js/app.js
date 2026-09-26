@@ -544,7 +544,20 @@ function describePairingId(id) {
 }
 
 function bindResults(root) {
-  $('[data-action="print"]', root)?.addEventListener('click', () => window.print());
+  $('[data-action="print"]', root)?.addEventListener('click', () => {
+    // ה-PDF מציג הכול בפירוט וכל שאר החלקים פתוחים, בלי קשר למה שמוצג כרגע על המסך.
+    const prevFilter = state.filter;
+    state.filter = 'all';
+    renderResults();
+    for (const d of $('#results').querySelectorAll('details')) d.open = true;
+    const restore = () => {
+      window.removeEventListener('afterprint', restore);
+      state.filter = prevFilter;
+      renderResults();
+    };
+    window.addEventListener('afterprint', restore);
+    window.print();
+  });
   const copy = $('[data-action="copy-codes"]', root);
   copy?.addEventListener('click', async () => {
     const text = unknownCodesText(state.result);
