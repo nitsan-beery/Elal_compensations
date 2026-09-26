@@ -24,6 +24,11 @@ const H = (hours) => hoursToMin(hours) ?? 0;
  *   SkdDur (LY336 ב-16/07/2026, ‏ATD 23:01 → 00:59 ו-03:46; ‏LY5110 ב-06/01/2026).
  * - מה שאחרי סוף החודש שייך לחודש הבא (31/05/2026: LY387 → 04:22). רגל שיצאה בחודש הקודם
  *   מזוכה ב-SkdDur פחות מה שזוכה שם (01/06/2026: ‎−00:07).
+ * - בסבב עם יותר מיעד אחד, רגל שלא יוצאת מהבסיס ולא חוזרת אליו זוכה לפי הביצוע (ActDur,
+ *   ATA−ATD) ולא לפי SkdDur: שני קצותיה בשעון זר, וההפרש בין השעונים לא תמיד ידוע כמו
+ *   בבסיס, ולכן SkdDur של הדוח לא תמיד מדויק לה. רק כשActDur חסר לוקחים SkdDur, כמו רגל
+ *   שנוגעת בבסיס (בעל המוצר, 26/09/2026; סוגר את הפער מול הדוח ב-09/09/2024 ‏TLV-SOF-TIV-TLV
+ *   וב-23/09/2024 ‏TLV-BUS-LCA-TLV).
  */
 function credit_from_scheduled(ctx, params, rule) {
   const monthEnd = ctx.timeline.at(-1).date;
@@ -44,30 +49,35 @@ function credit_from_scheduled(ctx, params, rule) {
     for (const leg of pairing.legs) {
       // בתכנון בלבד הקרדיט הוא ה-FT של כל יום, שכבר רשום ביום שלו. אין מה לפצל.
       if (!ctx.hasExec) { add(leg.date, leg.skdDur); continue; }
+      const dur = legCreditDur(leg, pairing, ctx.domicile);
+      const basis = dur !== leg.skdDur
+        ? `${leg.flight}: לג שאינו נוגע בבסיס, קרדיט לפי הביצוע ${minToHhmm(dur)} ולא ${minToHhmm(leg.skdDur)} מתוכננות`
+        : null;
+      const note = (msg) => [basis, msg].filter(Boolean).join('. ');
       const split = splitAtMidnight(leg, ctx.domicile);
       if (leg.prevMonth) {
         // הרגל רשומה ביום 1 אבל יצאה ביום האחרון של החודש הקודם.
         if (split.error) { error = split.error; break; }
-        const prev = split.before ?? leg.skdDur; // נחתה לפני חצות: כולה זוכתה בחודש הקודם
-        add(leg.date, leg.skdDur - prev, `${leg.flight} יצאה בחודש הקודם, ושם זוכו ${minToHhmm(prev)}. בחודש הזה ${minToHhmm(leg.skdDur - prev)} מתוך ${minToHhmm(leg.skdDur)}`);
+        const prev = split.before ?? dur; // נחתה לפני חצות: כולה זוכתה בחודש הקודם
+        add(leg.date, dur - prev, note(`${leg.flight} יצאה בחודש הקודם, ושם זוכו ${minToHhmm(prev)}. בחודש הזה ${minToHhmm(dur - prev)} מתוך ${minToHhmm(dur)}`));
         continue;
       }
       if (split.error) {
         // אי אפשר לדעת מתי המריאה בשעון הבסיס. בסוף החודש זה משנה את הסכום, ובאמצעו רק את החלוקה.
         if (leg.date === monthEnd) { error = split.error; break; }
-        add(leg.date, leg.skdDur, `${leg.flight}: לא ידועה שעת ההמראה בשעון הבסיס, כל הקרדיט ביום שבו היא רשומה`);
+        add(leg.date, dur, note(`${leg.flight}: לא ידועה שעת ההמראה בשעון הבסיס, כל הקרדיט ביום שבו היא רשומה`));
         continue;
       }
       const date = addDays(leg.date, split.shift);
       const moved = split.shift ? `${leg.flight} רשומה ב-${dayOf(leg.date)} אבל המריאה ב-${dayOf(date)} בשעון הבסיס` : null;
-      if (split.before == null) { add(date, leg.skdDur, moved); continue; }
+      if (split.before == null) { add(date, dur, note(moved)); continue; }
       const next = addDays(date, 1);
       if (next > monthEnd) {
-        add(date, split.before, `${leg.flight} חוצה את סוף החודש: בחודש הזה ${minToHhmm(split.before)} מההמראה בפועל עד חצות, והשאר בחודש הבא`);
+        add(date, split.before, note(`${leg.flight} חוצה את סוף החודש: בחודש הזה ${minToHhmm(split.before)} מההמראה בפועל עד חצות, והשאר בחודש הבא`));
         continue;
       }
-      add(date, split.before, `${leg.flight} חוצה חצות: ${minToHhmm(split.before)} מההמראה בפועל עד חצות`);
-      add(next, leg.skdDur - split.before, `${leg.flight}: ${minToHhmm(leg.skdDur - split.before)} אחרי חצות (${minToHhmm(leg.skdDur)} − ${minToHhmm(split.before)})`);
+      add(date, split.before, note(`${leg.flight} חוצה חצות: ${minToHhmm(split.before)} מההמראה בפועל עד חצות`));
+      add(next, dur - split.before, note(`${leg.flight}: ${minToHhmm(dur - split.before)} אחרי חצות (${minToHhmm(dur)} − ${minToHhmm(split.before)})`));
     }
     if (error) {
       ctx.review(`${describePairing(pairing)}: ${error} דורש בדיקה ידנית.`, rule);
@@ -78,6 +88,14 @@ function credit_from_scheduled(ctx, params, rule) {
     }
   }
 }
+
+/**
+ * קרדיט רגל, לצורך `credit_from_scheduled`: SkdDur, חוץ מרגל בסבב עם יותר מיעד אחד (לא
+ * חזרה תוך-אזורית ליעד היחיד, כמו PFO-LCA ב-20/06/2025 בדרך חזרה מ-LCA) שלא יוצאת מהבסיס
+ * ולא חוזרת אליו – שם לוקחים את הביצוע (ActDur) כשהוא קיים בדוח.
+ */
+const legCreditDur = (leg, pairing, domicile) =>
+  (pairing.destinations.length > 1 && leg.org !== domicile && leg.dst !== domicile ? leg.actDur : null) ?? leg.skdDur;
 
 /**
  * ההמראה בפועל בשעון הבסיס, ביחס לחצות של היום שבו הרגל רשומה: `shift` – כמה ימים
