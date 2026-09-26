@@ -116,13 +116,17 @@ const sameDestinations = (a, b) =>
   a.destinations.length > 0 && a.destinations.join() === b.destinations.join();
 const sameFlights = (a, b) => a.legs[0]?.flight != null && a.legs[0].flight === b.legs[0]?.flight;
 
-/** תיאור קריא של סבב, לתצוגה ולשאלות למשתמש. */
+/**
+ * תיאור קריא של סבב, לתצוגה ולשאלות למשתמש. עטוף ב-LRI/PDI (בידי-איזולציה) כדי שכמה תיאורים
+ * כאלה זה לצד זה בתוך משפט עברי (למשל "X → Y", או רשימה עם פסיקים) לא יתערבבו זה בזה: בלי
+ * הבידוד, הדפדפן מציג לפעמים את שני התיאורים הפוכים, ואפילו הופך את סדר התאריך בתוכם.
+ */
 export function describePairing(p) {
   if (!p) return '—';
   const flights = p.legs.map((l) => l.flight).filter(Boolean).join('/');
   const where = p.destinations.join('-') || 'מקומי';
   const when = p.from === p.to ? dayOf(p.from) : `${dayOf(p.from)}–${dayOf(p.to)}`;
-  return `${when} ${where}${flights ? ` (${flights})` : ''}`;
+  return `⁦${when} ${where}${flights ? ` (${flights})` : ''}⁩`;
 }
 
 const dayOf = (iso) => iso.slice(8, 10) + '/' + iso.slice(5, 7);
