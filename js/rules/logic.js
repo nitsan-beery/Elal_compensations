@@ -992,7 +992,7 @@ function askWhatHappened(ctx, match, rule) {
     date: plan.from,
     execId: exec?.id ?? null,
     title: exec
-      ? `סבב מתוכנן שבמקומו בוצע סבב אחר באותם ימים: ${describePairing(plan)} → ${describePairing(exec)}`
+      ? `סבב מתוכנן שבמקומו בוצע סבב אחר באותם ימים:\nתוכנן ${describePairing(plan)}, בוצע ${describePairing(exec)}`
       : `סבב מתוכנן שלא בוצע: ${describePairing(plan)}`,
     body: (diff != null && diff > 0 ? `המתוכנן ארוך ממה שבוצע ב-${minToHhmm(diff)}. ` : '') +
       'הסיבה אינה בקבצים, והיא קובעת מה מגיע. מה קרה?',
