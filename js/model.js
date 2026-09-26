@@ -124,9 +124,19 @@ const sameFlights = (a, b) => a.legs[0]?.flight != null && a.legs[0].flight === 
 export function describePairing(p) {
   if (!p) return '—';
   const flights = p.legs.map((l) => l.flight).filter(Boolean).join('/');
-  const where = p.destinations.join('-') || 'מקומי';
+  const where = route(p) || 'מקומי';
   const when = p.from === p.to ? dayOf(p.from) : `${dayOf(p.from)}–${dayOf(p.to)}`;
   return `⁦${when} ${where}${flights ? ` (${flights})` : ''}⁩`;
+}
+
+/** מסלול הסבב לפי סדר הרגלים בפועל, כולל הבסיס בקצוות: TLV-SOF-TIV-TLV, לא רק היעדים. */
+function route(p) {
+  const stops = [];
+  for (const l of p.legs) {
+    if (!stops.length) stops.push(l.org);
+    if (stops[stops.length - 1] !== l.dst) stops.push(l.dst);
+  }
+  return stops.join('-');
 }
 
 const dayOf = (iso) => iso.slice(8, 10) + '/' + iso.slice(5, 7);
