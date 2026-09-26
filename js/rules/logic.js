@@ -1043,6 +1043,9 @@ function vacation_recall(ctx, params, rule) {
  *
  * פעילות שמתחילה ב-`moved_ok_prefixes` (HOME) אינה הדרכה לעניין הזה: אם היא זזה ליום אחר
  * בחודש אין פיצוי (07/06/2026: HOME_RGT תוכנן ל-07 ובוצע ב-09). אם לא זזה – בדיקה ידנית.
+ * הטיסה שבוצעה ביום המקורי מוזכרת בהערה רק כשהיא לא מוסברת כבר בפני עצמה (`ctx.matches`):
+ * ב-07/06/2026 הטיסה שם היא BER, שכבר מוסברת משלה כהחלפה מרצונית של FRA (סבב אחר לגמרי,
+ * לא קשור ל-HOME) – ולכן אין טעם לצרף אותה להערה על ה-HOME (בעל המוצר, 26/09/2026).
  */
 function training_cancelled_flight(ctx, params, rule) {
   if (!ctx.hasPlan || !ctx.hasExec) return;
@@ -1063,15 +1066,17 @@ function training_cancelled_flight(ctx, params, rule) {
         'זו קריאה מיוחדת לפי ס\' 17.ג.', rule);
     }
 
+    const own = ctx.matches.find((m) => m.exec === pairing);
+    const placed = own && own.how !== 'unplanned' ? '' : `, ובמקומו הוצבת ל-${describePairing(pairing)}`;
     for (const code of planCodes.filter((c) => codeIn(c, [], params.moved_ok_prefixes))) {
       const prefix = params.moved_ok_prefixes.find((p) => code.startsWith(p));
       const movedTo = ctx.timeline.filter((d) => d.date !== day.date && ctx.execCodes(d).some((c) => c.startsWith(prefix)) &&
         !(d.plan?.codes ?? []).some((c) => c.startsWith(prefix)));
       if (movedTo.length) {
-        ctx.note(day.date, `${code} תוכנן ל-${dayOf(day.date)} ובוצע ב-${movedTo.map((d) => dayOf(d.date)).join(', ')}, ` +
-          `ובמקומו הוצבת ל-${describePairing(pairing)}. הזזה בתוך החודש אינה מזכה בפיצוי.`, rule);
+        ctx.note(day.date, `${code} תוכנן ל-${dayOf(day.date)} ובוצע ב-${movedTo.map((d) => dayOf(d.date)).join(', ')}${placed}. ` +
+          'הזזה בתוך החודש אינה מזכה בפיצוי.', rule);
       } else {
-        ctx.review(`${code} תוכנן ל-${dayOf(day.date)}, ובמקומו הוצבת ל-${describePairing(pairing)}. ` +
+        ctx.review(`${code} תוכנן ל-${dayOf(day.date)}${placed}. ` +
           `${code} לא בוצע ביום אחר בחודש. דורש בדיקה ידנית.`, rule);
       }
     }
