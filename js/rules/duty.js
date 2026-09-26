@@ -387,7 +387,7 @@ function night_landings(ctx, params, rule) {
   const unsettled = pool.filter((n) => n.status === 'unknown' || n.status === 'review');
   if (counted.length + unsettled.length < threshold) {
     const missed = pool.filter((n) => !counted.includes(n));
-    ctx.note(null, `${rule.title}: ${planned}, נספרות: ${counted.length}${counted.length ? ` (${list(counted)})` : ''}` +
+    ctx.note(null, `${rule.title}: ${planned}, נספרות ${counted.length}:${counted.length ? ` (${list(counted)})` : ''}` +
       `${missed.length ? `; לא בוצעו (בוטלו או הוחלפו שלא ביוזמת החברה): ${list(missed)}` : ''}. הפיצוי הוא מהטיסה ה-${threshold} שבוצעה, ולכן אין פיצוי.`, rule);
     return;
   }
