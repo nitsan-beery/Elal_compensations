@@ -363,6 +363,13 @@ function renderQuestions(res) {
   </div>`;
 }
 
+/** כותרת שאלה: מחרוזת רגילה (בבולד, כברירת המחדל של h3), או מקטעים – רק המסומנים `bold` בבולד. */
+function titleHtml(title) {
+  if (!Array.isArray(title)) return esc(title);
+  return `<span class="mixed">${title.map((part) =>
+    typeof part === 'string' ? esc(part) : `<b>${esc(part.text)}</b>`).join('')}</span>`;
+}
+
 function renderQuestion(q, i) {
   const name = `q${i}`;
   const options = q.options.map((o) => `
@@ -380,7 +387,7 @@ function renderQuestion(q, i) {
     <input type="date" name="date" value="${esc(q.dateInput.value)}"${q.dateInput.min ? ` min="${esc(q.dateInput.min)}"` : ''}${q.dateInput.max ? ` max="${esc(q.dateInput.max)}"` : ''} required>
   </label>` : '';
   return `<div class="question">
-    <h3>${esc(q.title)}</h3>
+    <h3>${titleHtml(q.title)}</h3>
     ${q.body ? `<p>${esc(q.body)}</p>` : ''}
     <form data-qid="${esc(q.id)}">
       ${picker}${options}

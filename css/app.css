@@ -177,6 +177,8 @@ tr.detail td { background: var(--surface-2); font-size: .85rem; color: var(--mut
 /* ---------- שאלות ---------- */
 .question { border: 1px solid var(--line); border-radius: 8px; padding: .8rem; margin-bottom: .7rem; }
 .question h3 { font-size: .98rem; white-space: pre-line; }
+.question h3 .mixed { font-weight: normal; }
+.question h3 .mixed b { font-weight: 700; }
 .question p { margin: .3rem 0 .6rem; color: var(--muted); font-size: .9rem; }
 .option { display: flex; gap: .5rem; align-items: flex-start; padding: .25rem 0; cursor: pointer; }
 .option input { margin-top: .3rem; }

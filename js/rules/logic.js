@@ -1044,8 +1044,10 @@ function askWhatHappened(ctx, match, rule) {
     id: `cancelled:${plan.id}`,
     date: plan.from,
     execId: exec?.id ?? null,
+    // תוכנן/בוצע בבולד, פרטי הטיסות והתאריכים לא (בעל המוצר, 27/09/2026).
     title: exec
-      ? `סבב מתוכנן שבמקומו בוצע סבב אחר באותם ימים:\nתוכנן ${describePairing(plan)}, בוצע ${describePairing(exec)}`
+      ? ['סבב מתוכנן שבמקומו בוצע סבב אחר באותם ימים:\n', { bold: true, text: 'תוכנן ' }, describePairing(plan),
+          { bold: true, text: ', בוצע ' }, describePairing(exec)]
       : `סבב מתוכנן שלא בוצע: ${describePairing(plan)}`,
     body: (diff != null && diff > 0 ? `המתוכנן ארוך ממה שבוצע ב-${minToHhmm(diff)}. ` : '') +
       'הסיבה אינה בקבצים, והיא קובעת מה מגיע. מה קרה?',
