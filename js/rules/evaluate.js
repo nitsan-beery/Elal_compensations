@@ -467,10 +467,11 @@ function describeMatch(m) {
     replaced_by_ground: 'סבב מתוכנן שהוחלף בפעילות קרקע',
     replaced_by_sick: 'סבב מתוכנן שבוטל עקב מחלה',
     replaced_by_standby: 'סבב מתוכנן שבוטל והוצבת לכוננות',
+    replaced_by_sick_standby: 'סבב מתוכנן שבוטל עקב מחלה והוצבת לכוננות',
   };
   return {
     how: m.how,
-    label: m.how === 'replaced_by_sick_standby' ? sickStandbyLabel(m) : labels[m.how] ?? m.how,
+    label: labels[m.how] ?? m.how,
     date: (m.plan ?? m.exec).from,
     planId: m.plan?.id ?? null,
     execId: m.exec?.id ?? null,
@@ -478,13 +479,6 @@ function describeMatch(m) {
     exec: m.exec ? describePairing(m.exec) : null,
     replacedBy: m.replacedBy?.map((r) => `${r.code} ${r.date.slice(8, 10)}/${r.date.slice(5, 7)}`) ?? null,
   };
-}
-
-/** "בוטל עקב מחלה (ביום X) והוצבת לכוננות ביום/ימים Y": מחלה וכוננות מעורבות בסבב שלא בוצע, כל אחת בימיה (בעל המוצר, 27/09/2026). */
-function sickStandbyLabel(m) {
-  const datesOf = (kind) => [...new Set(m.replacedBy.filter((r) => r.kind === kind).map((r) => r.date))].sort();
-  const phrase = (dates) => `ב${dates.length > 1 ? 'ימים' : 'יום'} ${dates.map((d) => `${d.slice(8, 10)}/${d.slice(5, 7)}`).join(', ')}`;
-  return `סבב מתוכנן שבוטל עקב מחלה (${phrase(datesOf('sick'))}) והוצבת לכוננות ${phrase(datesOf('standby'))}`;
 }
 
 /**
