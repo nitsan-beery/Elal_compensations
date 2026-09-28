@@ -695,8 +695,8 @@ function compare({ out, timeline, execPairings, domicile, codes: catalog }) {
   // כל סבב בשורה משלו, עם התאריכים שלו בשורה, והקודים בסוף השורה האחרונה (בעל המוצר, 28/09/2026).
   // חזרה לבסיס אחרי המראה שמחוברת לסבב שאחריה מוצגת כסבב נפרד (`pairingParts`), ורק בשורות הקרדיט:
   // פיצוי (COM, S/C) שייך לסבב שאחריה (15/02/2026: נחיתה מאוחרת של LY2368).
-  const labelOf = (dates, column) => {
-    const parts = [...new Set(dates.flatMap((d) => pairingOf.get(d) ?? []))].flatMap(pairingParts)
+  const labelOf = (dates, column, only = null) => {
+    const parts = (only ? [only] : [...new Set(dates.flatMap((d) => pairingOf.get(d) ?? []))]).flatMap(pairingParts)
       .map((part) => ({ part, days: reportDates(part, timeline, domicile).filter((d) => dates.includes(d)) }))
       .filter(({ part, days }) => days.length && (CREDIT_LABEL_COLUMNS.includes(column) || !part.legs.every((l) => l.org === l.dst)));
     const lines = parts.length === 1
@@ -707,26 +707,63 @@ function compare({ out, timeline, execPairings, domicile, codes: catalog }) {
     if (codes) lines.at(-1)[1] = [lines.at(-1)[1], codes].filter(Boolean).join(' · ');
     return lines.map((l) => l.filter(Boolean).map((t) => `⁦${t}⁩`).join(' · ')).join('\n');
   };
-  for (const dates of groups.values()) {
-    dates.sort();
-    const inGroup = out.expectations.filter((e) => dates.includes(e.dates[0]));
-    // פער בקבוצה שיש עליה שאלה פתוחה אינו ממצא עדיין: הצפוי תלוי בתשובה.
-    const asked = out.questions.some((q) => dates.includes(q.date));
-    const push = (row) => {
-      const ok = row.reported === row.expected;
-      const pending = !ok && asked;
-      rows.push({ ...row, diff: row.reported - row.expected, ok: pending ? null : ok, pending });
-    };
+  const reportedOn = (d, column) => reportedValue(dayOf(timeline, d), column);
 
-    // כל עמודה על הקבוצה כולה, ומוצגת אחרי היום האחרון. גם Credit: סבב שחוצה תאריכים הוא שורה אחת,
-    // עם סכום הקרדיט של כל ימיו, ולא שורה לכל יממה כמו בדוח (בעל המוצר, 28/09/2026). הפירוט לימים
-    // נשאר בהערות של הציפיות. הדוח רושם Rig של סבב ביום הראשון שלו.
-    for (const column of COMPARED_COLUMNS) {
-      const items = inGroup.filter((e) => KEY_COLUMNS[e.key]?.includes(column));
-      const expected = items.reduce((s, e) => s + e.min, 0);
-      const reported = dates.reduce((s, d) => s + reportedValue(dayOf(timeline, d), column), 0);
-      if (!expected && !reported) continue;
-      push({ dates, at: dates.at(-1), label: labelOf(dates, column), column, expected, reported, items });
+  /**
+   * קבוצה של כמה סבבים שחולקים יום מתפצלת לשורה לכל סבב (בעל המוצר, 28/09/2026): LY548 מאתונה
+   * המריאה אחרי חצות ונזקפה ל-28/09/2025, יום היציאה ללוטון, וה-Credit של 28/09 בדוח הוא של שתיהן.
+   * היום המשותף מתחלק לפי הציפיות של כל סבב בו, כלומר לפי SkdDur של כל רגל. זה אפשרי רק כשבכל
+   * עמודה הסכום בדוח ביום המשותף שווה לצפוי בו, וכל ציפייה בקבוצה שייכת לסבב ידוע ונופלת ביום
+   * שלו. אחרת נשארת שורה אחת לקבוצה, כדי שפער לא ייוחס לסבב הלא נכון (25/11/2025: Rig של BUS ו-LCA).
+   */
+  const splitByPairing = (dates) => {
+    const inGroup = out.expectations.filter((e) => dates.includes(e.dates[0]));
+    const whole = [{ dates, only: null, items: inGroup, reported: (column) => dates.reduce((s, d) => s + reportedOn(d, column), 0) }];
+    const pairings = [...new Set(dates.flatMap((d) => pairingOf.get(d) ?? []))];
+    const shared = dates.filter((d) => (pairingOf.get(d) ?? []).length > 1);
+    if (pairings.length < 2 || !shared.length || dates.some((d) => !pairingOf.has(d))) return whole;
+    const ownerOf = (e) => {
+      if (e.pairingId) return pairings.find((p) => p.id === e.pairingId);
+      if (e.flight) return pairings.find((p) => p.legs.some((l) => l.flight === e.flight && l.date === e.date));
+      const on = pairingOf.get(e.dates[0]);
+      return on.length === 1 ? on[0] : null;
+    };
+    const owner = new Map(inGroup.map((e) => [e, ownerOf(e)]));
+    if (inGroup.some((e) => !owner.get(e) || !pairingOf.get(e.dates[0]).includes(owner.get(e)))) return whole;
+    const expectedOn = (d, column, p) => inGroup
+      .filter((e) => e.dates[0] === d && KEY_COLUMNS[e.key]?.includes(column) && (!p || owner.get(e) === p))
+      .reduce((s, e) => s + e.min, 0);
+    if (shared.some((d) => COMPARED_COLUMNS.some((c) => expectedOn(d, c) !== reportedOn(d, c)))) return whole;
+    return pairings.map((p) => {
+      const own = dates.filter((d) => pairingOf.get(d).includes(p));
+      return { dates: own, only: p, items: inGroup.filter((e) => owner.get(e) === p),
+        reported: (column) => own.reduce((s, d) => s + (shared.includes(d) ? expectedOn(d, column, p) : reportedOn(d, column)), 0) };
+    });
+  };
+
+  for (const group of groups.values()) {
+    group.sort();
+    for (const { dates, only, items: inGroup, reported: reportedFor } of splitByPairing(group)) {
+      // פער בקבוצה שיש עליה שאלה פתוחה אינו ממצא עדיין: הצפוי תלוי בתשובה.
+      const asked = out.questions.some((q) => dates.includes(q.date));
+      const push = (row) => {
+        const ok = row.reported === row.expected;
+        const pending = !ok && asked;
+        rows.push({ ...row, diff: row.reported - row.expected, ok: pending ? null : ok, pending });
+      };
+
+      // כל עמודה על הקבוצה כולה, ומוצגת אחרי היום האחרון. גם Credit: סבב שחוצה תאריכים הוא שורה אחת,
+      // עם סכום הקרדיט של כל ימיו, ולא שורה לכל יממה כמו בדוח (בעל המוצר, 28/09/2026). הפירוט לימים
+      // נשאר בהערות של הציפיות. הדוח רושם Rig של סבב ביום הראשון שלו.
+      for (const column of COMPARED_COLUMNS) {
+        const items = inGroup.filter((e) => KEY_COLUMNS[e.key]?.includes(column));
+        const expected = items.reduce((s, e) => s + e.min, 0);
+        const reported = reportedFor(column);
+        if (!expected && !reported) continue;
+        const sharedDays = only ? dates.filter((d) => pairingOf.get(d).length > 1 && reportedOn(d, column)) : [];
+        push({ dates, at: dates.at(-1), label: labelOf(dates, column, only), column, expected, reported, items,
+          ...(sharedDays.length ? { sharedDays } : {}) });
+      }
     }
   }
 

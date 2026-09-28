@@ -485,7 +485,8 @@ function late_landing_home(ctx, params, rule) {
         continue;
       }
       const steps = Math.ceil((delay - grace) / step);
-      ctx.expect(day.date, 'com', steps * perStep, rule, `${leg.flight}: איחור ${delay} דק' → ${steps} מדרגות`);
+      // `flight`: לאיזה סבב שייך הפיצוי, כשהיום משותף לשני סבבים (טבלת הפירוט).
+      ctx.expect(day.date, 'com', steps * perStep, rule, `${leg.flight}: איחור ${delay} דק' → ${steps} מדרגות`, { flight: leg.flight });
       if (delay >= noteFrom) {
         const stepsWord = steps === 1 ? 'מדרגה אחת' : `${steps} מדרגות`;
         ctx.note(
