@@ -497,6 +497,12 @@ function renderExpectations(res) {
   </details>`;
 }
 
+/**
+ * תיאור סבב (`describePairing`) הוא קטע לועזי אחד מבודד. בתא עברי רוצים את התאריכים הכי ימניים
+ * ומשמאלם את פרטי הטיסה, אז מפצלים כל תיאור כזה לשני קטעים מבודדים, לפי הסדר הזה.
+ */
+const datesFirst = (text) => text.replace(/⁦(\S+) ([^⁩]*)⁩/g, '⁦$1⁩ ⁦$2⁩');
+
 function renderChanges(res) {
   const changes = res.changes.filter((c) => c.how !== 'exact' && c.how !== 'noplan');
   if (res.mode !== 'full') return '';
@@ -504,7 +510,7 @@ function renderChanges(res) {
     <summary><h2 style="display:inline">שינויים בין תכנון לביצוע <span class="count">${changes.length}</span></h2></summary>
     ${changes.length ? `<ul class="list">${changes.map((c) => `<li>
       <strong class="num">${ddmm(c.date)}</strong> ${esc(c.label)}
-      <div class="small">תכנון: ${esc(c.plan ?? '—')} · ביצוע: ${esc(c.exec ?? (c.replacedBy?.join(', ') || '—'))}</div>
+      <div class="small">תכנון: ${esc(datesFirst(c.plan ?? '—'))} · ביצוע: ${esc(datesFirst(c.exec ?? (c.replacedBy?.join(', ') || '—')))}</div>
     </li>`).join('')}</ul>` : '<p class="muted">כל הסבבים בוצעו כמתוכנן.</p>'}
   </details>`;
 }
