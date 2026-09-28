@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "rules_version": "2026-09-28.1",
+  "rules_version": "2026-09-28.2",
   "updated": "2026-09-22",
   "source": "טבלת פיצויי אצ\"א אל על (Artifact), על בסיס ההסכם הישן (פרק כ\"ה), הסכם 2018, הסכם אצ\"א 2024 והסכם 2026",
   "precedence": "הסכם מאוחר גובר על מוקדם. סעיף שלא בוטל ולא שונה נשאר בתוקף. פיצויי 2018, 2024 ו‑2026 באים בנוסף לפיצויים מהסכמים אחרים.",
@@ -19,6 +19,8 @@
       "HOME_RGT": "HOME_",
       "CPT_BAS": "CPT_B",
       "CRM_CRS": "CRM_C",
+      "INV_CRS": "INV_C",
+      "ENGL_TST": "ENGL_",
       "SIM_SHO": "SIM"
     },
     "relevant": [
@@ -30,6 +32,8 @@
       "SIM_SHO",
       "CPT_BAS",
       "CRM_CRS",
+      "INV_CRS",
+      "ENGL_TST",
       "SICK"
     ],
     "leave": [
@@ -77,6 +81,8 @@
       "RGT",
       "CPT_BAS",
       "CRM_CRS",
+      "INV_CRS",
+      "ENGL_TST",
       "UNF_B",
       "SBY_S",
       "SBY_L"
@@ -373,14 +379,14 @@
     {
       "id": "ground_training_credit",
       "category": "plan",
-      "title": "אימון קרקע (HOME_RGT, RGT, INV_C, CPT_BAS, CRM_CRS)",
-      "when": "יום אימון קרקע: מהבית (HOME_RGT), ‏RGT, פעילות קרקע INV_C, CPT_BAS או CRM_CRS.",
+      "title": "אימון קרקע (HOME_RGT, RGT, INV_CRS, CPT_BAS, CRM_CRS, ENGL_TST)",
+      "when": "יום אימון קרקע: מהבית (HOME_RGT), ‏RGT, פעילות קרקע INV_CRS, CPT_BAS, CRM_CRS או ENGL_TST.",
       "amount": {
         "unit": "credit_hours",
         "value": 3.75,
         "text": "3:45 ש' קרדיט"
       },
-      "source": "2024 ס' 56 (ימי הדרכה קרקעיים: 3.75 ש' ליום). אומת מול יולי 2026 (HOME_), אוגוסט 2026 (INV_C) ויוני 2026 (CPT_B, CRM_C)",
+      "source": "2024 ס' 56 (ימי הדרכה קרקעיים: 3.75 ש' ליום). אומת מול יולי 2026 (HOME_), אוגוסט 2026 (INV_C), יוני 2026 (CPT_B, CRM_C) וספטמבר 2025 (INV_CRS, ENGL_TST)",
       "status": "ok",
       "valid_from": "2024-06-01",
       "valid_to": null,
@@ -392,21 +398,24 @@
             "HOME_RGT",
             "RGT",
             "CPT_BAS",
-            "CRM_CRS"
+            "CRM_CRS",
+            "INV_CRS",
+            "ENGL_TST"
           ],
           "report_codes": [
             "HOME_",
             "RGT",
             "INV_C",
             "CPT_B",
-            "CRM_C"
+            "CRM_C",
+            "ENGL_"
           ],
           "report_flag_column": "CORS",
           "credit_hours": 3.75,
           "tab_hours": 11
         }
       },
-      "note": "ברומה מופיע גם 1.00 ב‑MEAL. הערך לא אומת מול מקור בהסכם. INV_C נוסף לפי החלטת בעל המוצר (21/09/2026): ב‑24/08/2026 נרשם בדיוק כמו HOME_ (Credit 03:45, TAB 11:00, CORS 1, MEAL 1). הקוד המלא של INV_C בתכנון עוד לא נראה, ולכן הוא ב‑report_codes בלבד. CPT_BAS ו‑CRM_CRS נוספו ביוני 2026: ברומה Credit 03:45, TAB 11:00, CORS 1, MEAL 1, ובתכנון הם נספרים ב‑Fict. flight time (18:45 = 5 × 03:45). RGT (אותו קוד בתכנון וברומה) הוא פעילות קרקע כמו HOME_RGT (החלטת בעל המוצר, 22/09/2026); פברואר 2025, 02–05/02."
+      "note": "ברומה מופיע גם 1.00 ב‑MEAL. הערך לא אומת מול מקור בהסכם. INV_C נוסף לפי החלטת בעל המוצר (21/09/2026): ב‑24/08/2026 נרשם בדיוק כמו HOME_ (Credit 03:45, TAB 11:00, CORS 1, MEAL 1). הקוד המלא של INV_C בתכנון הוא INV_CRS (ספטמבר 2025). CPT_BAS ו‑CRM_CRS נוספו ביוני 2026: ברומה Credit 03:45, TAB 11:00, CORS 1, MEAL 1, ובתכנון הם נספרים ב‑Fict. flight time (18:45 = 5 × 03:45). RGT (אותו קוד בתכנון וברומה) הוא פעילות קרקע כמו HOME_RGT (החלטת בעל המוצר, 22/09/2026); פברואר 2025, 02–05/02. INV_CRS (02/09/2025) ו‑ENGL_TST (09/09/2025, ברומה ENGL_) הם פעילות קרקע (החלטת בעל המוצר, 28/09/2026): ברומה Credit 03:45, TAB 11:00, CORS 1, MEAL 1; בתכנון 08:00–16:30 בארץ, בלי טיסות."
     },
     {
       "id": "short_call_standby_credit",
