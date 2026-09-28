@@ -457,8 +457,6 @@ function renderComparison(res) {
           ...c.items.filter((e) => (c.ok !== true || e.hint) && (e.ruleTitle || e.note))
             .map((e) => `${esc(e.ruleTitle ?? '')}${e.note ? `: ${esc(e.note)}` : ''}${e.min != null && c.unit !== 'count' ? ` <span class="num">${minToHhmm(e.min)}</span>` : ''}`),
           ...c.marks.map((m) => `${esc(m.column)}: צפוי <span class="num">${hm(m.expected, m.unit)}</span>, ברומה <span class="num">${hm(m.reported, m.unit)}</span>`),
-          // יום שהדוח רושם בו סכום אחד לשני סבבים: "ברומה" של השורה כולל רק את חלקו של הסבב הזה.
-          ...(c.sharedDays ?? []).map((d) => `ברומה ${ddmm(d)} משותף גם לסבב אחר, וחולק ביניהם לפי שעות הטיסה (SkdDur) של כל לג`),
         ].join('<br>');
         return `<tr class="${cls}">
           <td>${esc(c.label).replace(/\n/g, '<br>')}</td><td class="col">${esc(c.column)}${reasonOf(c)}</td>

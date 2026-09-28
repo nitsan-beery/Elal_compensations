@@ -696,7 +696,7 @@ function compare({ out, timeline, execPairings, domicile, codes: catalog }) {
   // חזרה לבסיס אחרי המראה שמחוברת לסבב שאחריה מוצגת כסבב נפרד (`pairingParts`), ורק בשורות הקרדיט:
   // פיצוי (COM, S/C) שייך לסבב שאחריה (15/02/2026: נחיתה מאוחרת של LY2368).
   const labelOf = (dates, column, only = null) => {
-    const parts = (only ? [only] : [...new Set(dates.flatMap((d) => pairingOf.get(d) ?? []))]).flatMap(pairingParts)
+    const parts = (only ?? [...new Set(dates.flatMap((d) => pairingOf.get(d) ?? []))]).flatMap(pairingParts)
       .map((part) => ({ part, days: reportDates(part, timeline, domicile).filter((d) => dates.includes(d)) }))
       .filter(({ part, days }) => days.length && (CREDIT_LABEL_COLUMNS.includes(column) || !part.legs.every((l) => l.org === l.dst)));
     const lines = parts.length === 1
@@ -715,6 +715,7 @@ function compare({ out, timeline, execPairings, domicile, codes: catalog }) {
    * היום המשותף מתחלק לפי הציפיות של כל סבב בו, כלומר לפי SkdDur של כל רגל. זה אפשרי רק כשבכל
    * עמודה הסכום בדוח ביום המשותף שווה לצפוי בו, וכל ציפייה בקבוצה שייכת לסבב ידוע ונופלת ביום
    * שלו. אחרת נשארת שורה אחת לקבוצה, כדי שפער לא ייוחס לסבב הלא נכון (25/11/2025: Rig של BUS ו-LCA).
+   * פיצוי על שני הסבבים יחד (`jointWith`, שתי טיסות סבב באותו FDP) הוא שורה אחת לשניהם (04/08/2025).
    */
   const splitByPairing = (dates) => {
     const inGroup = out.expectations.filter((e) => dates.includes(e.dates[0]));
@@ -722,22 +723,34 @@ function compare({ out, timeline, execPairings, domicile, codes: catalog }) {
     const pairings = [...new Set(dates.flatMap((d) => pairingOf.get(d) ?? []))];
     const shared = dates.filter((d) => (pairingOf.get(d) ?? []).length > 1);
     if (pairings.length < 2 || !shared.length || dates.some((d) => !pairingOf.has(d))) return whole;
-    const ownerOf = (e) => {
-      if (e.pairingId) return pairings.find((p) => p.id === e.pairingId);
-      if (e.flight) return pairings.find((p) => p.legs.some((l) => l.flight === e.flight && l.date === e.date));
+    // הבעלים של ציפייה: רשימת הסבבים שהיא שייכת להם (אחד, או כמה כשהפיצוי משותף).
+    const ownersOf = (e) => {
+      if (e.pairingId) return [e.pairingId, ...(e.jointWith ?? [])].map((id) => pairings.find((p) => p.id === id));
+      if (e.flight) return [pairings.find((p) => p.legs.some((l) => l.flight === e.flight && l.date === e.date))];
       const on = pairingOf.get(e.dates[0]);
-      return on.length === 1 ? on[0] : null;
+      return on.length === 1 ? on : [null];
     };
-    const owner = new Map(inGroup.map((e) => [e, ownerOf(e)]));
-    if (inGroup.some((e) => !owner.get(e) || !pairingOf.get(e.dates[0]).includes(owner.get(e)))) return whole;
-    const expectedOn = (d, column, p) => inGroup
-      .filter((e) => e.dates[0] === d && KEY_COLUMNS[e.key]?.includes(column) && (!p || owner.get(e) === p))
+    const units = new Map(); // מפתח → הסבבים
+    const owner = new Map();
+    for (const e of inGroup) {
+      const ps = ownersOf(e);
+      if (ps.some((p) => !p || !pairingOf.get(e.dates[0]).includes(p))) return whole;
+      ps.sort((a, b) => pairings.indexOf(a) - pairings.indexOf(b));
+      const key = ps.map((p) => p.id).join('+');
+      units.set(key, ps);
+      owner.set(e, key);
+    }
+    for (const p of pairings) if (!units.has(p.id)) units.set(p.id, [p]);
+    const expectedOn = (d, column, key) => inGroup
+      .filter((e) => e.dates[0] === d && KEY_COLUMNS[e.key]?.includes(column) && (!key || owner.get(e) === key))
       .reduce((s, e) => s + e.min, 0);
     if (shared.some((d) => COMPARED_COLUMNS.some((c) => expectedOn(d, c) !== reportedOn(d, c)))) return whole;
-    return pairings.map((p) => {
-      const own = dates.filter((d) => pairingOf.get(d).includes(p));
-      return { dates: own, only: p, items: inGroup.filter((e) => owner.get(e) === p),
-        reported: (column) => own.reduce((s, d) => s + (shared.includes(d) ? expectedOn(d, column, p) : reportedOn(d, column)), 0) };
+    return [...units].map(([key, ps]) => {
+      const own = dates.filter((d) => ps.some((p) => pairingOf.get(d).includes(p)));
+      // שורה משותפת כוללת רק את הציפיות המשותפות; ימים שאינם משותפים שייכים לשורה של כל סבב.
+      const onlyShared = ps.length > 1;
+      return { dates: own, only: ps, items: inGroup.filter((e) => owner.get(e) === key),
+        reported: (column) => own.reduce((s, d) => s + (shared.includes(d) ? expectedOn(d, column, key) : onlyShared ? 0 : reportedOn(d, column)), 0) };
     });
   };
 
@@ -760,9 +773,7 @@ function compare({ out, timeline, execPairings, domicile, codes: catalog }) {
         const expected = items.reduce((s, e) => s + e.min, 0);
         const reported = reportedFor(column);
         if (!expected && !reported) continue;
-        const sharedDays = only ? dates.filter((d) => pairingOf.get(d).length > 1 && reportedOn(d, column)) : [];
-        push({ dates, at: dates.at(-1), label: labelOf(dates, column, only), column, expected, reported, items,
-          ...(sharedDays.length ? { sharedDays } : {}) });
+        push({ dates, at: dates.at(-1), label: labelOf(dates, column, only), column, expected, reported, items });
       }
     }
   }

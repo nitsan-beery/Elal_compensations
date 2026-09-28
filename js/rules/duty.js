@@ -137,7 +137,8 @@ function same_fdp_rounds(ctx, params, rule) {
       ctx.note(p2.from, `${why}, אבל שתיהן לא בוצעו כמתוכנן. הפיצוי מותנה בהתייצבות לשתיהן.`, rule);
       continue;
     }
-    ctx.expectPairing(e2, keyFor(params.report_column), H(params.hours), rule, why);
+    // `jointWith`: הפיצוי על שתי הטיסות יחד, ובטבלת הפירוט הוא שורה אחת לשני הסבבים (04/08/2025).
+    ctx.expectPairing(e2, keyFor(params.report_column), H(params.hours), rule, why, { jointWith: [e1.id] });
   }
 }
 
