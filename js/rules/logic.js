@@ -1184,7 +1184,7 @@ function standby_end_for_bid(ctx, params, rule) {
       // הדוח כבר מזכה את הקריאה המיוחדת: זו זכייה במכרז, ואין מה לשאול.
       const answer = ctx.answer(id) ??
         (ctx.paidOn(pairing, sc?.logic?.params?.report_column ?? 'S/C', 'sc', bidAmount(pairing, ctx, sc)) ? { value: 'standby_bid' } : null);
-      const range = run.length === 1 ? dayOf(run[0]) : `${dayOf(run[0])}–${dayOf(run.at(-1))}`;
+      const range = run.length === 1 ? dayOf(run[0]) : `⁦${dayOf(run[0])}–${dayOf(run.at(-1))}⁩`;
       if (!answer) {
         ctx.markPairing(pairing, 'standby_bid_pending');
         ctx.ask({
@@ -1245,7 +1245,7 @@ function standby_activation(ctx, params, rule) {
   if (!ctx.hasPlan || !ctx.hasExec) return;
   const pending = ['standby_bid', 'standby_bid_pending'];
   for (const run of standbyRuns(ctx, params)) {
-    const range = run.length === 1 ? dayOf(run[0]) : `${dayOf(run[0])}–${dayOf(run.at(-1))}`;
+    const range = run.length === 1 ? dayOf(run[0]) : `⁦${dayOf(run[0])}–${dayOf(run.at(-1))}⁩`;
     const planCode = ctx.timeline.find((d) => d.date === run[0]).plan.codes.find((c) => codeIn(c, params.plan_codes, params.plan_code_prefixes));
     const value = standbyDayRule(ctx, planCode);
 

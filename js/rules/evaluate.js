@@ -683,11 +683,13 @@ function compare({ out, timeline, execPairings, domicile }) {
   const labelOf = (dates) => {
     const pairings = [...new Set(dates.flatMap((d) => pairingOf.get(d) ?? []))];
     const codes = dates.flatMap((d) => execCodesOf(dayOf(timeline, d)));
-    return [
+    // כולו לועזי: LRI/PDI סביב התווית מונע מהדפדפן להפוך את שני התאריכים בתא עברי.
+    const label = [
       dates.length === 1 ? ddmm(dates[0]) : `${ddmm(dates[0])}–${ddmm(dates.at(-1))}`,
-      pairings.map((p) => describePairing(p).replace(/^\S+\s/, '')).join(' + '),
+      pairings.map((p) => describePairing(p).replace(/[⁦⁩]/g, '').replace(/^\S+\s/, '')).join(' + '),
       codes.join(' '),
     ].filter(Boolean).join(' · ');
+    return `⁦${label}⁩`;
   };
   for (const dates of groups.values()) {
     dates.sort();
