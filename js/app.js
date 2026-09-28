@@ -237,7 +237,7 @@ function shownComparison(res) {
   }
   const order = (c) => (MAIN_COLUMNS.includes(c.column) ? MAIN_COLUMNS.indexOf(c.column) : MAIN_COLUMNS.length);
   const at = (c) => c.at ?? c.dates[0]; // שורות של סבב שלם מוצגות אחרי היום האחרון שלו
-  return [...main, ...orphans].sort((a, b) => at(a).localeCompare(at(b)) || order(a) - order(b));
+  return [...main, ...orphans].sort((a, b) => at(a).localeCompare(at(b)) || a.dates[0].localeCompare(b.dates[0]) || order(a) - order(b));
 }
 const isGap = (c) => c.ok === false || c.marks.length > 0;
 

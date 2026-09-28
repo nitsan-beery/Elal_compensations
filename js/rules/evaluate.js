@@ -695,14 +695,15 @@ function compare({ out, timeline, execPairings, domicile, codes: catalog }) {
   // כל סבב בשורה משלו, עם התאריכים שלו בשורה, והקודים בסוף השורה האחרונה (בעל המוצר, 28/09/2026).
   // חזרה לבסיס אחרי המראה שמחוברת לסבב שאחריה מוצגת כסבב נפרד (`pairingParts`), ורק בשורות הקרדיט:
   // פיצוי (COM, S/C) שייך לסבב שאחריה (15/02/2026: נחיתה מאוחרת של LY2368).
-  const labelOf = (dates, column, only = null) => {
+  // `only`: הסבבים של השורה, ו-`dayCodes`: קודי היום שבה, כשהקבוצה פוצלה (`splitByPairing`).
+  const labelOf = (dates, column, only = null, dayCodes = null) => {
     const parts = (only ?? [...new Set(dates.flatMap((d) => pairingOf.get(d) ?? []))]).flatMap(pairingParts)
       .map((part) => ({ part, days: reportDates(part, timeline, domicile).filter((d) => dates.includes(d)) }))
       .filter(({ part, days }) => days.length && (CREDIT_LABEL_COLUMNS.includes(column) || !part.legs.every((l) => l.org === l.dst)));
     const lines = parts.length === 1
       ? [[range(dates), describeRoute(parts[0].part)]]
       : parts.map(({ part, days }) => [range(days), describeRoute(part)]);
-    const codes = dates.flatMap((d) => execCodesOf(dayOf(timeline, d), catalog)).join(' ');
+    const codes = (dayCodes ?? dates.flatMap((d) => execCodesOf(dayOf(timeline, d), catalog))).join(' ');
     if (!lines.length) lines.push([range(dates), '']);
     if (codes) lines.at(-1)[1] = [lines.at(-1)[1], codes].filter(Boolean).join(' · ');
     return lines.map((l) => l.filter(Boolean).map((t) => `⁦${t}⁩`).join(' · ')).join('\n');
@@ -716,25 +717,37 @@ function compare({ out, timeline, execPairings, domicile, codes: catalog }) {
    * עמודה הסכום בדוח ביום המשותף שווה לצפוי בו, וכל ציפייה בקבוצה שייכת לסבב ידוע ונופלת ביום
    * שלו. אחרת נשארת שורה אחת לקבוצה, כדי שפער לא ייוחס לסבב הלא נכון (25/11/2025: Rig של BUS ו-LCA).
    * פיצוי על שני הסבבים יחד (`jointWith`, שתי טיסות סבב באותו FDP) הוא שורה אחת לשניהם (04/08/2025).
+   * פעילות של יום (קוד כמו HOME_RGT או חופשה) ביום שהסבב נזקף אליו היא שורה משלה, כמו סבב נוסף
+   * (בעל המוצר, 28/09/2026): LY544 מאתונה נחתה אחרי חצות, וה-Credit של 25/07/2025 בדוח הוא 01:33
+   * שלה ועוד 03:45 של HOME_RGT.
    */
   const splitByPairing = (dates) => {
     const inGroup = out.expectations.filter((e) => dates.includes(e.dates[0]));
     const whole = [{ dates, only: null, items: inGroup, reported: (column) => dates.reduce((s, d) => s + reportedOn(d, column), 0) }];
-    const pairings = [...new Set(dates.flatMap((d) => pairingOf.get(d) ?? []))];
-    const shared = dates.filter((d) => (pairingOf.get(d) ?? []).length > 1);
-    if (pairings.length < 2 || !shared.length || dates.some((d) => !pairingOf.has(d))) return whole;
+    // פעילות יום: ציפייה עם קוד ובלי סבב, ביום שיש בו סבב. מתנהגת כמו סבב של יום אחד.
+    const activityOf = (e) => (e.code && !e.pairingId && !e.flight && pairingOf.has(e.dates[0]) ? `${e.code}@${e.dates[0]}` : null);
+    const activities = new Map();
+    for (const e of inGroup) {
+      const id = activityOf(e);
+      if (id && !activities.has(id)) activities.set(id, { id, activity: true, code: e.code, dates: [e.dates[0]] });
+    }
+    const occupants = (d) => [...(pairingOf.get(d) ?? []), ...[...activities.values()].filter((a) => a.dates[0] === d)];
+    const pairings = [...new Set(dates.flatMap(occupants))];
+    const shared = dates.filter((d) => occupants(d).length > 1);
+    if (pairings.length < 2 || !shared.length || dates.some((d) => !occupants(d).length)) return whole;
     // הבעלים של ציפייה: רשימת הסבבים שהיא שייכת להם (אחד, או כמה כשהפיצוי משותף).
     const ownersOf = (e) => {
+      if (activityOf(e)) return [activities.get(activityOf(e))];
       if (e.pairingId) return [e.pairingId, ...(e.jointWith ?? [])].map((id) => pairings.find((p) => p.id === id));
-      if (e.flight) return [pairings.find((p) => p.legs.some((l) => l.flight === e.flight && l.date === e.date))];
-      const on = pairingOf.get(e.dates[0]);
+      if (e.flight) return [pairings.find((p) => p.legs?.some((l) => l.flight === e.flight && l.date === e.date))];
+      const on = occupants(e.dates[0]);
       return on.length === 1 ? on : [null];
     };
     const units = new Map(); // מפתח → הסבבים
     const owner = new Map();
     for (const e of inGroup) {
       const ps = ownersOf(e);
-      if (ps.some((p) => !p || !pairingOf.get(e.dates[0]).includes(p))) return whole;
+      if (ps.some((p) => !p || !occupants(e.dates[0]).includes(p))) return whole;
       ps.sort((a, b) => pairings.indexOf(a) - pairings.indexOf(b));
       const key = ps.map((p) => p.id).join('+');
       units.set(key, ps);
@@ -745,18 +758,22 @@ function compare({ out, timeline, execPairings, domicile, codes: catalog }) {
       .filter((e) => e.dates[0] === d && KEY_COLUMNS[e.key]?.includes(column) && (!key || owner.get(e) === key))
       .reduce((s, e) => s + e.min, 0);
     if (shared.some((d) => COMPARED_COLUMNS.some((c) => expectedOn(d, c) !== reportedOn(d, c)))) return whole;
+    // קודי היום של כל שורה: פעילות היום בשורה שלה, ושאר הקודים בשורות הסבבים.
+    const split = new Set([...activities.values()].map((a) => a.id));
+    const codesOf = (ps, own) => (ps.every((p) => p.activity) ? ps.map((p) => p.code)
+      : own.flatMap((d) => execCodesOf(dayOf(timeline, d), catalog).filter((c) => !split.has(`${c}@${d}`))));
     return [...units].map(([key, ps]) => {
-      const own = dates.filter((d) => ps.some((p) => pairingOf.get(d).includes(p)));
+      const own = dates.filter((d) => ps.some((p) => occupants(d).includes(p)));
       // שורה משותפת כוללת רק את הציפיות המשותפות; ימים שאינם משותפים שייכים לשורה של כל סבב.
       const onlyShared = ps.length > 1;
-      return { dates: own, only: ps, items: inGroup.filter((e) => owner.get(e) === key),
+      return { dates: own, only: ps.filter((p) => !p.activity), codes: codesOf(ps, own), items: inGroup.filter((e) => owner.get(e) === key),
         reported: (column) => own.reduce((s, d) => s + (shared.includes(d) ? expectedOn(d, column, key) : onlyShared ? 0 : reportedOn(d, column)), 0) };
     });
   };
 
   for (const group of groups.values()) {
     group.sort();
-    for (const { dates, only, items: inGroup, reported: reportedFor } of splitByPairing(group)) {
+    for (const { dates, only, codes, items: inGroup, reported: reportedFor } of splitByPairing(group)) {
       // פער בקבוצה שיש עליה שאלה פתוחה אינו ממצא עדיין: הצפוי תלוי בתשובה.
       const asked = out.questions.some((q) => dates.includes(q.date));
       const push = (row) => {
@@ -773,7 +790,7 @@ function compare({ out, timeline, execPairings, domicile, codes: catalog }) {
         const expected = items.reduce((s, e) => s + e.min, 0);
         const reported = reportedFor(column);
         if (!expected && !reported) continue;
-        push({ dates, at: dates.at(-1), label: labelOf(dates, column, only), column, expected, reported, items });
+        push({ dates, at: dates.at(-1), label: labelOf(dates, column, only, codes), column, expected, reported, items });
       }
     }
   }
@@ -795,7 +812,9 @@ function compare({ out, timeline, execPairings, domicile, codes: catalog }) {
       diff: reported - t.min, ok: reported === t.min, items: [t] });
   }
   const at = (r) => r.at ?? r.dates[0];
-  return rows.sort((a, b) => at(a).localeCompare(at(b)) || COMPARED_COLUMNS.indexOf(a.column) - COMPARED_COLUMNS.indexOf(b.column));
+  // באותו יום אחרון, השורה שמתחילה קודם קודמת: סבב שנחת אחרי חצות לפני פעילות היום שאחריו.
+  return rows.sort((a, b) => at(a).localeCompare(at(b)) || a.dates[0].localeCompare(b.dates[0])
+    || COMPARED_COLUMNS.indexOf(a.column) - COMPARED_COLUMNS.indexOf(b.column));
 }
 
 /**
