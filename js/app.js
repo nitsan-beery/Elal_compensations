@@ -459,7 +459,7 @@ function renderComparison(res) {
           ...c.marks.map((m) => `${esc(m.column)}: צפוי <span class="num">${hm(m.expected, m.unit)}</span>, ברומה <span class="num">${hm(m.reported, m.unit)}</span>`),
         ].join('<br>');
         return `<tr class="${cls}">
-          <td>${esc(c.label)}</td><td class="col">${esc(c.column)}${reasonOf(c)}</td>
+          <td>${esc(c.label).replace(/\n/g, '<br>')}</td><td class="col">${esc(c.column)}${reasonOf(c)}</td>
           <td class="num">${hm(c.expected, c.unit)}</td><td class="num">${hm(c.reported, c.unit)}</td>
           <td class="num">${c.ok ? '' : (c.diff > 0 ? '+' : '') + hm(c.diff, c.unit)}</td><td>${status}</td></tr>
           ${why ? `<tr class="detail"><td colspan="6">${why}</td></tr>` : ''}`;

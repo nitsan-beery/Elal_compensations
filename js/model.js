@@ -143,11 +143,35 @@ const sameFlights = (a, b) => a.legs[0]?.flight != null && a.legs[0].flight === 
  */
 export function describePairing(p) {
   if (!p) return '—';
-  const flights = p.legs.map((l) => l.flight).filter(Boolean).join('/');
-  const where = route(p) || 'מקומי';
+  const parts = pairingParts(p);
+  if (parts.length > 1) return parts.map(describePairing).join(' + ');
   const when = p.from === p.to ? dayOf(p.from) : `${dayOf(p.from)}–${dayOf(p.to)}`;
-  return `⁦${when} ${where}${flights ? ` (${flights})` : ''}⁩`;
+  return `⁦${when} ${describeRoute(p)}⁩`;
 }
+
+/** מסלול הסבב ומספרי הטיסות, בלי תאריכים ובלי בידוד: "TLV-BUD-TLV (LY2367/LY2368)". */
+export function describeRoute(p) {
+  const flights = p.legs.map((l) => l.flight).filter(Boolean).join('/');
+  return `${route(p) || 'מקומי'}${flights ? ` (${flights})` : ''}`;
+}
+
+/**
+ * חלקי הסבב לתצוגה. חזרה לבסיס אחרי המראה שמחוברת לטיסה שאחריה היא חלק מאותו סבב בחישוב
+ * (ההשלמה ל-5 שעות על כולן יחד), אבל מוצגת כסבב נפרד: TLV-TLV (LY2367) ו-TLV-BUD-TLV
+ * (LY2367/LY2368) ב-15/02/2026, ולא TLV-BUD-TLV (LY2367/LY2367/LY2368) (בעל המוצר, 28/09/2026).
+ */
+export function pairingParts(p) {
+  const parts = [];
+  p.legs.forEach((leg, i) => {
+    const prev = p.legs[i - 1];
+    if (!prev || isAirReturnLeg(prev) !== isAirReturnLeg(leg)) parts.push([]);
+    parts.at(-1).push(leg);
+  });
+  if (parts.length < 2) return [p];
+  return parts.map((legs) => ({ from: legs[0].date, to: legs.at(-1).date, legs }));
+}
+
+const isAirReturnLeg = (l) => l.org != null && l.org === l.dst;
 
 /** מסלול הסבב לפי סדר הרגלים בפועל, כולל הבסיס בקצוות: TLV-SOF-TIV-TLV, לא רק היעדים. */
 function route(p) {

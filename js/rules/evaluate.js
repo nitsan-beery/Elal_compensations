@@ -8,7 +8,7 @@
 
 import { LOGIC, LOGIC_ORDER } from './logic.js';
 import { rulesInEffect, partitionRules, rulesByLogic, classifyCode } from './catalog.js';
-import { buildTimeline, buildPairings, markCarryIn, matchPairings, describePairing } from '../model.js';
+import { buildTimeline, buildPairings, markCarryIn, matchPairings, describePairing, describeRoute, pairingParts } from '../model.js';
 import { hoursToMin } from '../time.js';
 import { OPTIONAL_COLUMNS } from '../pdf/exec.js';
 
@@ -688,14 +688,14 @@ function compare({ out, timeline, execPairings, domicile }) {
   const labelOf = (dates) => {
     const pairings = [...new Set(dates.flatMap((d) => pairingOf.get(d) ?? []))];
     const codes = dates.flatMap((d) => execCodesOf(dayOf(timeline, d)));
-    // שני קטעים לועזיים, כל אחד מבודד (LRI/PDI): התאריכים הכי ימניים, ומשמאלם פרטי הטיסה. בלי בידוד
+    // קטעים לועזיים, כל אחד מבודד (LRI/PDI): התאריכים הכי ימניים, ומשמאלם פרטי הטיסה. בלי בידוד
     // הדפדפן הופך את שני התאריכים, ובלי הפרדה התווית כולה נקראת משמאל לימין והתאריכים יוצאים משמאל.
-    const flight = [
-      pairings.map((p) => describePairing(p).replace(/[⁦⁩]/g, '').replace(/^\S+\s/, '')).join(' + '),
-      codes.join(' '),
-    ].filter(Boolean).join(' · ');
+    // כל סבב בשורה משלו (בעל המוצר, 28/09/2026), והקודים בסוף השורה האחרונה.
+    const lines = pairings.flatMap(pairingParts).map(describeRoute);
+    if (codes.length) lines.push([lines.pop(), codes.join(' ')].filter(Boolean).join(' · '));
     const when = dates.length === 1 ? ddmm(dates[0]) : `${ddmm(dates[0])}–${ddmm(dates.at(-1))}`;
-    return [when, flight].filter(Boolean).map((t) => `⁦${t}⁩`).join(' · ');
+    const isolated = lines.map((t) => `⁦${t}⁩`);
+    return [[`⁦${when}⁩`, isolated.shift()].filter(Boolean).join(' · '), ...isolated].join('\n');
   };
   for (const dates of groups.values()) {
     dates.sort();
