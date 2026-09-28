@@ -168,7 +168,7 @@ export function pairingParts(p) {
     parts.at(-1).push(leg);
   });
   if (parts.length < 2) return [p];
-  return parts.map((legs) => ({ from: legs[0].date, to: legs.at(-1).date, legs }));
+  return parts.map((legs) => ({ from: legs[0].date, to: legs.at(-1).date, dates: [...new Set(legs.map((l) => l.date))], legs }));
 }
 
 const isAirReturnLeg = (l) => l.org != null && l.org === l.dst;

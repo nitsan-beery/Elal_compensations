@@ -22,6 +22,8 @@ const KEY_COLUMNS = {
   sc: ['S/C'],
 };
 const COMPARED_COLUMNS = ['Credit', 'FLT+DH', 'Rig', 'COM', 'S/C'];
+/** עמודות הקרדיט: רק בהן מוצגת בתווית חזרה לבסיס אחרי המראה שמחוברת לסבב שאחריה. */
+const CREDIT_LABEL_COLUMNS = ['Credit', 'FLT+DH', 'Rig'];
 
 /**
  * @param {object} input
@@ -687,17 +689,23 @@ function compare({ out, timeline, execPairings, domicile, codes: catalog }) {
   }
 
   const rows = [];
-  const labelOf = (dates) => {
-    const pairings = [...new Set(dates.flatMap((d) => pairingOf.get(d) ?? []))];
-    const codes = dates.flatMap((d) => execCodesOf(dayOf(timeline, d), catalog));
-    // קטעים לועזיים, כל אחד מבודד (LRI/PDI): התאריכים הכי ימניים, ומשמאלם פרטי הטיסה. בלי בידוד
-    // הדפדפן הופך את שני התאריכים, ובלי הפרדה התווית כולה נקראת משמאל לימין והתאריכים יוצאים משמאל.
-    // כל סבב בשורה משלו (בעל המוצר, 28/09/2026), והקודים בסוף השורה האחרונה.
-    const lines = pairings.flatMap(pairingParts).map(describeRoute);
-    if (codes.length) lines.push([lines.pop(), codes.join(' ')].filter(Boolean).join(' · '));
-    const when = dates.length === 1 ? ddmm(dates[0]) : `${ddmm(dates[0])}–${ddmm(dates.at(-1))}`;
-    const isolated = lines.map((t) => `⁦${t}⁩`);
-    return [[`⁦${when}⁩`, isolated.shift()].filter(Boolean).join(' · '), ...isolated].join('\n');
+  const range = (ds) => (ds.length === 1 ? ddmm(ds[0]) : `${ddmm(ds[0])}–${ddmm(ds.at(-1))}`);
+  // קטעים לועזיים, כל אחד מבודד (LRI/PDI): התאריכים הכי ימניים, ומשמאלם פרטי הטיסה. בלי בידוד
+  // הדפדפן הופך את שני התאריכים, ובלי הפרדה התווית כולה נקראת משמאל לימין והתאריכים יוצאים משמאל.
+  // כל סבב בשורה משלו, עם התאריכים שלו בשורה, והקודים בסוף השורה האחרונה (בעל המוצר, 28/09/2026).
+  // חזרה לבסיס אחרי המראה שמחוברת לסבב שאחריה מוצגת כסבב נפרד (`pairingParts`), ורק בשורות הקרדיט:
+  // פיצוי (COM, S/C) שייך לסבב שאחריה (15/02/2026: נחיתה מאוחרת של LY2368).
+  const labelOf = (dates, column) => {
+    const parts = [...new Set(dates.flatMap((d) => pairingOf.get(d) ?? []))].flatMap(pairingParts)
+      .map((part) => ({ part, days: reportDates(part, timeline, domicile).filter((d) => dates.includes(d)) }))
+      .filter(({ part, days }) => days.length && (CREDIT_LABEL_COLUMNS.includes(column) || !part.legs.every((l) => l.org === l.dst)));
+    const lines = parts.length === 1
+      ? [[range(dates), describeRoute(parts[0].part)]]
+      : parts.map(({ part, days }) => [range(days), describeRoute(part)]);
+    const codes = dates.flatMap((d) => execCodesOf(dayOf(timeline, d), catalog)).join(' ');
+    if (!lines.length) lines.push([range(dates), '']);
+    if (codes) lines.at(-1)[1] = [lines.at(-1)[1], codes].filter(Boolean).join(' · ');
+    return lines.map((l) => l.filter(Boolean).map((t) => `⁦${t}⁩`).join(' · ')).join('\n');
   };
   for (const dates of groups.values()) {
     dates.sort();
@@ -716,7 +724,7 @@ function compare({ out, timeline, execPairings, domicile, codes: catalog }) {
       const expected = items.reduce((s, e) => s + e.min, 0);
       const reported = reportedValue(dayOf(timeline, date), 'Credit');
       if (!expected && !reported) continue;
-      push({ dates: [date], at: date, label: labelOf([date]), column: 'Credit', expected, reported, items });
+      push({ dates: [date], at: date, label: labelOf([date], 'Credit'), column: 'Credit', expected, reported, items });
     }
 
     // שאר העמודות על הקבוצה כולה (הדוח רושם Rig של סבב ביום הראשון שלו), ומוצגות אחרי היום האחרון.
@@ -726,7 +734,7 @@ function compare({ out, timeline, execPairings, domicile, codes: catalog }) {
       const expected = items.reduce((s, e) => s + e.min, 0);
       const reported = dates.reduce((s, d) => s + reportedValue(dayOf(timeline, d), column), 0);
       if (!expected && !reported) continue;
-      push({ dates, at: dates.at(-1), label: labelOf(dates), column, expected, reported, items });
+      push({ dates, at: dates.at(-1), label: labelOf(dates, column), column, expected, reported, items });
     }
   }
 
