@@ -718,18 +718,10 @@ function compare({ out, timeline, execPairings, domicile, codes: catalog }) {
       rows.push({ ...row, diff: row.reported - row.expected, ok: pending ? null : ok, pending });
     };
 
-    // Credit: כל יממה קלנדרית בנפרד, כמו בדוח. ציפייה של כמה ימים (סבב) נרשמת ביום הראשון שלה.
-    for (const date of dates) {
-      const items = inGroup.filter((e) => KEY_COLUMNS[e.key]?.includes('Credit') && e.dates[0] === date);
-      const expected = items.reduce((s, e) => s + e.min, 0);
-      const reported = reportedValue(dayOf(timeline, date), 'Credit');
-      if (!expected && !reported) continue;
-      push({ dates: [date], at: date, label: labelOf([date], 'Credit'), column: 'Credit', expected, reported, items });
-    }
-
-    // שאר העמודות על הקבוצה כולה (הדוח רושם Rig של סבב ביום הראשון שלו), ומוצגות אחרי היום האחרון.
+    // כל עמודה על הקבוצה כולה, ומוצגת אחרי היום האחרון. גם Credit: סבב שחוצה תאריכים הוא שורה אחת,
+    // עם סכום הקרדיט של כל ימיו, ולא שורה לכל יממה כמו בדוח (בעל המוצר, 28/09/2026). הפירוט לימים
+    // נשאר בהערות של הציפיות. הדוח רושם Rig של סבב ביום הראשון שלו.
     for (const column of COMPARED_COLUMNS) {
-      if (column === 'Credit') continue;
       const items = inGroup.filter((e) => KEY_COLUMNS[e.key]?.includes(column));
       const expected = items.reduce((s, e) => s + e.min, 0);
       const reported = dates.reduce((s, d) => s + reportedValue(dayOf(timeline, d), column), 0);
