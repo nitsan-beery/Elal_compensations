@@ -55,7 +55,11 @@ export function evaluate({ rulesData, plan = null, exec = null, answers = {} }) 
 
   const planPairings = plan ? buildPairings(timeline, domicile, planLegsWithCredit).map(ftOnLastDay) : [];
   if (exec) markCarryIn(timeline, domicile);
-  const execPairings = exec ? buildPairings(timeline, domicile, (d) => d.exec?.legs) : [];
+  // חזרה לבסיס אחרי המראה מצטרפת לטיסה שיוצאת אחריה באותו FDP, לפי הגדרת ה-FDP של הסליפ הקצר.
+  const slip = supported.find((r) => r.logic.id === 'min_slip_credit')?.logic.params;
+  const fdp = slip?.legal_rest_hours != null
+    ? { legalRestMin: slip.legal_rest_hours * 60, reportMin: slip.report_minutes_before_std ?? 0 } : null;
+  const execPairings = exec ? buildPairings(timeline, domicile, (d) => d.exec?.legs, fdp) : [];
   const matches = mode === 'full'
     ? matchPairings(planPairings, execPairings)
     : mode === 'exec' ? execPairings.map((e) => ({ plan: null, exec: e, how: 'noplan' })) : [];
@@ -460,6 +464,7 @@ function describeMatch(m) {
   const labels = {
     exact: 'בוצע כמתוכנן',
     dates: 'הוחלף בסבב אחר באותם ימים',
+    air_return: 'חזר לבסיס אחרי ההמראה והסבב לא הושלם',
     cancelled: 'סבב מתוכנן שלא בוצע',
     unplanned: 'פעילות ביום לא מתוכנן',
     noplan: 'בוצע (אין קובץ תכנון להשוואה)',

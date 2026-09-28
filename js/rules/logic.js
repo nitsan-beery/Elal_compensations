@@ -50,9 +50,11 @@ function credit_from_scheduled(ctx, params, rule) {
       // בתכנון בלבד הקרדיט הוא ה-FT של כל יום, שכבר רשום ביום שלו. אין מה לפצל.
       if (!ctx.hasExec) { add(leg.date, leg.skdDur); continue; }
       const dur = legCreditDur(leg, pairing, ctx.domicile);
-      const basis = dur !== leg.skdDur
-        ? `${leg.flight}: לג שאינו נוגע בבסיס, קרדיט לפי הביצוע ${minToHhmm(dur)} ולא ${minToHhmm(leg.skdDur)} מתוכננות`
-        : null;
+      const basis = isAirReturn(leg)
+        ? `${leg.flight} חזרה ל-${leg.org} אחרי ההמראה: קרדיט לפי זמן הביצוע בפועל, ${minToHhmm(dur)}`
+        : dur !== leg.skdDur
+          ? `${leg.flight}: לג שאינו נוגע בבסיס, קרדיט לפי הביצוע ${minToHhmm(dur)} ולא ${minToHhmm(leg.skdDur)} מתוכננות`
+          : null;
       const note = (msg) => [basis, msg].filter(Boolean).join('. ');
       const split = splitAtMidnight(leg, ctx.domicile);
       if (leg.prevMonth) {
@@ -95,7 +97,13 @@ function credit_from_scheduled(ctx, params, rule) {
  * ולא חוזרת אליו – שם לוקחים את הביצוע (ActDur) כשהוא קיים בדוח.
  */
 const legCreditDur = (leg, pairing, domicile) =>
-  (pairing.destinations.length > 1 && leg.org !== domicile && leg.dst !== domicile ? leg.actDur : null) ?? leg.skdDur;
+  (isAirReturn(leg) || (pairing.destinations.length > 1 && leg.org !== domicile && leg.dst !== domicile) ? leg.actDur : null) ?? leg.skdDur;
+
+/**
+ * חזרה לשדה המוצא אחרי ההמראה: מזוכה לפי זמן הביצוע בפועל (בעל המוצר, 28/09/2026). בדוח ה-SkdDur
+ * שלה שווה ל-ActDur (LY571 ב-15/09/2025 ‏00:25, ‏LY321 ב-31/03/2025, ‏LY2367 ב-15/02/2026).
+ */
+const isAirReturn = (leg) => leg.org != null && leg.org === leg.dst;
 
 /**
  * ההמראה בפועל בשעון הבסיס, ביחס לחצות של היום שבו הרגל רשומה: `shift` – כמה ימים
@@ -129,8 +137,10 @@ function splitAtMidnight(leg, domicile) {
   return { shift, before: clock + dur <= 1440 ? null : 1440 - clock };
 }
 
-const sumLegs = (pairing) =>
-  pairing.legs.reduce((acc, l) => (acc == null || l.skdDur == null ? null : acc + l.skdDur), 0);
+const sumLegs = (pairing) => pairing.legs.reduce((acc, l) => {
+  const dur = isAirReturn(l) ? l.actDur ?? l.skdDur : l.skdDur;
+  return acc == null || dur == null ? null : acc + dur;
+}, 0);
 
 /**
  * סליפ שהקרדיט שלו קצר מהמינימום מקבל השלמה, וההפרש נרשם ב-Rig. סליפ שנחתך בגבול

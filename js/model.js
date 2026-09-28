@@ -25,14 +25,17 @@ export function buildTimeline(period, plan, exec) {
  * רגל שנפתחת בבסיס בזמן שסבב פתוח סוגרת אותו קודם, כדי שתקלה בנתונים
  * לא תבלע ימים שלמים לתוך סבב אחד.
  *
- * חזרה לבסיס אחרי המראה (רגל TLV→TLV שאחריה יוצא אותו מספר טיסה מהבסיס) היא חלק
- * מהסבב שאחריה ולא סבב נפרד (אומת: LY2367 ב-15/02/2026, הקרדיט שלה נכלל בסליפ).
+ * חזרה לבסיס אחרי המראה (רגל TLV→TLV) שאחריה יוצאת טיסה מהבסיס באותו FDP היא חלק מהסבב
+ * שאחריה ולא סבב נפרד: אותו מספר טיסה (אומת: LY2367 ב-15/02/2026, הקרדיט שלה נכלל בסליפ),
+ * או טיסה אחרת כשהמנוחה ביניהן קצרה מ-`fdp.legalRestMin` (בעל המוצר, 28/09/2026). כך
+ * ההשלמה ל-5 שעות חלה פעם אחת על כל הרגליים יחד. חזרה שאחריה אין טיסה נשארת סבב לבדה
+ * (LY571 ב-15/09/2025).
  *
  * סבב שנחתך בגבול החודש מסומן: `cutAtStart` – הרגל הראשונה בחודש לא יוצאת מהבסיס, או
  * שהיא יצאה עוד בחודש הקודם (`prevMonth`, ראו markCarryIn); `cutAtEnd` – בסוף החודש
  * הסבב עוד לא חזר. החלק השני שלו בדוח של החודש השכן.
  */
-export function buildPairings(days, domicile, getLegs) {
+export function buildPairings(days, domicile, getLegs, fdp = null) {
   const all = days.flatMap((day) => (getLegs(day) ?? []).map((leg) => ({ ...leg, date: day.date })));
   const pairings = [];
   let open = null;
@@ -52,7 +55,7 @@ export function buildPairings(days, domicile, getLegs) {
       open.destinations.push(leg.dst);
     }
     const next = all[i + 1];
-    const airReturn = leg.org === leg.dst && next?.flight === leg.flight && next?.org === leg.org;
+    const airReturn = leg.org === leg.dst && next?.org === leg.org && (next.flight === leg.flight || sameFdp(leg, next, fdp));
     if (leg.dst === domicile && !airReturn) { closePairing(pairings, open, true); open = null; }
   });
   if (open) { open.cutAtEnd = true; closePairing(pairings, open, false); }
@@ -71,7 +74,21 @@ export function markCarryIn(days, domicile) {
   leg.prevMonth = true;
 }
 
-const isAirReturnOnly =(pairing) => pairing.legs.every((l) => l.org === l.dst);
+const isAirReturnOnly = (pairing) => pairing.legs.every((l) => l.org === l.dst);
+
+/**
+ * האם הרגל `next` יוצאת באותו FDP שבו נחתה `leg`: המנוחה ביניהן, פחות זמן ההתייצבות לפני
+ * ה-STD, קצרה ממנוחה חוקית. השעות שתיהן בשעון הבסיס, כי שתי הרגליים נוגעות בו.
+ */
+function sameFdp(leg, next, fdp) {
+  if (!fdp) return false;
+  const end = leg.ata ?? leg.sta;
+  const starts = [next.std, next.atd].filter((t) => t != null);
+  if (end == null || !starts.length) return false;
+  const days = (Date.parse(next.date) - Date.parse(leg.date)) / 86400000;
+  const rest = days * 1440 + Math.min(...starts) - (fdp.reportMin ?? 0) - end;
+  return rest < fdp.legalRestMin;
+}
 
 function closePairing(pairings, pairing, closed) {
   pairing.closed = closed;
@@ -85,7 +102,8 @@ function closePairing(pairings, pairing, closed) {
 
 /**
  * התאמה בין סבבי התכנון לסבבי הביצוע.
- * ההתאמה היא לפי חפיפת תאריכים ויעד, ואחר כך לפי חפיפת תאריכים בלבד.
+ * ההתאמה היא לפי חפיפת תאריכים ויעד, אחר כך חזרה לבסיס אחרי ההמראה של הטיסה הראשונה
+ * (`air_return`), ואחר כך לפי חפיפת תאריכים בלבד.
  * מה שלא הותאם הוא סבב שבוטל (בתכנון) או פעילות לא מתוכננת (בביצוע).
  */
 export function matchPairings(planPairings, execPairings) {
@@ -97,6 +115,8 @@ export function matchPairings(planPairings, execPairings) {
     let hit = findExec(execPairings, usedExec, (e) => overlaps(p, e) && sameDestinations(p, e) && sameFlights(p, e))
       ?? findExec(execPairings, usedExec, (e) => overlaps(p, e) && sameDestinations(p, e));
     let how = 'exact';
+    // הטיסה הראשונה של הסבב חזרה לבסיס אחרי ההמראה, והסבב לא הושלם: זה אותו סבב ולא החלפה.
+    if (!hit) { hit = findExec(execPairings, usedExec, (e) => overlaps(p, e) && isAirReturnOnly(e) && sameFlights(p, e)); how = 'air_return'; }
     if (!hit) { hit = findExec(execPairings, usedExec, (e) => overlaps(p, e)); how = 'dates'; }
     if (hit) { usedExec.add(hit); matched.push({ plan: p, exec: hit, how }); }
     else matched.push({ plan: p, exec: null, how: 'cancelled' });
