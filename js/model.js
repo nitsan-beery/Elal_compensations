@@ -151,7 +151,8 @@ export function describePairing(p) {
 
 /** מסלול הסבב ומספרי הטיסות, בלי תאריכים ובלי בידוד: "TLV-BUD-TLV (LY2367/LY2368)". */
 export function describeRoute(p) {
-  const flights = p.legs.map((l) => l.flight).filter(Boolean).join('/');
+  // DH בחברה אחרת מופיע בדוח בלי מספר טיסה (DHX), ובכל זאת מזוכה: PRG→ZRH ב-28/01/2025.
+  const flights = p.legs.map((l) => l.flight ?? (l.type === 'DHX' ? 'DH' : null)).filter(Boolean).join('/');
   return `${route(p) || 'מקומי'}${flights ? ` (${flights})` : ''}`;
 }
 
