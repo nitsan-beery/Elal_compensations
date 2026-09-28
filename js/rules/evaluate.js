@@ -410,32 +410,42 @@ function fleetOf(plan) {
 }
 
 /**
- * סבב מתוכנן שלא בוצע, אבל בימים שלו רשומה בדוח מחלה או פעילות קרקע: הסיבה ידועה
- * מהקובץ, ולכן לא שואלים "מה קרה". פעילות קרקע במקום סבב עוברת לבדיקה ידנית,
- * כי אין חוק נתמך שקובע מה מגיע עליה.
+ * סבב מתוכנן שלא בוצע, אבל בימיו רשומה בדוח מחלה, כוננות או פעילות קרקע: הסיבה ידועה מהקובץ,
+ * ולכן לא שואלים "מה קרה". כוננות (קוד שמתחיל ב-SBY) ומחלה (קוד שמתחיל ב-SCK, וגם SICK) אינן
+ * פעילות קרקע (בעל המוצר, 27/09/2026): מחלה מתוארת "בוטל עקב מחלה", כוננות "בוטל והוצבת
+ * לכוננות", ושילוב של שתיהן (21/06/2026: SCK_F ‏21/06 ואחריו SBY_S ‏22/06) מפרט את התאריך של
+ * כל אחת, כדי להבחין ביניהן. פעילות קרקע שאין חוק נתמך לקוד שלה עוברת לבדיקה ידנית.
  */
 function explainByActivity(matches, timeline, codes, isSick) {
   const ground = new Set(codes.ground_activity ?? []);
   const reportLeave = new Set(Object.entries(codes.plan_to_report ?? {})
     .filter(([full]) => (codes.leave ?? []).includes(full)).map(([, short]) => short));
   for (const c of codes.leave ?? []) reportLeave.add(c);
+  const kindOf = (code) => isStandbyCode(code) ? 'standby' : isSick(code) ? 'sick' :
+    isLeaveCode(code, reportLeave, codes) ? 'leave' : ground.has(code) ? 'ground' : 'other';
 
   for (const m of matches) {
     if (m.how !== 'cancelled') continue;
     const found = [];
     for (const day of timeline) {
       if (day.date < m.plan.from || day.date > m.plan.to) continue;
-      for (const code of execCodesOf(day)) found.push({ date: day.date, code });
+      for (const code of execCodesOf(day)) found.push({ date: day.date, code, kind: kindOf(code) });
     }
     if (!found.length) continue;
-    const kinds = new Set(found.map((f) => (isLeaveCode(f.code, reportLeave, codes) ? 'leave' : ground.has(f.code) ? 'ground' : 'other')));
+    const kinds = new Set(found.map((f) => f.kind));
     if (kinds.has('other')) continue; // קוד לא מוכר: לא מסיקים ממנו, והשאלה תישאל
-    m.how = kinds.has('ground') ? 'replaced_by_ground' : 'replaced_by_leave';
     m.replacedBy = found;
-    m.byLeave = kinds.has('leave'); // היעדרות של אצ"א בימי הסבב, גם כשאחריה פעילות קרקע
-    m.bySick = found.every((f) => isSick(f.code));
+    m.byLeave = kinds.has('leave') || kinds.has('sick'); // היעדרות או מחלה, גם כשמעורבת גם כוננות
+    m.how = kinds.has('ground') ? 'replaced_by_ground'
+      : kinds.has('sick') && kinds.has('standby') ? 'replaced_by_sick_standby'
+      : kinds.has('sick') ? 'replaced_by_sick'
+      : kinds.has('standby') ? 'replaced_by_standby'
+      : 'replaced_by_leave';
   }
 }
+
+/** קוד כוננות: כל קוד שמתחיל ב-SBY. כוננות אינה פעילות קרקע, גם ש-SBY_S/SBY_L ברשימת הקודים ל-`ground_activity` (בעל המוצר, 27/09/2026). */
+const isStandbyCode = (code) => code.startsWith('SBY');
 
 /** קודי מחלה (כולל מחלת בן משפחה): הקודים של חוקי זיכוי היום שמסמנים את עמודת SICK או SCKFM בדוח. */
 function sickCodeTest(supported) {
@@ -455,12 +465,12 @@ function describeMatch(m) {
     noplan: 'בוצע (אין קובץ תכנון להשוואה)',
     replaced_by_leave: 'סבב מתוכנן שהוחלף בהיעדרות',
     replaced_by_ground: 'סבב מתוכנן שהוחלף בפעילות קרקע',
+    replaced_by_sick: 'סבב מתוכנן שבוטל עקב מחלה',
+    replaced_by_standby: 'סבב מתוכנן שבוטל והוצבת לכוננות',
   };
   return {
     how: m.how,
-    label: m.bySick
-      ? `סבב מתוכנן שהוחלף ב${new Set(m.replacedBy.map((r) => r.date)).size > 1 ? 'ימי' : 'יום'} מחלה`
-      : labels[m.how] ?? m.how,
+    label: m.how === 'replaced_by_sick_standby' ? sickStandbyLabel(m) : labels[m.how] ?? m.how,
     date: (m.plan ?? m.exec).from,
     planId: m.plan?.id ?? null,
     execId: m.exec?.id ?? null,
@@ -468,6 +478,13 @@ function describeMatch(m) {
     exec: m.exec ? describePairing(m.exec) : null,
     replacedBy: m.replacedBy?.map((r) => `${r.code} ${r.date.slice(8, 10)}/${r.date.slice(5, 7)}`) ?? null,
   };
+}
+
+/** "בוטל עקב מחלה (ביום X) והוצבת לכוננות ביום/ימים Y": מחלה וכוננות מעורבות בסבב שלא בוצע, כל אחת בימיה (בעל המוצר, 27/09/2026). */
+function sickStandbyLabel(m) {
+  const datesOf = (kind) => [...new Set(m.replacedBy.filter((r) => r.kind === kind).map((r) => r.date))].sort();
+  const phrase = (dates) => `ב${dates.length > 1 ? 'ימים' : 'יום'} ${dates.map((d) => `${d.slice(8, 10)}/${d.slice(5, 7)}`).join(', ')}`;
+  return `סבב מתוכנן שבוטל עקב מחלה (${phrase(datesOf('sick'))}) והוצבת לכוננות ${phrase(datesOf('standby'))}`;
 }
 
 /**

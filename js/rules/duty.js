@@ -543,7 +543,7 @@ function cancelStatus(ctx, planPairing) {
   const m = ctx.matches.find((x) => x.plan === planPairing);
   if (!m) return 'unknown';
   if (m.byLeave) return 'no'; // היעדרות ומחלה אינן ביוזמת החברה
-  if (m.how === 'replaced_by_ground') return 'company'; // החברה הציבה אותו לפעילות קרקע
+  if (m.how === 'replaced_by_ground' || m.how === 'replaced_by_standby') return 'company'; // החברה הציבה אותו לפעילות קרקע או לכוננות
   const by = (tag) => ctx.pairingHandledBy(planPairing, tag);
   if (by('lost_hours_credit') || by('cancelled_no_compensation')) return 'company';
   if (by('voluntary_swap')) return 'no';
