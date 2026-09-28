@@ -156,13 +156,16 @@ function minSlipGroups(ctx, params) {
   return out;
 }
 
-/** ההשלמה שמגיעה לקבוצה, או 0 כשהקרדיט מגיע למינימום או שאינו ידוע. */
+/**
+ * ההשלמה שמגיעה לקבוצה: כל סבב לפי הקרדיט שלו לבדו, והעודף של סבב שעבר את המינימום אינו מקוזז
+ * מסבב קצר באותו FDP (2018 ס' 27.2 מדבר על סליפ; 04/08/2025: BUS 06:16 ו-LCA 02:20 → Rig 02:40).
+ * סבב שהקרדיט שלו אינו ידוע, או אפס, אינו נבדק.
+ */
 function minSlipShortfall(group, min) {
-  const credits = group.map(sumLegs);
-  if (credits.some((c) => c == null)) return 0;
-  const credit = credits.reduce((s, c) => s + c, 0);
-  if (credit === 0 || credit >= min * group.length) return 0;
-  return min * group.length - credit;
+  return group.reduce((sum, p) => {
+    const credit = sumLegs(p);
+    return credit == null || credit === 0 ? sum : sum + Math.max(0, min - credit);
+  }, 0);
 }
 
 /**
@@ -178,15 +181,15 @@ function minSlipTopUp(ctx, execPairing) {
 }
 
 /**
- * המינימום ל-FDP הוא המינימום לסליפ כפול מספר הסבבים שבו, מול הקרדיט של כולם יחד
- * (25/11/2025: BUS 05:04 ו-LCA 02:15 → Rig 02:41 = 2 × 5:00 − 07:19, ולא 02:45).
+ * כל סבב ב-FDP מקבל השלמה למינימום לפי הקרדיט שלו בלבד. ב-25/11/2025 וב-30/12/2025 (BUS 05:04
+ * ו-LCA 02:15) הדוח רשם Rig 02:41, ארבע דקות פחות מ-02:45 של קריאה זו, וזה הפער היחיד שנשאר.
  */
 function expectMinSlip(ctx, group, min, params, rule) {
   const shortfall = minSlipShortfall(group, min);
   if (!shortfall) return;
   const note = group.length === 1
     ? `השלמה ל-${params.min_credit_hours} שעות`
-    : `השלמה ל-${group.length} × ${params.min_credit_hours} שעות על ${group.length} סבבים באותו FDP (${group.map(describePairing).join(', ')})`;
+    : `השלמה ל-${params.min_credit_hours} שעות לכל סבב קצר, על ${group.length} סבבים באותו FDP (${group.map(describePairing).join(', ')})`;
   ctx.expectPairing(group.at(-1), 'rig', shortfall, rule, note,
     { reason: `השלמה ל-${params.min_credit_hours} שעות` });
 }
