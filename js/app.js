@@ -365,9 +365,9 @@ function renderQuestions(res) {
 
 /** כותרת שאלה: מחרוזת רגילה (בבולד, כברירת המחדל של h3), או מקטעים – רק המסומנים `bold` בבולד. */
 function titleHtml(title) {
-  if (!Array.isArray(title)) return esc(title);
+  if (!Array.isArray(title)) return esc(datesFirst(title));
   return `<span class="mixed">${title.map((part) =>
-    typeof part === 'string' ? esc(part) : `<b>${esc(part.text)}</b>`).join('')}</span>`;
+    typeof part === 'string' ? esc(datesFirst(part)) : `<b>${esc(part.text)}</b>`).join('')}</span>`;
 }
 
 function renderQuestion(q, i) {
@@ -375,11 +375,11 @@ function renderQuestion(q, i) {
   const options = q.options.map((o) => `
     <label class="option">
       <input type="radio" name="${name}" value="${esc(o.value)}" ${o.needsLink ? 'data-needs-link' : ''} ${o.needsText ? 'data-needs-text' : ''}>
-      <span>${esc(o.label)}${o.hint ? ` <span class="hint-inline">– ${esc(o.hint)}</span>` : ''}</span>
+      <span>${esc(datesFirst(o.label))}${o.hint ? ` <span class="hint-inline">– ${esc(datesFirst(o.hint))}</span>` : ''}</span>
     </label>
     ${o.needsLink ? `<div class="extra" data-for="${esc(o.value)}" hidden>
       <label class="small">עם איזו טיסה הוחלף?
-        <select name="link">${(o.linkCandidates ?? []).map((c) => `<option value="${esc(c.id ?? '')}">${esc(c.label)}</option>`).join('')}</select>
+        <select name="link">${(o.linkCandidates ?? []).map((c) => `<option value="${esc(c.id ?? '')}">${esc(datesFirst(c.label))}</option>`).join('')}</select>
       </label></div>` : ''}
     ${o.needsText ? `<div class="extra" data-for="${esc(o.value)}" hidden><textarea name="text" placeholder="פרט מה קרה"></textarea></div>` : ''}`).join('');
   // שאלה שהתשובה בה היא תאריך: יומן עם ברירת מחדל, ואפשר לשמור אותה מיד.
@@ -388,7 +388,7 @@ function renderQuestion(q, i) {
   </label>` : '';
   return `<div class="question">
     <h3>${titleHtml(q.title)}</h3>
-    ${q.body ? `<p>${esc(q.body)}</p>` : ''}
+    ${q.body ? `<p>${esc(datesFirst(q.body))}</p>` : ''}
     <form data-qid="${esc(q.id)}">
       ${picker}${options}
       <div class="row" style="margin-top:.5rem"><button class="btn primary" type="submit" ${q.dateInput ? '' : 'disabled'}>שמור תשובה</button></div>
