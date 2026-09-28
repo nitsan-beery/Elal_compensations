@@ -167,7 +167,7 @@ function makeContext({ out, timeline, domicile, codes, holidays, answers, plan, 
 
     /** קודי פעילות ביום (קרקע, סימולטור, כוננות), בלי היעדרות, הערות ו-DUM. לפי הדוח כשיש. */
     activityCodes(day) {
-      const list = exec ? execCodesOf(day) : (day.plan?.codes ?? []);
+      const list = exec ? execCodesOf(day, codes) : (day.plan?.codes ?? []);
       return list.filter((c) => !isLeaveCode(c, leave, codes) && !isIgnoredPlanCode(c, codes) &&
         (activityCodes.has(c) || activityCodes.has(expandCode(c, codes))));
     },
@@ -201,7 +201,7 @@ function makeContext({ out, timeline, domicile, codes, holidays, answers, plan, 
       }
       const days = dates.map((d) => dayOf(timeline, d)).filter(Boolean);
       const inPlan = days.some((d) => (d.plan?.codes ?? []).some((c) => same(c, code)));
-      const inExec = days.some((d) => execCodesOf(d).some((c) => same(c, code)));
+      const inExec = days.some((d) => execCodesOf(d, codes).some((c) => same(c, code)));
       out.unknownCodes.push({ code, where: inPlan && inExec ? 'both' : inExec ? 'exec' : 'plan', dates: [...dates], answer: text,
         report: days.map((d) => ({ date: d.date, text: reportedCells(d) })).filter((r) => r.text) });
     },
@@ -216,7 +216,7 @@ function makeContext({ out, timeline, domicile, codes, holidays, answers, plan, 
       absenceBy.get(date).add(ruleId);
     },
     isAbsenceBy: (date, ruleId) => absenceBy.get(date)?.has(ruleId) ?? false,
-    execCodes: (day) => execCodesOf(day),
+    execCodes: (day) => execCodesOf(day, codes),
     /** ימים ללא פעילות בתכנון מול המינימום בהסכם, לסיכום החודשי. */
     setFreeDays(v) { out.freeDays = v; },
     /** קודים בתכנון שאינם היעדרות, הערה או DUM: פעילות, וגם קוד לא מוכר (לא מניחים שהוא יום פנוי). */
@@ -433,7 +433,7 @@ function explainByActivity(matches, timeline, codes, isSick) {
     const found = [];
     for (const day of timeline) {
       if (day.date < m.plan.from || day.date > m.plan.to) continue;
-      for (const code of execCodesOf(day)) found.push({ date: day.date, code, kind: kindOf(code) });
+      for (const code of execCodesOf(day, codes)) found.push({ date: day.date, code, kind: kindOf(code) });
     }
     if (!found.length) continue;
     const kinds = new Set(found.map((f) => f.kind));
@@ -590,12 +590,14 @@ function attachLinkCandidates(questions, matches, ctx) {
 /**
  * קודי היום בדוח הביצוע, בלי מסלולי הטיסה ("TLV-AMS"). רגל שחוזרת לשדה המוצא
  * (TLV→TLV) מופיעה במסלולים כ-"LEG" (15/02/2026), ולכן גם הוא מסלול ביום שיש בו רגל כזו.
+ * קוד מ-`ignored_report_codes` (UNF_B) אינו מזכה בכלום ואינו מוצג, ולכן מושמט כאן.
  */
-function execCodesOf(day) {
+function execCodesOf(day, codes) {
   const details = day?.exec?.details;
   if (!details) return [];
   const hasReturnLeg = (day.exec.legs ?? []).some((l) => l.org && l.org === l.dst);
-  return details.split(/[,\s]+/).filter((t) => t && !/^[A-Z]{3}-[A-Z]{3}$/.test(t) && !(hasReturnLeg && t === 'LEG'));
+  const hidden = new Set(codes?.ignored_report_codes ?? []);
+  return details.split(/[,\s]+/).filter((t) => t && !/^[A-Z]{3}-[A-Z]{3}$/.test(t) && !(hasReturnLeg && t === 'LEG') && !hidden.has(t));
 }
 
 /** קוד היעדרות: ברשימה, או מתחיל בקידומת היעדרות (SCK_F, 21/06/2026). */
@@ -627,7 +629,7 @@ function collectUnknownCodes(timeline, codes, supported) {
   };
   for (const day of timeline) {
     for (const c of day.plan?.codes ?? []) if (classifyCode(c, codes, supported) === 'unknown') add(c, 'plan', day);
-    for (const c of execCodesOf(day)) if (classifyCode(c, codes, supported) === 'unknown') add(c, 'exec', day);
+    for (const c of execCodesOf(day, codes)) if (classifyCode(c, codes, supported) === 'unknown') add(c, 'exec', day);
   }
   return [...found.values()];
 }
@@ -665,7 +667,7 @@ function reportedValue(day, column) {
   return v[column]?.min ?? 0;
 }
 
-function compare({ out, timeline, execPairings, domicile }) {
+function compare({ out, timeline, execPairings, domicile, codes: catalog }) {
   // קבוצות ימים: סבב וימי הפיצול שלו מתאחדים; ימים שחולקים סבב מתאחדים גם הם.
   const parent = new Map(timeline.map((d) => [d.date, d.date]));
   const find = (x) => (parent.get(x) === x ? x : (parent.set(x, find(parent.get(x))), parent.get(x)));
@@ -687,7 +689,7 @@ function compare({ out, timeline, execPairings, domicile }) {
   const rows = [];
   const labelOf = (dates) => {
     const pairings = [...new Set(dates.flatMap((d) => pairingOf.get(d) ?? []))];
-    const codes = dates.flatMap((d) => execCodesOf(dayOf(timeline, d)));
+    const codes = dates.flatMap((d) => execCodesOf(dayOf(timeline, d), catalog));
     // קטעים לועזיים, כל אחד מבודד (LRI/PDI): התאריכים הכי ימניים, ומשמאלם פרטי הטיסה. בלי בידוד
     // הדפדפן הופך את שני התאריכים, ובלי הפרדה התווית כולה נקראת משמאל לימין והתאריכים יוצאים משמאל.
     // כל סבב בשורה משלו (בעל המוצר, 28/09/2026), והקודים בסוף השורה האחרונה.

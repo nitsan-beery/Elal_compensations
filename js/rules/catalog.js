@@ -114,7 +114,7 @@ export function classifyCode(code, codes, supportedRules) {
 }
 
 function isIgnored(code, codes) {
-  const lists = [codes.ignored_plan_notes, codes.ignored_report_dd];
+  const lists = [codes.ignored_plan_notes, codes.ignored_report_dd, codes.ignored_report_codes];
   for (const list of lists || []) {
     if (!list) continue;
     // ההערות בתכנון מגיעות לפעמים כקידומת, למשל "REQ, SIK" או "DH/123".
