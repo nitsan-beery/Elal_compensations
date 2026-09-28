@@ -151,6 +151,8 @@ export function describePairing(p) {
 
 /** מסלול הסבב לפי סדר הרגלים בפועל, כולל הבסיס בקצוות: TLV-SOF-TIV-TLV, לא רק היעדים. */
 function route(p) {
+  // סבב שכולו חזרה לבסיס אחרי המראה: TLV-TLV ולא רק TLV (15/09/2025 LY571).
+  if (p.legs.length && isAirReturnOnly(p)) return `${p.legs[0].org}-${p.legs[0].dst}`;
   const stops = [];
   for (const l of p.legs) {
     if (!stops.length) stops.push(l.org);
