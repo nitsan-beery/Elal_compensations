@@ -214,6 +214,10 @@ tr.detail td { background: var(--surface-2); font-size: .85rem; color: var(--mut
 .extra { margin: .3rem 1.6rem .3rem 0; }
 .extra select, .extra textarea { width: 100%; max-width: 32rem; padding: .35rem; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); }
 .extra textarea { min-height: 3.5em; }
+.credit-pick { display: flex; flex-wrap: wrap; gap: .5rem 1rem; margin-top: .4rem; }
+.credit-pick label { display: flex; align-items: center; gap: .4rem; }
+.credit-pick label[hidden] { display: none; }
+.credit-pick select { width: auto; }
 
 /* ---------- היסטוריה וחוקים ---------- */
 .month-item { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem 1rem; }

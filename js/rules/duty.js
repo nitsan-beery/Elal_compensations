@@ -19,6 +19,30 @@ const H = (hours) => hoursToMin(hours) ?? 0;
  * קרדיט (בעל המוצר, 23/09/2026). שם העמודה עצמו אינו מוצג בהערות ובשאלות.
  */
 export const amountWord = (column) => (column === 'COM' || column === 'S/C' ? 'פיצוי' : 'קרדיט');
+
+/**
+ * "סיבה אחרת" בשאלה: המשתמש כותב את הסיבה, ואומר אם מגיע עליה קרדיט וכמה, מחצי שעה עד חמש
+ * שעות (`answer.creditMin`, 0 כשלא מגיע; בעל המוצר, 29/09/2026). הקרדיט נבדק מול עמודת Rig,
+ * העמודה של קרדיט שאינו קרדיט הטיסה עצמה.
+ */
+export const otherOption = () => ({ value: 'other', label: 'סיבה אחרת', needsText: true, needsCredit: true });
+
+/**
+ * הערה עם הסיבה כלשונה, מסומנת "לפי תשובת המשתמש", והקרדיט שהמשתמש אמר שמגיע – על `pairing`
+ * כשיש טיסה שבוצעה, ואחרת על `date`. תשובה שנשמרה לפני שנשאל על הקרדיט מחזירה false, והקורא
+ * שולח אותה לבדיקה ידנית כמו קודם.
+ */
+export function applyOtherReason(ctx, answer, rule, { what, date, pairing = null, extra }) {
+  if (typeof answer.creditMin !== 'number') return false;
+  const min = answer.creditMin;
+  const note = `${what}: "${answer.text}"`;
+  ctx.note(date, `${note} – ${min > 0 ? `מגיע קרדיט ${minToHhmm(min)}` : 'לא מגיע קרדיט'}.`, rule, { byUser: true, ruleTitle: null });
+  // בשורת ההשוואה: "סיבה אחרת" ולא שם החוק, שאינו מתאר את מה שקרה ("טיסה שבוטלה ללא פיצוי").
+  const shown = { ...extra, ruleTitle: 'סיבה אחרת, לפי תשובת המשתמש' };
+  if (min > 0 && pairing) ctx.expectPairing(pairing, 'rig', min, rule, note, shown);
+  else if (min > 0) ctx.expect(date, 'rig', min, rule, note, shown);
+  return true;
+}
 const dayMs = 86400000;
 const at = (date, clock) => Date.parse(date) / 60000 + clock;
 const dateOf = (abs) => new Date(Math.floor(abs / 1440) * dayMs).toISOString().slice(0, 10);
@@ -289,14 +313,20 @@ function base_rest_shortfall(ctx, params, rule) {
           { value: 'company_request', label: 'לבקשת החברה ובהסכמתי', hint: 'פיצוי לפי 2024 ס\' 35' },
           { value: 'planning_error', label: 'טעות בתכנון שלא תוקנה, והסכמתי לבצע', hint: 'פיצוי לפי ישן כ"ה ס\' 12.טו' },
           { value: 'my_request', label: 'ויתרתי על המנוחה בבקשות שלי', hint: 'אין פיצוי (2018 ס\' 61.1)' },
-          { value: 'other', label: 'סיבה אחרת', needsText: true },
+          otherOption(),
         ],
         ruleId: rule.id,
       });
       continue;
     }
     if (a.value === 'other') {
-      ctx.review(`${what}. ${a.text || 'סיבה אחרת'}. דורש בדיקה ידנית.`, rule);
+      // שני החוקים שחולקים את השאלה מגיעים לכאן: הקרדיט נרשם פעם אחת.
+      if (ctx.pairingHandledBy(p2, 'base_rest_other')) continue;
+      ctx.markPairing(p2, 'base_rest_other');
+      const rest = `מנוחה בבסיס קצרה מהחוזית לפני ${describePairing(p2)}`;
+      if (!applyOtherReason(ctx, a, rule, { what: rest, date: p2.from, pairing: target })) {
+        ctx.review(`${what}. ${a.text || 'סיבה אחרת'}. דורש בדיקה ידנית.`, rule);
+      }
       continue;
     }
     if (a.value !== params.answer_value) continue;

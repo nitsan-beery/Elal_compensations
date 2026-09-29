@@ -410,6 +410,20 @@ function titleHtml(title) {
     typeof part === 'string' ? esc(datesFirst(part)) : `<b>${esc(part.text)}</b>`).join('')}</span>`;
 }
 
+/** "סיבה אחרת": האם מגיע קרדיט, וכמה – מחצי שעה עד חמש שעות (בעל המוצר, 29/09/2026). */
+const CREDIT_STEPS = Array.from({ length: 10 }, (_, i) => (i + 1) * 30);
+
+function creditPicker() {
+  return `<div class="credit-pick">
+    <label class="small">מגיע קרדיט?
+      <select name="credit"><option value="">בחר</option><option value="no">לא מגיע</option><option value="yes">מגיע</option></select>
+    </label>
+    <label class="small" data-credit-hours hidden>כמה שעות?
+      <select name="creditMin">${CREDIT_STEPS.map((m) => `<option value="${m}">${minToHhmm(m)}</option>`).join('')}</select>
+    </label>
+  </div>`;
+}
+
 function renderQuestion(q, i) {
   const name = `q${i}`;
   const options = q.options.map((o) => `
@@ -421,7 +435,7 @@ function renderQuestion(q, i) {
       <label class="small">עם איזו טיסה הוחלף?
         <select name="link">${(o.linkCandidates ?? []).map((c) => `<option value="${esc(c.id ?? '')}">${esc(datesFirst(c.label))}</option>`).join('')}</select>
       </label></div>` : ''}
-    ${o.needsText ? `<div class="extra" data-for="${esc(o.value)}" hidden><textarea name="text" placeholder="פרט מה קרה"></textarea></div>` : ''}`).join('');
+    ${o.needsText ? `<div class="extra" data-for="${esc(o.value)}" hidden><textarea name="text" placeholder="פרט מה קרה"></textarea>${o.needsCredit ? creditPicker() : ''}</div>` : ''}`).join('');
   // שאלה שהתשובה בה היא תאריך: יומן עם ברירת מחדל, ואפשר לשמור אותה מיד.
   const picker = q.dateInput ? `<label class="date-pick">בחר תאריך
     <input type="date" name="date" value="${esc(q.dateInput.value)}"${q.dateInput.min ? ` min="${esc(q.dateInput.min)}"` : ''}${q.dateInput.max ? ` max="${esc(q.dateInput.max)}"` : ''} required>
@@ -563,7 +577,8 @@ function renderAnswered() {
     <ul class="list">${answers.map(([id, a]) => `<li class="row">
       <span>${esc(describeQuestionId(id))}: <strong>${esc(a.value === 'partial' && a.count ? `ויתרתי מרצוני על ${a.count === 1 ? 'יום אחד' : `${a.count} ימים`}` : answerLabel(a.value))}</strong>
         ${a.link !== undefined ? `<span class="small muted">(${a.link === 'none' ? 'מסירת הטיסה ללא חלופה' : a.link ? `עם ${esc(describePairingId(a.link))}` : 'בחודש אחר'})</span>` : ''}
-        ${a.text ? `<span class="small muted">– ${esc(a.text)}</span>` : ''}</span>
+        ${a.text ? `<span class="small muted">– ${esc(a.text)}</span>` : ''}
+        ${typeof a.creditMin === 'number' ? `<span class="small muted">(${a.creditMin ? `מגיע קרדיט ${minToHhmm(a.creditMin)}` : 'לא מגיע קרדיט'})</span>` : ''}</span>
       <span class="spacer"></span>
       <button class="btn no-print" data-unanswer="${esc(id)}">שנה</button>
     </li>`).join('')}</ul>
@@ -574,7 +589,7 @@ function renderNotes(res) {
   if (!res.notes.length) return '';
   return `<details class="card">
     <summary><h2 style="display:inline">הערות <span class="count">${res.notes.length}</span></h2></summary>
-    <ul class="list">${res.notes.map((n) => `<li>${n.date ? `<strong class="num">${ddmm(n.date)}</strong> ` : ''}${esc(n.message)}${n.ruleTitle ? ` <span class="tag">${esc(n.ruleTitle)}</span>` : ''}</li>`).join('')}</ul>
+    <ul class="list">${res.notes.map((n) => `<li>${n.date ? `<strong class="num">${ddmm(n.date)}</strong> ` : ''}${esc(n.message)}${n.byUser ? ' <span class="small muted">לפי תשובת המשתמש</span>' : ''}${n.ruleTitle ? ` <span class="tag">${esc(n.ruleTitle)}</span>` : ''}</li>`).join('')}</ul>
   </details>`;
 }
 
@@ -647,6 +662,9 @@ function bindResults(root) {
       if (countFor) { const radio = $(`input[type="radio"][value="${CSS.escape(countFor)}"]`, form); if (radio) radio.checked = true; }
       const chosen = $('input[type="radio"]:checked', form);
       for (const extra of form.querySelectorAll('.extra')) extra.hidden = extra.dataset.for !== chosen?.value;
+      for (const pick of form.querySelectorAll('.credit-pick')) {
+        $('[data-credit-hours]', pick).hidden = $('select[name="credit"]', pick).value !== 'yes';
+      }
       submit.disabled = !chosen && !$('input[type="date"]', form);
     });
     form.addEventListener('submit', async (e) => {
@@ -666,6 +684,12 @@ function bindResults(root) {
         const text = $(`.extra[data-for="${CSS.escape(chosen.value)}"] textarea`, form)?.value.trim();
         if (!text) { alert('פרט בבקשה מה קרה.'); return; }
         answer.text = text;
+      }
+      const credit = chosen && $(`.extra[data-for="${CSS.escape(chosen.value)}"] .credit-pick`, form);
+      if (credit) {
+        const due = $('select[name="credit"]', credit).value;
+        if (!due) { alert('בחר אם מגיע קרדיט.'); return; }
+        answer.creditMin = due === 'yes' ? Number($('select[name="creditMin"]', credit).value) : 0;
       }
       state.record.answers = { ...(state.record.answers ?? {}), [form.dataset.qid]: answer };
       state.notices = [];

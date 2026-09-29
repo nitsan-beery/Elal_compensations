@@ -266,12 +266,15 @@ function makeContext({ out, timeline, domicile, codes, holidays, answers, plan, 
       reviewKeys.add(message);
       out.reviews.push({ message, ...ruleRef(rule) });
     },
-    /** `date` הוא null בהערה על החודש כולו, בלי יום מסוים. */
-    note(date, message, rule) {
+    /**
+     * `date` הוא null בהערה על החודש כולו, בלי יום מסוים. `extra.byUser`: ההערה מצטטת את מה
+     * שהמשתמש כתב, ומוצגת עם "לפי תשובת המשתמש".
+     */
+    note(date, message, rule, extra) {
       const k = `${date}|${message}`;
       if (noteKeys.has(k)) return;
       noteKeys.add(k);
-      out.notes.push({ date, message, ...ruleRef(rule) });
+      out.notes.push({ date, message, ...ruleRef(rule), ...extra });
     },
     ask(question) {
       if (askedIds.has(question.id) || answers[question.id]) return;

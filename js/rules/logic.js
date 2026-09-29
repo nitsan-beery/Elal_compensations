@@ -7,7 +7,7 @@
 import { hoursToMin, minToHhmm } from '../time.js';
 import { describePairing, describeRoute, fdpParts } from '../model.js';
 import { stationOffset } from '../airports.js';
-import { DUTY_LOGIC, DUTY_PARAMS, execFdpGroups, amountWord } from './duty.js';
+import { DUTY_LOGIC, DUTY_PARAMS, execFdpGroups, amountWord, otherOption, applyOtherReason } from './duty.js';
 
 const H = (hours) => hoursToMin(hours) ?? 0;
 
@@ -593,10 +593,12 @@ function special_call(ctx, params, rule) {
         options: [
           { value: 'special_call', label: 'קריאה מיוחדת' },
           { value: 'voluntary_swap', label: 'החלפה מרצוני', needsLink: true },
-          { value: 'other', label: 'סיבה אחרת', needsText: true },
+          otherOption(),
         ],
         ruleId: rule.id,
       });
+    } else if (match.how === 'unplanned' && answer?.value === 'other') {
+      applyOtherReason(ctx, answer, rule, { what: 'פעילות ביום שלא תוכננה בו פעילות', date: match.exec.from, pairing: match.exec });
     }
   }
 }
@@ -948,7 +950,10 @@ function cancelled_no_compensation(ctx, params, rule) {
       continue;
     }
     if (answer.value === 'cancelled') noteCancelled(ctx, match, rule, null);
-    if (answer.value === 'other') {
+    if (answer.value === 'other' && !applyOtherReason(ctx, answer, rule, {
+      what: match.exec ? 'סבב מתוכנן שבמקומו בוצע סבב אחר' : 'סבב מתוכנן שלא בוצע',
+      date: match.plan.from, pairing: match.exec, extra: { plannedRoute: describeRoute(match.plan) },
+    })) {
       ctx.review(`${describePairing(match.plan)}: ${answer.text || 'סיבה אחרת'}. דורש בדיקה ידנית.`, rule);
     }
   }
@@ -1160,7 +1165,7 @@ function askWhatHappened(ctx, match, rule) {
       'הסיבה אינה בקבצים, והיא קובעת מה מגיע. מה קרה?',
     options: [
       ...whatHappenedOptions(ctx, plan, exec),
-      { value: 'other', label: 'סיבה אחרת', needsText: true },
+      otherOption(),
     ],
     ruleId: rule.id,
   });
@@ -1303,7 +1308,7 @@ function standby_end_for_bid(ctx, params, rule) {
           options: [
             { value: 'standby_bid', label: 'סיום כוננות בגלל זכייה במכרז', hint: bidHint(pairing, ctx, sc) },
             { value: 'standby_activated', label: 'הפעלת הכוננות', hint: 'קרדיט הטיסה, בלי קריאה מיוחדת' },
-            { value: 'other', label: 'סיבה אחרת', needsText: true },
+            otherOption(),
           ],
           ruleId: rule.id,
         });
@@ -1317,7 +1322,9 @@ function standby_end_for_bid(ctx, params, rule) {
         ctx.markPairing(pairing, 'standby_activated');
       } else {
         ctx.markPairing(pairing, 'standby_bid_pending');
-        ctx.review(`${describePairing(pairing)}, ביומיים האחרונים של הכוננות (${range}): ${answer.text || 'סיבה אחרת'}. דורש בדיקה ידנית.`, rule);
+        if (!applyOtherReason(ctx, answer, rule, { what: `טיסה ביומיים האחרונים של הכוננות (${range})`, date: pairing.from, pairing })) {
+          ctx.review(`${describePairing(pairing)}, ביומיים האחרונים של הכוננות (${range}): ${answer.text || 'סיבה אחרת'}. דורש בדיקה ידנית.`, rule);
+        }
       }
     }
   }
