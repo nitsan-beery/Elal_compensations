@@ -761,7 +761,7 @@ function higher_of_planned_performed(ctx, params, rule) {
     const paidOn = extra <= 0 ? null
       : findShortfallPaid(ctx, m, extra, column, reportColumn) ?? findShortfallPaid(ctx, m, extra, column, reportColumn, true);
     const moved = paidOn && paidOn !== exec ? paidOn : null;
-    const movedText = moved ? ` בדוח הוא רשום ב-${dayOf(moved.from)}.` : '';
+    const movedText = moved ? ` ברומה הוא רשום ב-${dayOf(moved.from)}.` : '';
     ctx.note(match.plan.from, `החלפה ביוזמת החברה: מגיע הקרדיט של הטיסה הארוכה מבין השתיים: ${longer}.${topUp}${movedText}`, rule);
     // ביום של הטיסה שבוצעה, כשהוא אחר.
     if (exec.from !== match.plan.from) ctx.note(exec.from, 'החלפה ביוזמת החברה: קרדיט על הטיסה שבוצעה.', rule);
