@@ -559,9 +559,12 @@ function special_call(ctx, params, rule) {
         continue;
       }
       const days = countSpecialCallDays(stay, params);
-      ctx.expectPairing(match.exec, 'sc', days.counted.length * H(params.hours), rule,
-        `קריאה מיוחדת: ${days.counted.length === 1 ? 'יממה אחת' : `${days.counted.length} יממות`} ` +
-        `(${days.counted.map(dayOf).join(', ')}). ${days.reason}`);
+      const explain = `קריאה מיוחדת: ${days.counted.length === 1 ? 'יממה אחת' : `${days.counted.length} יממות`} ` +
+        `(${days.counted.map(dayOf).join(', ')}). ${days.reason}`;
+      // השהייה נוגעת ביותר מיממה אחת (`all`, לא `counted`): הערה קבועה, גם כשתואם לדוח, כדי
+      // להסביר איזו יממה נספרת (20–21/07/2025: S/C רק על 20/07, היממה השנייה קצרה מהסף).
+      if (days.all.length > 1) ctx.note(match.exec.from, `${describePairing(match.exec)}: ${explain}`, rule);
+      ctx.expectPairing(match.exec, 'sc', days.counted.length * H(params.hours), rule, explain);
       continue;
     }
     // טיסה לא מתוכננת בלי S/C: לא מנחשים, שואלים.
@@ -623,17 +626,18 @@ function countSpecialCallDays(stay, params) {
   const lastDay = Math.floor((stay.end - 1) / 1440);
   const all = [];
   for (let d = firstDay; d <= lastDay; d++) all.push(addDays(stay.first, d));
-  if (stay.cutAtEnd) return { counted: all, reason: 'הסבב חוזר בחודש הבא; נספרות היממות עד סוף החודש, והיממה האחרונה נבדקת בחודש הבא.' };
-  if (all.length === 1) return { counted: all, reason: 'יממה אחת.' };
+  if (stay.cutAtEnd) return { counted: all, all, reason: 'הסבב חוזר בחודש הבא; נספרות היממות עד סוף החודש, והיממה האחרונה נבדקת בחודש הבא.' };
+  if (all.length === 1) return { counted: all, all, reason: 'יממה אחת.' };
 
   const total = stay.end - stay.start;
   const inLast = stay.end - lastDay * 1440;
   const gap = H(params.second_day_min_gap_hours);
   const min = H(params.second_day_min_hours);
   const facts = `שהייה ${minToHhmm(total)}, מתוכה ${minToHhmm(inLast)} ביממה האחרונה`;
-  if (total > gap && inLast >= min) return { counted: all, reason: `${facts}: היממה האחרונה נספרת.` };
+  if (total > gap && inLast >= min) return { counted: all, all, reason: `${facts}: היממה האחרונה נספרת.` };
   return {
     counted: all.slice(0, -1),
+    all,
     reason: `${facts}. היממה האחרונה לא נספרת: נדרשים מעל ${minToHhmm(gap)} ברצף ולפחות ${minToHhmm(min)} בה.`,
   };
 }
