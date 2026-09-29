@@ -240,11 +240,14 @@ function reasonOf(c) {
 }
 
 function summarize(res) {
+  // פער בסיכום נספר רק כשהפערים בשורות של אותה עמודה אינם מסבירים אותו, כדי לא לספור פער אחד פעמיים
+  // (נובמבר ודצמבר 2025: Rig של 00:04 בשורה ובסיכום; בעל המוצר, 29/09/2026).
+  const rowsDiff = (column) => res.comparison.filter((c) => c.column === column && c.ok === false).reduce((s, c) => s + c.diff, 0);
   return {
     mode: res.mode,
     questions: res.questions.length,
     gaps: shownComparison(res).filter(isGap).length
-      + (res.questions.length ? 0 : res.totals.filter((t) => t.ok === false).length),
+      + (res.questions.length ? 0 : res.totals.filter((t) => t.ok === false && t.reported - t.expected !== rowsDiff(t.column)).length),
     reviews: res.reviews.length,
     unknownCodes: res.unknownCodes.length,
   };
@@ -622,6 +625,16 @@ function bindResults(root) {
 
 // ---------- היסטוריה ----------
 
+/** הסיכום של חודש שמור לפי החוקים והקוד הנוכחיים, ולא זה שנשמר בהרצה האחרונה שלו. */
+function currentSummary(m) {
+  if (!state.rulesData || !(m.plan || m.exec)) return m.summary ?? {};
+  try {
+    return summarize(evaluate({ rulesData: state.rulesData, plan: m.plan, exec: m.exec, answers: m.answers ?? {} }));
+  } catch {
+    return m.summary ?? {};
+  }
+}
+
 async function renderHistory() {
   const root = $('#view-history');
   const months = await safe(() => store.listMonths(), []);
@@ -629,12 +642,12 @@ async function renderHistory() {
     <div class="card">
       <h2>חודשים שמורים על המכשיר</h2>
       ${months.length ? `<ul class="list">${months.map((m) => {
-        const s = m.summary ?? {};
+        const s = currentSummary(m);
         const tags = [
           m.plan ? '<span class="tag">תכנון</span>' : '',
           m.exec ? '<span class="tag">ביצוע</span>' : '',
-          s.questions ? `<span class="tag warn">${s.questions} שאלות פתוחות</span>` : '',
-          s.gaps ? `<span class="tag bad">${s.gaps} פערים</span>` : '',
+          s.questions ? `<span class="tag warn">${s.questions === 1 ? 'שאלה פתוחה אחת' : `${s.questions} שאלות פתוחות`}</span>` : '',
+          s.gaps ? `<span class="tag bad">${s.gaps === 1 ? 'פער אחד' : `${s.gaps} פערים`}</span>` : '',
           m.exec && !s.gaps && !s.questions ? '<span class="tag ok">תואם לדוח</span>' : '',
         ].join(' ');
         return `<li class="month-item">
