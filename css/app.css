@@ -120,7 +120,7 @@ main { max-width: 1100px; margin: 0 auto; padding: 1rem 16px 3rem; }
 .drop.loaded { border-style: solid; border-color: var(--ok); }
 .drop.busy { opacity: .6; pointer-events: none; }
 .drop-title { font-weight: 700; font-size: 1.05rem; }
-.drop-sub { color: var(--muted); font-size: .85rem; direction: ltr; }
+.drop-sub { color: var(--muted); font-size: .85rem; }
 .drop-state { margin-top: .5rem; font-size: .9rem; word-break: break-word; }
 /* קובץ טעון (בעל המוצר, 29/09/2026): לחיצה על הקובץ פותחת אותו, ו"בחר חודש אחר" הוא הדרך היחידה
    לבחור קובץ חדש, חוץ מגרירה. בלי קובץ – כל האזור בוחר קובץ, כמו קודם. */
@@ -131,7 +131,7 @@ main { max-width: 1100px; margin: 0 auto; padding: 1rem 16px 3rem; }
 .drop:not(.loaded) .drop-file, .drop:not(.loaded) .drop-pick,
 .drop.busy .drop-file, .drop.busy .drop-pick { display: none; }
 .drop-file {
-  display: flex; align-items: center; gap: .6rem; margin-top: .6rem; padding: .4rem .75rem;
+  display: flex; align-items: center; gap: .6rem; margin-top: .15rem; padding: .25rem .75rem;
   font: inherit; color: var(--ok); background: none; text-align: start;
   border: 1px solid transparent; border-radius: var(--radius); cursor: pointer;
 }
