@@ -143,6 +143,8 @@ main { max-width: 1100px; margin: 0 auto; padding: 1rem 16px 3rem; }
 .drop-file > svg { width: 1.6rem; height: 1.6rem; flex: none; }
 /* מקום ריק ברוחב הסמל בצד השני, כדי שהחודש ושם הקובץ יהיו בדיוק מתחת לכותרת (בעל המוצר, 29/09/2026). */
 .drop-file::after { content: ''; width: 1.6rem; flex: none; }
+/* בלי קובץ שמור אין מה לפתוח, ולכן גם אין סמל מסמך (בעל המוצר, 29/09/2026). */
+.drop-file:disabled > svg, .drop-file:disabled::after { display: none; }
 .drop-file-text { display: flex; flex-direction: column; align-items: center; text-align: center; }
 .drop-month { font-weight: 700; font-size: .95rem; }
 .drop-name { font-size: .8rem; color: var(--muted); direction: ltr; text-align: center; word-break: break-word; }
