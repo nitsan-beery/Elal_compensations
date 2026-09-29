@@ -80,7 +80,7 @@ const isAirReturnOnly = (pairing) => pairing.legs.every((l) => l.org === l.dst);
  * האם הרגל `next` יוצאת באותו FDP שבו נחתה `leg`: המנוחה ביניהן, פחות זמן ההתייצבות לפני
  * ה-STD, קצרה ממנוחה חוקית. השעות שתיהן בשעון הבסיס, כי שתי הרגליים נוגעות בו.
  */
-function sameFdp(leg, next, fdp) {
+export function sameFdp(leg, next, fdp) {
   if (!fdp) return false;
   const end = leg.ata ?? leg.sta;
   const starts = [next.std, next.atd].filter((t) => t != null);

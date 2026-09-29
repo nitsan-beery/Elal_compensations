@@ -5,7 +5,7 @@
 // מזהה לוגיקה שאינו מופיע כאן נחשב "לא נתמך" ומוצג למשתמש.
 
 import { hoursToMin, minToHhmm } from '../time.js';
-import { describePairing } from '../model.js';
+import { describePairing, sameFdp } from '../model.js';
 import { stationOffset } from '../airports.js';
 import { DUTY_LOGIC, DUTY_PARAMS, execFdpGroups, amountWord } from './duty.js';
 
@@ -558,7 +558,7 @@ function special_call(ctx, params, rule) {
         ctx.review(`${describePairing(match.exec)}: ${stay.error} לא ניתן לספור יממות לקריאה המיוחדת. דורש בדיקה ידנית.`, rule);
         continue;
       }
-      const days = countSpecialCallDays(stay, params);
+      const days = countSpecialCallDays(stay, params, match.exec, ctx.fdp);
       const explain = `קריאה מיוחדת: ${days.counted.length === 1 ? 'יממה אחת' : `${days.counted.length} יממות`} ` +
         `(${days.counted.map(dayOf).join(', ')}). ${days.reason}`;
       // השהייה נוגעת ביותר מיממה אחת (`all`, לא `counted`): הערה קבועה, גם כשתואם לדוח, כדי
@@ -619,15 +619,22 @@ function awayFromBase(pairing, domicile, monthEnd) {
 /**
  * יממות לתשלום קריאה מיוחדת. יממה היא יום קלנדרי בשעון מקומי (ישן כ"ה ס' 12.א).
  * "כל יממה או חלק ממנה" (12.ג), אבל היממה האחרונה נספרת רק אם השהייה כולה ארוכה מ-
- * `second_day_min_gap_hours`, ולפחות `second_day_min_hours` ממנה ביממה האחרונה (12.יא).
+ * `second_day_min_gap_hours`, ולפחות `second_day_min_hours` ממנה ביממה האחרונה (12.יא) –
+ * ורק כשהיממה האחרונה היא המשך של אותו FDP שחוצה חצות. כשהיממה האחרונה פותחת FDP משלה
+ * (מנוחה אמיתית לפני, לא רק חיבור בין רגליים) זו יממת עבודה נפרדת לפי 12.ג, ונספרת בלי
+ * בדיקת הסף: 19–20/06/2025, TLV-LCA ב-19 ואחרי מנוחה PFO-LCA-TLV שיוצאת כולה ב-20.
  */
-function countSpecialCallDays(stay, params) {
+function countSpecialCallDays(stay, params, pairing, fdp) {
   const firstDay = Math.floor(stay.start / 1440);
   const lastDay = Math.floor((stay.end - 1) / 1440);
   const all = [];
   for (let d = firstDay; d <= lastDay; d++) all.push(addDays(stay.first, d));
   if (stay.cutAtEnd) return { counted: all, all, reason: 'הסבב חוזר בחודש הבא; נספרות היממות עד סוף החודש, והיממה האחרונה נבדקת בחודש הבא.' };
   if (all.length === 1) return { counted: all, all, reason: 'יממה אחת.' };
+
+  if (pairing && lastFdpStartsOn(pairing, fdp, all.at(-1))) {
+    return { counted: all, all, reason: `היממה האחרונה (${dayOf(all.at(-1))}) היא FDP נפרד, אחרי מנוחה אמיתית, ולא המשך של ה-FDP הקודם מעבר לחצות: יממת עבודה בפני עצמה, נספרת בלי בדיקת סף.` };
+  }
 
   const total = stay.end - stay.start;
   const inLast = stay.end - lastDay * 1440;
@@ -640,6 +647,19 @@ function countSpecialCallDays(stay, params) {
     all,
     reason: `${facts}. היממה האחרונה לא נספרת: נדרשים מעל ${minToHhmm(gap)} ברצף ולפחות ${minToHhmm(min)} בה.`,
   };
+}
+
+/**
+ * האם ה-FDP האחרון בסבב (המסתיים בנחיתה בבסיס) מתחיל ביממה `lastDate` עצמה: מהלגה האחרונה
+ * אחורה, כל עוד יש מנוחה חוקית לפני הלגה (לא `sameFdp`), עדיין באותו FDP. בלי `fdp` (חסר
+ * `legal_rest_hours` בפרמטרים של הסליפ הקצר) אי אפשר לדעת, ומניחים שזה המשך.
+ */
+function lastFdpStartsOn(pairing, fdp, lastDate) {
+  if (!fdp) return false;
+  const legs = pairing.legs;
+  let i = legs.length - 1;
+  while (i > 0 && sameFdp(legs[i - 1], legs[i], fdp)) i--;
+  return legs[i].date === lastDate;
 }
 
 const mod = (n, m) => ((n % m) + m) % m;
@@ -1330,7 +1350,7 @@ function bidHint(pairing, ctx, sc) {
   const p = sc.logic.params ?? {};
   const stay = awayFromBase(pairing, ctx.domicile, ctx.timeline.at(-1).date);
   if (stay.error) return `קריאה מיוחדת על ימי הטיסה, ב-${p.report_column ?? 'S/C'}`;
-  const n = countSpecialCallDays(stay, p).counted.length;
+  const n = countSpecialCallDays(stay, p, pairing, ctx.fdp).counted.length;
   return `קריאה מיוחדת: ${n === 1 ? 'יממה אחת' : `${n} יממות`}, ${minToHhmm(n * H(p.hours))} ב-${p.report_column ?? 'S/C'}`;
 }
 
@@ -1340,7 +1360,7 @@ function bidAmount(pairing, ctx, sc) {
   const p = sc.logic.params ?? {};
   const stay = awayFromBase(pairing, ctx.domicile, ctx.timeline.at(-1).date);
   if (stay.error) return 0;
-  return countSpecialCallDays(stay, p).counted.length * H(p.hours);
+  return countSpecialCallDays(stay, p, pairing, ctx.fdp).counted.length * H(p.hours);
 }
 
 export const LOGIC = {

@@ -8,7 +8,7 @@
 
 import { LOGIC, LOGIC_ORDER } from './logic.js';
 import { rulesInEffect, partitionRules, rulesByLogic, classifyCode } from './catalog.js';
-import { buildTimeline, buildPairings, markCarryIn, matchPairings, describePairing, describeRoute, pairingParts } from '../model.js';
+import { buildTimeline, buildPairings, markCarryIn, matchPairings, describePairing, describeRoute, pairingParts, sameFdp } from '../model.js';
 import { hoursToMin } from '../time.js';
 import { OPTIONAL_COLUMNS } from '../pdf/exec.js';
 
@@ -105,7 +105,7 @@ export function evaluate({ rulesData, plan = null, exec = null, answers = {} }) 
   }
 
   const ctx = makeContext({ out, timeline, domicile, codes, holidays: rulesData.holidays ?? {}, answers, plan, exec, supported, matches, planPairings,
-    period, fleet,
+    period, fleet, fdp,
     // בלי דוח ביצוע, הסבבים המתוכננים משמשים לחישוב הקרדיט והרי"ג הצפויים.
     execPairings: exec ? execPairings : planPairings });
 
@@ -135,7 +135,7 @@ export function evaluate({ rulesData, plan = null, exec = null, answers = {} }) 
 
 // ---------- ctx: מה שהלוגיקות רואות ----------
 
-function makeContext({ out, timeline, domicile, codes, holidays, answers, plan, exec, supported, matches, planPairings, period, fleet, execPairings }) {
+function makeContext({ out, timeline, domicile, codes, holidays, answers, plan, exec, supported, matches, planPairings, period, fleet, execPairings, fdp }) {
   const absenceBy = new Map(); // date → Set(ruleId)
   const pairingTags = new Map(); // pairing.id → Set(tag)
   const askedIds = new Set();
@@ -160,6 +160,8 @@ function makeContext({ out, timeline, domicile, codes, holidays, answers, plan, 
     domicile,
     period,
     fleet,
+    /** הגדרת ה-FDP של הסליפ הקצר (מנוחה חוקית, זמן התייצבות), null בלי הפרמטרים שלה. */
+    fdp,
     monthFirst: timeline[0].date,
     /** ימי חג לפי שנה (`holidays` ב-rules.json). */
     holidays: (year) => holidays[String(year)] ?? null,
