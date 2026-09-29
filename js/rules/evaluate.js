@@ -589,13 +589,13 @@ function noteChanges(out, supported) {
         if (!e.pairingId) g.days.set(e.date, (g.days.get(e.date) ?? 0) + e.min);
       }
       const items = [...byWhat].map(([what, { min, days }]) => {
-        if (days.size < 2 || [...days.values()].reduce((s, m) => s + m, 0) !== min) return `${what} ${minToHhmm(min)} שעות`;
+        if (days.size < 2 || [...days.values()].reduce((s, m) => s + m, 0) !== min) return `${what} ${minToHhmm(min)}`;
         const ds = [...days.keys()].sort().map((d) => `${d.slice(8, 10)}/${d.slice(5, 7)}`);
         const on = `${ds.slice(0, -1).join(', ')} ו-${ds.at(-1)}`;
         const amounts = new Set(days.values());
-        const each = amounts.size === 1 ? `${minToHhmm([...amounts][0])} שעות ליום על ${on}`
+        const each = amounts.size === 1 ? `${minToHhmm([...amounts][0])} ליום על ${on}`
           : [...days].sort(([a], [b]) => a.localeCompare(b)).map(([d, m]) => `${minToHhmm(m)} ב-${d.slice(8, 10)}/${d.slice(5, 7)}`).join(', ');
-        return `${what} ${each}, סה"כ ${minToHhmm(min)} שעות`;
+        return `${what} ${each}, סה"כ ${minToHhmm(min)}`;
       });
       due = items.length ? `מגיע ${items.length > 1 ? `${items.slice(0, -1).join(', ')} ו${items.at(-1)}` : items[0]}` : 'לא מגיע קרדיט ולא פיצוי';
     }

@@ -1024,7 +1024,7 @@ function stay_extension(ctx, params, rule) {
 
     ctx.markPairing(m.exec, 'stay_extension');
     const what = `${describePairing(m.exec)}: החזרה לבסיס ב-${ddmm(dateOf(actual))} ${hhmm(actual)}, ` +
-      `${minToHhmm(actual - planned)} שעות אחרי המתוכנן (${ddmm(dateOf(planned))} ${hhmm(planned)})`;
+      `${minToHhmm(actual - planned)} אחרי המתוכנן (${ddmm(dateOf(planned))} ${hhmm(planned)})`;
     const unplanned = [];
     for (let d = addDays(dateOf(planned), 1); d <= dateOf(actual); d = addDays(d, 1)) unplanned.push(d);
     const id = `stay_extension:${m.exec.id}`;

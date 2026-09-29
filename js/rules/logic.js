@@ -40,8 +40,8 @@ function credit_from_scheduled(ctx, params, rule) {
     const airReturnMatch = ctx.matches.find((m) => m.exec === pairing);
     if (airReturnMatch?.how === 'air_return') {
       const top = minSlipTopUp(ctx, pairing);
-      ctx.note(pairing.from, `חזרה לבסיס אחרי ההמראה: מגיע קרדיט לפי זמן הטיסה בפועל, ${minToHhmm(sumLegs(pairing))} שעות` +
-        (top ? `, ועוד השלמה לסליפ קצר ${minToHhmm(top)} שעות` : '') + '.', rule);
+      ctx.note(pairing.from, `חזרה לבסיס אחרי ההמראה: מגיע קרדיט לפי זמן הטיסה בפועל, ${minToHhmm(sumLegs(pairing))}` +
+        (top ? `, ועוד השלמה לסליפ קצר ${minToHhmm(top)}` : '') + '.', rule);
     }
     const days = new Map(); // date → {min, why[]}
     const add = (date, min, why) => {
@@ -469,10 +469,10 @@ function unexplained_report_amount(ctx, params, rule) {
  * (H:MM) מעבר לשעה (בעל המוצר, 24/09/2026).
  */
 
-/** משך איחור בהערה: בדקות עד שעה, אחרת H:MM שעות (בעל המוצר, 24/09/2026). */
+/** משך איחור בהערה: בדקות עד שעה, אחרת H:MM בלי "שעות" (בעל המוצר, 24/09/2026 ו-29/09/2026). */
 function delayText(min) {
   if (min <= 60) return `${min} דק'`;
-  return `${Math.floor(min / 60)}:${String(min % 60).padStart(2, '0')} שעות`;
+  return `${Math.floor(min / 60)}:${String(min % 60).padStart(2, '0')}`;
 }
 
 function late_landing_home(ctx, params, rule) {
@@ -522,7 +522,7 @@ function long_flight_day(ctx, params, rule) {
     }
     for (const [date, { legs, min: flown }] of byDate) {
       if (legs < 2 || flown <= over) continue;
-      ctx.expect(date, 'com', H(params.hours), rule, `${describePairing(pairing)}: ${minToHhmm(flown)} שעות טיסה ביום`);
+      ctx.expect(date, 'com', H(params.hours), rule, `${describePairing(pairing)}: זמן טיסה ${minToHhmm(flown)} ביום`);
     }
   }
 }
@@ -659,7 +659,7 @@ function countSpecialCallDays(stay, params, pairing, fdp) {
   const gap = H(params.second_day_min_gap_hours);
   const min = H(params.second_day_min_hours);
   const which = all.length === 2 ? 'השנייה' : 'האחרונה';
-  const need = `שהייה של מעל ${minToHhmm(gap)} שעות, מתוכן לפחות ${minToHhmm(min)} ביממה ${which}`;
+  const need = `שהייה של מעל ${minToHhmm(gap)}, מתוכן לפחות ${minToHhmm(min)} ביממה ${which}`;
   if (total > gap && inLast >= min) {
     return { counted: all, all,
       reason: `${all.length > 2 ? `${countDays(all.length)} ${list(all)}. ` : ''}בוצעה ${need}, ולכן מגיעה קריאה מיוחדת גם על היממה ${which}.` };
@@ -669,7 +669,7 @@ function countSpecialCallDays(stay, params, pairing, fdp) {
     counted,
     all,
     reason: `${counted.length === 1 ? 'נספרת רק יממה אחת' : `נספרות רק ${counted.length} יממות`} ${list(counted)}. ` +
-      `סה"כ זמן שהייה ${minToHhmm(total)} שעות, מתוכן ${minToHhmm(inLast)} ביממה ${which}. ` +
+      `סה"כ זמן שהייה ${minToHhmm(total)}, מתוכן ${minToHhmm(inLast)} ביממה ${which}. ` +
       `נדרשת ${need}, ולכן אין קריאה מיוחדת על היממה ${which}.`,
   };
 }
@@ -745,10 +745,10 @@ function higher_of_planned_performed(ctx, params, rule) {
     const performed = planned - diff;
     // בלי מספרי הטיסות: הם כבר בשינויים בין תכנון לביצוע (בעל המוצר, 29/09/2026).
     const longer = diff > 0
-      ? `${minToHhmm(planned)} שעות של הטיסה המתוכננת, מול ${minToHhmm(performed)} של הטיסה שבוצעה`
-      : `${minToHhmm(performed)} שעות של הטיסה שבוצעה, מול ${minToHhmm(planned)} של הטיסה המתוכננת`;
+      ? `${minToHhmm(planned)} של הטיסה המתוכננת, מול ${minToHhmm(performed)} של הטיסה שבוצעה`
+      : `${minToHhmm(performed)} של הטיסה שבוצעה, מול ${minToHhmm(planned)} של הטיסה המתוכננת`;
     // כאן שם העמודה כן מופיע, לבקשת בעל המוצר (29/09/2026).
-    const extraCredit = `מגיע ${minToHhmm(diff)} שעות כקרדיט נוסף (${column === 'rig' ? 'RIG' : reportColumn})`;
+    const extraCredit = `מגיע ${minToHhmm(diff)} כקרדיט נוסף (${column === 'rig' ? 'RIG' : reportColumn})`;
     const topUp = diff <= 0 ? ''
       : !alreadyMinSlip ? ` ${extraCredit}.`
       : extra > 0 ? ` ${extraCredit}: ${minToHhmm(alreadyMinSlip)} בהשלמה לסליפ קצר ועוד ${minToHhmm(extra)}.`
@@ -882,7 +882,7 @@ function lostHoursOptions(ctx, planPairing, extra) {
     const lost = lostHours(ctx, planPairing, p);
     const word = amountWord(p.credit_column ?? 'Credit');
     const amount = lost == null ? `מגיע ${word}` : `מגיע ${word} של ${minToHhmm(lost)}`;
-    return { value: p.answer_value, label: p.answer_label, hint: extra ? `${amount} על הטיסה המקורית ${extra}` : `${amount} שעות` };
+    return { value: p.answer_value, label: p.answer_label, hint: extra ? `${amount} על הטיסה המקורית ${extra}` : amount };
   });
 }
 
@@ -1377,7 +1377,7 @@ function standby_activation(ctx, params, rule) {
         ctx.review(`${describePairing(pairing)}: על ${what} מגיע הגבוה מבין קרדיט הטיסה (${credit == null ? 'לא ידוע' : minToHhmm(credit)}) ` +
           `לבין ${flown.length} × ${minToHhmm(value.min)} (${value.rule.title}; 2018 ס' 98). הכוננות גבוהה יותר, ועוד לא ראינו איך זה נרשם ברומה. דורש בדיקה ידנית.`, rule);
       } else {
-        ctx.note(pairing.from, `הפעלה מהכוננות: קרדיט הטיסה, ${minToHhmm(credit)} שעות, גבוה מערך ${what} (${flown.length} × ${minToHhmm(value.min)}), ולכן אין תוספת.`, rule);
+        ctx.note(pairing.from, `הפעלה מהכוננות: קרדיט הטיסה, ${minToHhmm(credit)}, גבוה מערך ${what} (${flown.length} × ${minToHhmm(value.min)}), ולכן אין תוספת.`, rule);
       }
     }
   }
