@@ -566,10 +566,10 @@ function special_call(ctx, params, rule) {
         .filter((x) => x.days.length);
       // השהייה נוגעת ביותר מיממה אחת (`all`, לא `counted`): הערה קבועה, גם כשתואם לדוח, כדי
       // להסביר איזו יממה נספרת (20–21/07/2025: S/C רק על 20/07, היממה השנייה קצרה מהסף).
+      // בכמה FDP השינויים מציגים שורה לכל FDP, והערה על כל אחת אומרת שמגיעה עליו קריאה מיוחדת
+      // (`splitChangesByFdp` ב-evaluate.js, בעל המוצר 29/09/2026). הערה כאן רק על יממה שנבדקה מול הסף.
       if (perPart.length > 1) {
-        const each = perPart.map((x) => `${x.days.map(dayOf).join(', ')} על ${flightsOf(x.part)}`).join(', ');
-        ctx.note(match.exec.from, `${flightsOf(match.exec)} קריאה מיוחדת: ${perPart.length === 2 ? 'שני' : perPart.length} FDP נפרדים, עם מנוחה חוקית ביניהם, ` +
-          `ולכן מגיעה קריאה מיוחדת על כל אחד: ${each}.` + (days.ownFdp ? '' : ` ${days.reason}`), rule);
+        if (!days.ownFdp) ctx.note(match.exec.from, `${flightsOf(match.exec)} קריאה מיוחדת: ${explain}`, rule);
         for (const x of perPart) {
           ctx.expectPairing(match.exec, 'sc', x.days.length * H(params.hours), rule,
             `${flightsOf(x.part)}: ${x.days.length === 1 ? 'יממה אחת' : `${x.days.length} יממות`} (${x.days.map(dayOf).join(', ')}).`,

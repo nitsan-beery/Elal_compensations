@@ -126,6 +126,7 @@ export function evaluate({ rulesData, plan = null, exec = null, answers = {} }) 
 
   attachLinkCandidates(out.questions, matches, ctx);
   showSwaps(out, answers, assumed);
+  splitChangesByFdp(out, matches, ctx, fdp);
   noteChanges(out, supported);
   // כמו שאר הטבלאות: לפי תאריך. הערה בלי תאריך (על החודש כולו) בסוף.
   out.notes.sort((a, b) => (a.date ?? '￿').localeCompare(b.date ?? '￿'));
@@ -552,6 +553,21 @@ function showSwaps(out, answers, assumed) {
   }
 }
 
+/**
+ * פעילות לא מתוכננת בכמה FDP נפרדים, שעל כל אחד מגיעה קריאה מיוחדת: שורה לכל FDP בשינויים,
+ * ולכן גם הערה לכל אחד (בעל המוצר, 29/09/2026; 19–20/06/2025). `until` הוא היום שבו מתחיל
+ * ה-FDP הבא: יממה בלי רגל שייכת ל-FDP שלפניה, כמו בספירת הקריאה המיוחדת.
+ */
+function splitChangesByFdp(out, matches, ctx, fdp) {
+  out.changes = out.changes.flatMap((c) => {
+    const m = c.how === 'unplanned' && matches.find((x) => x.exec?.id === c.execId);
+    if (!m || !ctx.pairingHandledBy(m.exec, 'special_call')) return [c];
+    const parts = fdpParts(m.exec, fdp);
+    if (parts.length < 2) return [c];
+    return parts.map((p, i) => ({ ...c, date: p.from, until: parts[i + 1]?.from ?? null, exec: describePairing(p) }));
+  });
+}
+
 /** לוגיקות שהערה שלהן מסבירה שינוי בין התכנון לביצוע. */
 const CHANGE_LOGIC = new Set(['credit_from_scheduled', 'cancelled_no_compensation', 'voluntary_swap', 'higher_of_planned_performed',
   'lost_hours_credit', 'special_call', 'training_cancelled_flight', 'standby_end_for_bid', 'standby_activation', 'vacation_recall', 'dh_activated']);
@@ -577,7 +593,9 @@ function noteChanges(out, supported) {
     if (c.how === 'exact' || c.how === 'noplan') continue;
     const ids = [c.planId, c.execId].filter(Boolean);
     const ranges = ids.map(rangeOf).filter(Boolean);
-    const within = (d) => !!d && ranges.some(([from, to]) => from <= d && d <= to);
+    // שורה אחת מכמה על אותו סבב (`splitChangesByFdp`): רק מה שנרשם בימים שלה.
+    const own = (d) => c.until === undefined || (c.date <= d && (!c.until || d < c.until));
+    const within = (d) => !!d && own(d) && ranges.some(([from, to]) => from <= d && d <= to);
     if (out.notes.some((n) => CHANGE_LOGIC.has(logicOf.get(n.ruleId)) && within(n.date))) continue;
 
     // קצר ובלי מספרי הטיסות, שכבר מופיעים בשינויים: רק מה מגיע או לא מגיע (בעל המוצר, 29/09/2026).
@@ -591,7 +609,7 @@ function noteChanges(out, supported) {
       for (const e of out.expectations) {
         const logic = logicOf.get(e.ruleId);
         if (!CHANGE_DUE_LOGIC.has(logic)) continue;
-        if (e.pairingId ? !ids.includes(e.pairingId) : !within(e.date)) continue;
+        if (e.pairingId ? !ids.includes(e.pairingId) || !own(e.date) : !within(e.date)) continue;
         const what = DUE_WORDING[logic] ?? (logic === 'absence_day_credit' ? `קרדיט ${e.ruleTitle}` : e.shortTitle ?? e.ruleTitle);
         if (!byWhat.has(what)) byWhat.set(what, { min: 0, days: new Map() });
         const g = byWhat.get(what);
