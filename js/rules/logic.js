@@ -569,7 +569,7 @@ function special_call(ctx, params, rule) {
       // להסביר איזו יממה נספרת (20–21/07/2025: S/C רק על 20/07, היממה השנייה קצרה מהסף).
       if (perPart.length > 1) {
         const each = perPart.map((x) => `${x.days.map(dayOf).join(', ')} על ${flightsOf(x.part)}`).join(', ');
-        ctx.note(match.exec.from, `${flightsOf(match.exec)}: קריאה מיוחדת: ${perPart.length === 2 ? 'שני' : perPart.length} FDP נפרדים, עם מנוחה חוקית ביניהם, ` +
+        ctx.note(match.exec.from, `${flightsOf(match.exec)} קריאה מיוחדת: ${perPart.length === 2 ? 'שני' : perPart.length} FDP נפרדים, עם מנוחה חוקית ביניהם, ` +
           `ולכן מגיעה קריאה מיוחדת על כל אחד: ${each}.` + (days.ownFdp ? '' : ` ${days.reason}`), rule);
         for (const x of perPart) {
           ctx.expectPairing(match.exec, 'sc', x.days.length * H(params.hours), rule,
@@ -578,7 +578,7 @@ function special_call(ctx, params, rule) {
         }
         continue;
       }
-      if (days.all.length > 1) ctx.note(match.exec.from, `${flightsOf(match.exec)}: קריאה מיוחדת: ${explain}`, rule);
+      if (days.all.length > 1) ctx.note(match.exec.from, `${flightsOf(match.exec)} קריאה מיוחדת: ${explain}`, rule);
       ctx.expectPairing(match.exec, 'sc', days.counted.length * H(params.hours), rule, explain);
       continue;
     }
@@ -670,7 +670,7 @@ function countSpecialCallDays(stay, params, pairing, fdp) {
     counted,
     all,
     reason: `${counted.length === 1 ? 'נספרת רק יממה אחת' : `נספרות רק ${counted.length} יממות`} ${list(counted)}. ` +
-      `סה"כ זמן שהייה: ${minToHhmm(total)} שעות, מתוכן ${minToHhmm(inLast)} ביממה ${which}. ` +
+      `סה"כ זמן שהייה ${minToHhmm(total)} שעות, מתוכן ${minToHhmm(inLast)} ביממה ${which}. ` +
       `נדרשת ${need}, ולכן אין קריאה מיוחדת על היממה ${which}.`,
   };
 }
