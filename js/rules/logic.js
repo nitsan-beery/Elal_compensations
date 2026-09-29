@@ -37,6 +37,13 @@ function credit_from_scheduled(ctx, params, rule) {
       ctx.review(`${describePairing(pairing)}: חסרות שעות מתוכננות (SkdDur) ברומה, ולא ניתן לחשב קרדיט.`, rule);
       continue;
     }
+    const airReturnMatch = ctx.matches.find((m) => m.exec === pairing);
+    if (airReturnMatch?.how === 'air_return') {
+      const top = minSlipTopUp(ctx, pairing);
+      ctx.note(pairing.from, `${describePairing(airReturnMatch.plan)} לא בוצע: הטיסה חזרה ל-${pairing.legs[0].org} אחרי ההמראה. ` +
+        `הקרדיט לפי זמן הטיסה בפועל (${minToHhmm(sumLegs(pairing))})` +
+        (top ? `, ומעבר לו קרדיט נוסף עד המינימום לסליפ קצר (${minToHhmm(top)})` : '') + '.', rule);
+    }
     const days = new Map(); // date → {min, why[]}
     const add = (date, min, why) => {
       if (date > monthEnd) return;
