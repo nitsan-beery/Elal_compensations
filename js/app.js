@@ -563,7 +563,7 @@ function renderChanges(res) {
     <summary><h2 style="display:inline">שינויים בין תכנון לביצוע <span class="count">${changes.length}</span></h2></summary>
     ${changes.length ? `<ul class="list">${changes.map((c) => `<li>
       <strong class="num">${ddmm(c.date)}</strong> ${esc(c.label)}
-      <div class="small">תכנון: ${esc(datesFirst(c.plan ?? '—'))} · ביצוע: ${esc(datesFirst(c.exec ?? (c.replacedBy?.join(', ') || '—')))}</div>
+      <div class="small"><span class="side-plan">תכנון: ${esc(datesFirst(c.plan ?? '—'))}</span> · <span class="side-exec">ביצוע: ${esc(datesFirst(c.exec ?? (c.replacedBy?.join(', ') || '—')))}</span></div>
     </li>`).join('')}</ul>` : '<p class="muted">כל הסבבים בוצעו כמתוכנן.</p>'}
   </details>`;
 }

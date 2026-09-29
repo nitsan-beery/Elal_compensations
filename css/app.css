@@ -16,6 +16,8 @@
   --warn-bg: #fff4d6;
   --pending: #4a5a8c;
   --pending-bg: #e9edf8;
+  --plan: #1d5fb0;
+  --exec: #7b3fa0;
   --radius: 10px;
   color-scheme: light dark;
 }
@@ -37,6 +39,8 @@
     --warn-bg: #3a2f14;
     --pending: #a9b8ea;
     --pending-bg: #252c44;
+    --plan: #7fb2f0;
+    --exec: #c99be8;
   }
 }
 
@@ -56,6 +60,9 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .num { font-variant-numeric: tabular-nums; direction: ltr; unicode-bidi: isolate; }
 .muted { color: var(--muted); }
 .small { font-size: .875rem; }
+/* בשינויים בין תכנון לביצוע כל צד בצבע משלו (בעל המוצר, 29/09/2026). */
+.side-plan { color: var(--plan); }
+.side-exec { color: var(--exec); }
 
 /* ---------- מבנה ---------- */
 .topbar {
