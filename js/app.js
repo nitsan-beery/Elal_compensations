@@ -56,7 +56,7 @@ const state = {
   result: null,
   filter: 'comp',
   notices: [],
-  files: {}, // kind → {id: "2026-07:plan", url} של קובץ ה-PDF השמור, לכפתור "פתח קובץ"
+  files: {}, // kind → {id: "2026-07:plan", url} של קובץ ה-PDF השמור, ללחיצה על הקובץ באזור ההעלאה
 };
 
 // ---------- אתחול ----------
@@ -121,13 +121,16 @@ function showView(view) {
 function setupUploads() {
   for (const zone of document.querySelectorAll('.drop')) {
     const input = $('input', zone);
-    // הכפתור בתוך אזור ההעלאה: פותח את הקובץ השמור, ולא את בחירת הקובץ.
-    $('.drop-open', zone).addEventListener('click', (e) => {
-      e.preventDefault();
-      e.stopPropagation();
+    // כשיש קובץ, לחיצה עליו פותחת אותו, וקובץ חדש נבחר רק ב"בחר חודש אחר" (בעל המוצר, 29/09/2026).
+    // הלחיצה של `input.click()` עוברת גם היא דרך האזור, ואסור לבטל אותה.
+    zone.addEventListener('click', (e) => {
+      if (zone.classList.contains('loaded') && e.target !== input) e.preventDefault();
+    });
+    $('.drop-file', zone).addEventListener('click', () => {
       const url = state.files[zone.dataset.kind]?.url;
       if (url) window.open(url, '_blank');
     });
+    $('.drop-pick', zone).addEventListener('click', () => input.click());
     input.addEventListener('change', () => {
       if (input.files[0]) handleFile(input.files[0], zone.dataset.kind);
       input.value = '';
@@ -201,16 +204,21 @@ function renderUploadState() {
     const r = state.record;
     const loaded = !!r?.[kind];
     zone.classList.toggle('loaded', loaded);
-    $('.drop-state', zone).textContent = loaded
-      ? `${r[`${kind}File`] ?? 'נטען מהחודשים השמורים'} · ${monthName(r.period)}`
-      : 'לא נבחר קובץ. לחץ או גרור לכאן';
+    $('.drop-state', zone).textContent = 'לא נבחר קובץ. לחץ או גרור לכאן';
+    $('.drop-month', zone).textContent = loaded ? `${FILE_OF[kind]} של ${monthName(r.period)}` : '';
+    $('.drop-name', zone).textContent = loaded ? r[`${kind}File`] ?? 'נטען מהחודשים השמורים' : '';
     refreshFileLink(zone, kind);
   }
 }
 
-/** קובץ ה-PDF השמור של החודש הפתוח, לכפתור "פתח קובץ". חודש שנשמר לפני שהקבצים נשמרו – בלי כפתור. */
+const FILE_OF = { plan: 'התכנון', exec: 'הרומה' };
+
+/**
+ * קובץ ה-PDF השמור של החודש הפתוח, ללחיצה על הקובץ. חודש שנשמר לפני שהקבצים נשמרו – הקובץ מוצג
+ * בלי אפשרות לפתוח אותו.
+ */
 async function refreshFileLink(zone, kind) {
-  const button = $('.drop-open', zone);
+  const button = $('.drop-file', zone);
   const r = state.record;
   const id = r?.[kind] ? `${r.key}:${kind}` : null;
   if (state.files[kind]?.id !== id) {
@@ -224,7 +232,9 @@ async function refreshFileLink(zone, kind) {
       if (file) entry.url = URL.createObjectURL(new Blob([file.bytes], { type: 'application/pdf' }));
     }
   }
-  button.hidden = !state.files[kind]?.url;
+  const url = state.files[kind]?.url;
+  button.disabled = !url;
+  button.title = url ? 'פתיחת הקובץ' : 'הקובץ לא נשמר במכשיר. בחר אותו שוב כדי לשמור אותו.';
 }
 
 function dropFileLink(kind) {
@@ -729,7 +739,7 @@ async function renderHistory() {
       const c = await store.importBackup(JSON.parse(await file.text()));
       alert(`שוחזרו ${c.added} חודשים חדשים, ${c.replaced} עודכנו, ${c.skipped} דולגו (הגרסה במכשיר חדשה יותר).` +
         (c.files ? ` שוחזרו ${c.files === 1 ? 'קובץ PDF אחד' : `${c.files} קובצי PDF`}.` : ''));
-      // ייתכן ששוחזר קובץ לחודש הפתוח: לטעון אותו מחדש לכפתור "פתח קובץ".
+      // ייתכן ששוחזר קובץ לחודש הפתוח: לטעון אותו מחדש, כדי שאפשר יהיה לפתוח אותו.
       for (const kind of Object.keys(PARSERS)) dropFileLink(kind);
       renderUploadState();
     } catch (err) {
