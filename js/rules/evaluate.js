@@ -9,7 +9,7 @@
 import { LOGIC, LOGIC_ORDER } from './logic.js';
 import { rulesInEffect, partitionRules, rulesByLogic, classifyCode } from './catalog.js';
 import { buildTimeline, buildPairings, markCarryIn, matchPairings, describePairing, describeRoute, pairingParts, fdpParts } from '../model.js';
-import { hoursToMin } from '../time.js';
+import { hoursToMin, minToHhmm } from '../time.js';
 import { OPTIONAL_COLUMNS } from '../pdf/exec.js';
 
 /** עמודות הדוח שכל סוג ציפייה נבדק מולן. */
@@ -125,6 +125,7 @@ export function evaluate({ rulesData, plan = null, exec = null, answers = {} }) 
 
   attachLinkCandidates(out.questions, matches, ctx);
   showSwaps(out, answers);
+  noteChanges(out, supported);
   // כמו שאר הטבלאות: לפי תאריך. הערה בלי תאריך (על החודש כולו) בסוף.
   out.notes.sort((a, b) => (a.date ?? '￿').localeCompare(b.date ?? '￿'));
   if (exec) {
@@ -535,6 +536,45 @@ function showSwaps(out, answers) {
       : a.value === 'replaced' ? `החלפה ביוזמת החברה – ${linked ?? 'טיסה בחודש אחר'}`
       : a.value === 'other' ? `סיבה אחרת${a.text ? `: ${a.text}` : ''}`
       : CANCELLED_OUTCOME[a.value] ?? a.value;
+  }
+}
+
+/** לוגיקות שהערה שלהן מסבירה שינוי בין התכנון לביצוע. */
+const CHANGE_LOGIC = new Set(['credit_from_scheduled', 'cancelled_no_compensation', 'voluntary_swap', 'higher_of_planned_performed',
+  'lost_hours_credit', 'special_call', 'training_cancelled_flight', 'standby_end_for_bid', 'standby_activation', 'vacation_recall', 'dh_activated']);
+/** לוגיקות שהזיכוי שלהן הוא חלק ממה שמגיע על השינוי עצמו (ולא, למשל, נחיתה מאוחרת). */
+const CHANGE_DUE_LOGIC = new Set([...CHANGE_LOGIC, 'absence_day_credit', 'min_slip_credit']);
+
+/**
+ * הערה על כל שינוי בין התכנון לביצוע (בעל המוצר, 29/09/2026). שינוי שחוק כבר רשם עליו הערה
+ * מוסבר שם; לשאר נרשמת הערה כללית: מה השתנה, ומה מגיע עליו לפי החוקים, או שממתינים לתשובה.
+ */
+function noteChanges(out, supported) {
+  const logicOf = new Map(supported.map((r) => [r.id, r.logic.id]));
+  const rangeOf = (id) => String(id ?? '').match(/^(\d{4}-\d{2}-\d{2})\.\.(\d{4}-\d{2}-\d{2}):/)?.slice(1) ?? null;
+  for (const c of out.changes) {
+    if (c.how === 'exact' || c.how === 'noplan') continue;
+    const ids = [c.planId, c.execId].filter(Boolean);
+    const ranges = ids.map(rangeOf).filter(Boolean);
+    const within = (d) => !!d && ranges.some(([from, to]) => from <= d && d <= to);
+    if (out.notes.some((n) => CHANGE_LOGIC.has(logicOf.get(n.ruleId)) && within(n.date))) continue;
+
+    const execSide = c.exec ?? (c.replacedBy?.join(', ') || null);
+    const what = c.plan && execSide ? `${c.plan} → ${execSide}` : c.plan ?? execSide;
+    let due;
+    if (out.questions.some((q) => ids.some((id) => q.id.endsWith(`:${id}`)))) {
+      due = 'ממתין לתשובה בשאלה על הסבב.';
+    } else {
+      const byRule = new Map();
+      for (const e of out.expectations) {
+        if (!CHANGE_DUE_LOGIC.has(logicOf.get(e.ruleId))) continue;
+        if (e.pairingId ? !ids.includes(e.pairingId) : !within(e.date)) continue;
+        const title = e.shortTitle ?? e.ruleTitle;
+        byRule.set(title, (byRule.get(title) ?? 0) + e.min);
+      }
+      due = byRule.size ? `מגיע: ${[...byRule].map(([t, min]) => `${t} ${minToHhmm(min)}`).join(', ')}.` : 'אין קרדיט ואין פיצוי.';
+    }
+    out.notes.push({ date: c.date, message: `${c.label}: ${what}. ${due}`, ruleId: null, ruleTitle: null });
   }
 }
 

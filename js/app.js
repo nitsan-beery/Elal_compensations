@@ -275,8 +275,8 @@ function renderResults() {
   parts.push(renderComparison(res));
   parts.push(renderExpectations(res));
   parts.push(renderChanges(res));
-  parts.push(renderAnswered());
   parts.push(renderNotes(res));
+  parts.push(renderAnswered());
   root.innerHTML = parts.join('');
   bindResults(root);
 }
