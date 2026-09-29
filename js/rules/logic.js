@@ -40,9 +40,8 @@ function credit_from_scheduled(ctx, params, rule) {
     const airReturnMatch = ctx.matches.find((m) => m.exec === pairing);
     if (airReturnMatch?.how === 'air_return') {
       const top = minSlipTopUp(ctx, pairing);
-      ctx.note(pairing.from, `${describePairing(airReturnMatch.plan)} לא בוצע: הטיסה חזרה ל-${pairing.legs[0].org} אחרי ההמראה. ` +
-        `הקרדיט לפי זמן הטיסה בפועל (${minToHhmm(sumLegs(pairing))})` +
-        (top ? `, ומעבר לו קרדיט נוסף עד המינימום לסליפ קצר (${minToHhmm(top)})` : '') + '.', rule);
+      ctx.note(pairing.from, `חזרה לבסיס אחרי ההמראה: מגיע קרדיט לפי זמן הטיסה בפועל, ${minToHhmm(sumLegs(pairing))} שעות` +
+        (top ? `, ועוד השלמה לסליפ קצר ${minToHhmm(top)} שעות` : '') + '.', rule);
     }
     const days = new Map(); // date → {min, why[]}
     const add = (date, min, why) => {
@@ -1214,12 +1213,11 @@ function training_cancelled_flight(ctx, params, rule) {
     if (training.length && !marked.has(pairing)) {
       marked.add(pairing);
       ctx.markPairing(pairing, 'training_cancelled');
-      ctx.note(day.date, `${training.join(', ')} תוכנן ל-${dayOf(day.date)}, ובמקומו הוצבת ל-${describePairing(pairing)}. ` +
-        'זו קריאה מיוחדת לפי ס\' 17.ג.', rule);
+      ctx.note(day.date, `${training.join(', ')} תוכנן ל-${dayOf(day.date)}, ובמקומו הוצבת לטיסה: מגיעה קריאה מיוחדת (ס' 17.ג).`, rule);
     }
 
     const own = ctx.matches.find((m) => m.exec === pairing);
-    const placed = own && own.how !== 'unplanned' ? '' : `, ובמקומו הוצבת ל-${describePairing(pairing)}`;
+    const placed = own && own.how !== 'unplanned' ? '' : ', ובמקומו הוצבת לטיסה';
     for (const code of planCodes.filter((c) => codeIn(c, [], params.moved_ok_prefixes))) {
       const prefix = params.moved_ok_prefixes.find((p) => code.startsWith(p));
       const movedTo = ctx.timeline.filter((d) => d.date !== day.date && ctx.execCodes(d).some((c) => c.startsWith(prefix)) &&
@@ -1302,7 +1300,7 @@ function standby_end_for_bid(ctx, params, rule) {
       }
       if (answer.value === 'standby_bid') {
         ctx.markPairing(pairing, 'standby_bid');
-        ctx.note(pairing.from, `${describePairing(pairing)}: סיום כוננות (${range}) בגלל זכייה במכרז. קרדיט הטיסה וקריאה מיוחדת על ימי הטיסה.`, rule);
+        ctx.note(pairing.from, `סיום כוננות (${range}) בגלל זכייה במכרז: מגיע קרדיט הטיסה וקריאה מיוחדת על ימי הטיסה.`, rule);
       } else if (answer.value === 'standby_activated') {
         // הקרדיט על ימי ההפעלה נבדק בחוק ההפעלה מכוננות.
         ctx.markPairing(pairing, 'standby_activated');
@@ -1361,7 +1359,7 @@ function standby_activation(ctx, params, rule) {
       ctx.markPairing(pairing, 'standby_activated');
       const flown = run.filter((d) => pairing.from <= d && d <= pairing.to);
       const beyond = pairing.to > run.at(-1);
-      ctx.note(pairing.from, `${describePairing(pairing)}: הפעלה מהכוננות (${range}). קרדיט הטיסה, בלי קריאה מיוחדת.`, rule);
+      ctx.note(pairing.from, `הפעלה מהכוננות (${range}): מגיע קרדיט הטיסה, בלי קריאה מיוחדת.`, rule);
       if (beyond) {
         ctx.review(`${describePairing(pairing)}: הופעלת מהכוננות (${range}), והחזרה אחרי סוף הכוננות. החברה רשאית להפעיל ` +
           'כונן רק כשהחזרה מתוכננת להסתיים בתוך הכוננות (2018 ס\' 88). דורש בדיקה ידנית.', rule);
@@ -1378,7 +1376,7 @@ function standby_activation(ctx, params, rule) {
         ctx.review(`${describePairing(pairing)}: על ${what} מגיע הגבוה מבין קרדיט הטיסה (${credit == null ? 'לא ידוע' : minToHhmm(credit)}) ` +
           `לבין ${flown.length} × ${minToHhmm(value.min)} (${value.rule.title}; 2018 ס' 98). הכוננות גבוהה יותר, ועוד לא ראינו איך זה נרשם ברומה. דורש בדיקה ידנית.`, rule);
       } else {
-        ctx.note(pairing.from, `${describePairing(pairing)}: קרדיט הטיסה (${minToHhmm(credit)}) גבוה מערך ${what} (${flown.length} × ${minToHhmm(value.min)}), ולכן אין תוספת (2018 ס' 98).`, rule);
+        ctx.note(pairing.from, `הפעלה מהכוננות: קרדיט הטיסה, ${minToHhmm(credit)} שעות, גבוה מערך ${what} (${flown.length} × ${minToHhmm(value.min)}), ולכן אין תוספת.`, rule);
       }
     }
   }
