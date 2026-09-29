@@ -569,7 +569,8 @@ function noteChanges(out, supported) {
       for (const e of out.expectations) {
         if (!CHANGE_DUE_LOGIC.has(logicOf.get(e.ruleId))) continue;
         if (e.pairingId ? !ids.includes(e.pairingId) : !within(e.date)) continue;
-        const title = e.shortTitle ?? e.ruleTitle;
+        // "קרדיט טיסה לפי התכנון" נשמע מוזר על טיסה שבוצעה (בעל המוצר, 29/09/2026).
+        const title = logicOf.get(e.ruleId) === 'credit_from_scheduled' ? 'קרדיט הטיסה' : e.shortTitle ?? e.ruleTitle;
         byRule.set(title, (byRule.get(title) ?? 0) + e.min);
       }
       due = byRule.size ? `מגיע: ${[...byRule].map(([t, min]) => `${t} ${minToHhmm(min)}`).join(', ')}.` : 'אין קרדיט ואין פיצוי.';
