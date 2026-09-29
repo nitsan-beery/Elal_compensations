@@ -42,6 +42,7 @@ const ANSWER_LABEL = {
   wet_lease: 'הורדה מהטיסה המקורית', trainee: 'הורדה מהטיסה המקורית', swap_777: 'הטיסה עברה ל-777 (לא כשיר MFF)',
   cancelled: 'הטיסה המקורית בוטלה ללא קרדיט', other: 'סיבה אחרת',
   yes: 'כן, הייתי מוצב', no: 'לא הייתי מוצב',
+  company: 'לבקשת החברה', own: 'ויתור מרצון',
   standby_bid: 'סיום כוננות בגלל זכייה במכרז', standby_activated: 'הפעלת הכוננות', regular_standby: 'מצב הכן רגיל',
 };
 
@@ -369,7 +370,7 @@ function renderQuestion(q, i) {
   const options = q.options.map((o) => `
     <label class="option">
       <input type="radio" name="${name}" value="${esc(o.value)}" ${o.needsLink ? 'data-needs-link' : ''} ${o.needsText ? 'data-needs-text' : ''}>
-      <span>${esc(datesFirst(o.label))}${o.hint ? ` <span class="hint-inline">– ${esc(datesFirst(o.hint))}</span>` : ''}</span>
+      <span>${esc(datesFirst(o.label))}${o.count ? ` <select name="count" data-count-for="${esc(o.value)}">${o.count.map((c) => `<option value="${esc(c.value)}">${esc(c.label)}</option>`).join('')}</select>` : ''}${o.hint ? ` <span class="hint-inline">– ${esc(datesFirst(o.hint))}</span>` : ''}</span>
     </label>
     ${o.needsLink ? `<div class="extra" data-for="${esc(o.value)}" hidden>
       <label class="small">עם איזו טיסה הוחלף?
@@ -515,7 +516,7 @@ function renderAnswered() {
   return `<details class="card">
     <summary><h2 style="display:inline">תשובות שנשמרו <span class="count">${answers.length}</span></h2></summary>
     <ul class="list">${answers.map(([id, a]) => `<li class="row">
-      <span>${esc(describeQuestionId(id))}: <strong>${esc(answerLabel(a.value))}</strong>
+      <span>${esc(describeQuestionId(id))}: <strong>${esc(a.value === 'partial' && a.count ? `ויתרתי מרצוני על ${a.count === 1 ? 'יום אחד' : `${a.count} ימים`}` : answerLabel(a.value))}</strong>
         ${a.link !== undefined ? `<span class="small muted">(${a.link === 'none' ? 'מסירת הטיסה ללא חלופה' : a.link ? `עם ${esc(describePairingId(a.link))}` : 'בחודש אחר'})</span>` : ''}
         ${a.text ? `<span class="small muted">– ${esc(a.text)}</span>` : ''}</span>
       <span class="spacer"></span>
@@ -533,12 +534,12 @@ function renderNotes(res) {
 }
 
 const QUESTION_KIND = { cancelled: 'סבב שלא בוצע', unplanned: 'פעילות לא מתוכננת', replaced: 'סבב שהוחלף', assigned: 'מוצב לפעילות', standby_bid: 'טיסה בסוף כוננות', standby_code: 'קוד כוננות',
-  school_start: 'פתיחת שנת הלימודים' };
+  school_start: 'פתיחת שנת הלימודים', free_days: 'ימים ללא פעילות', free_days_first: 'ימים ללא פעילות, X ב-1 לחודש' };
 
 function describeQuestionId(id) {
   const [kind, ...rest] = id.split(':');
   const ref = rest.join(':');
-  const what = /^\d{4}-\d{2}-\d{2}$/.test(ref) ? ddmm(ref) : describePairingId(ref);
+  const what = /^\d{4}-\d{2}-\d{2}$/.test(ref) ? ddmm(ref) : /^\d{4}-\d{2}$/.test(ref) ? `${ref.slice(5)}/${ref.slice(0, 4)}` : describePairingId(ref);
   return `${QUESTION_KIND[kind] ?? kind} ${what}`;
 }
 
@@ -595,7 +596,10 @@ function bindResults(root) {
   }
   for (const form of root.querySelectorAll('form[data-qid]')) {
     const submit = $('button[type="submit"]', form);
-    form.addEventListener('change', () => {
+    form.addEventListener('change', (e) => {
+      // בחירת מספר באפשרות שיש בה בחירה כזו בוחרת גם את האפשרות עצמה.
+      const countFor = e.target.dataset?.countFor;
+      if (countFor) { const radio = $(`input[type="radio"][value="${CSS.escape(countFor)}"]`, form); if (radio) radio.checked = true; }
       const chosen = $('input[type="radio"]:checked', form);
       for (const extra of form.querySelectorAll('.extra')) extra.hidden = extra.dataset.for !== chosen?.value;
       submit.disabled = !chosen && !$('input[type="date"]', form);
@@ -611,6 +615,8 @@ function bindResults(root) {
         const sel = $(`.extra[data-for="${CSS.escape(chosen.value)}"] select`, form);
         answer.link = sel?.value || null;
       }
+      const count = chosen && $(`select[data-count-for="${CSS.escape(chosen.value)}"]`, form);
+      if (count) answer.count = Number(count.value);
       if (chosen?.hasAttribute('data-needs-text')) {
         const text = $(`.extra[data-for="${CSS.escape(chosen.value)}"] textarea`, form)?.value.trim();
         if (!text) { alert('פרט בבקשה מה קרה.'); return; }

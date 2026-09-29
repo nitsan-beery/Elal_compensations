@@ -745,6 +745,10 @@ function free_days_waived(ctx, params, rule) {
   const paid = ctx.hasExec &&
     ctx.reportedOnDate(ctx.monthFirst, params.report_column) - ctx.expectedOnDate(ctx.monthFirst, key) >= paidDays * H(params.hours);
   const a = ctx.answer(id) ?? (paid ? { value: 'company' } : null);
+  // "היום השני" נספר מבין הימים שוויתרת עליהם לבקשת החברה בלבד (2024 ס' 33), ולכן ויתור מרצון
+  // על חלק מהימים מוריד את הפיצוי לפי מה שנשאר לבקשת החברה (בעל המוצר, 29/09/2026).
+  const paidFor = (companyDays) => Math.max(0, companyDays - (params.paid_from_day - 1));
+  const days = (n) => (n === 1 ? 'יום אחד' : `${n} ימים`);
   if (!a) {
     ctx.ask({
       id,
@@ -752,11 +756,24 @@ function free_days_waived(ctx, params, rule) {
       title: `ימים ללא פעילות: חסרים ${missing}. האם הוויתור היה לבקשת החברה?`,
       body: `${what}. הימים הפנויים: ${free.map(ddmm).join(', ')}.`,
       options: [
-        { value: 'company', label: 'לבקשת החברה ובהסכמתי', hint: minToHhmm(paidDays * H(params.hours)) },
-        { value: 'own', label: 'ויתרתי בבקשות שלי', hint: 'אין פיצוי' },
+        { value: 'company', label: 'לבקשת החברה', hint: `מגיע פיצוי ${minToHhmm(paidDays * H(params.hours))}` },
+        { value: 'own', label: 'ויתור מרצון', hint: 'אין פיצוי' },
+        // ויתור מרצון על כל החסרים הוא האפשרות הקודמת, ולכן הבחירה עד אחד פחות.
+        { value: 'partial', label: 'ויתרתי מרצוני על', hint: 'מגיע פיצוי על הימים שלא ויתרתי מרצוני',
+          count: Array.from({ length: missing - 1 }, (_, i) => ({ value: i + 1, label: days(i + 1) })) },
       ],
       ruleId: rule.id,
     });
+    return;
+  }
+  const own = a.value === 'own' ? missing : a.value === 'partial' ? Math.min(missing, Math.max(0, Number(a.count) || 0)) : 0;
+  const n = paidFor(missing - own);
+  if (a.value === 'partial' && n) {
+    ctx.expect(ctx.monthFirst, key, n * H(params.hours), rule,
+      `${what}: ${missing} ימים חסרים, על ${days(own)} מהם ויתרת מרצונך, פיצוי על ${n} (מהיום השני שלבקשת החברה)`);
+  } else if (a.value === 'partial') {
+    ctx.note(null, `${what}. ויתרת מרצונך על ${days(own)} מתוך ${missing}, ולבקשת החברה ${missing - own === 1 ? 'נשאר יום אחד' : `נשארו ${missing - own}`}. ` +
+      `הפיצוי רק מהיום השני שלבקשת החברה, ולכן לא מגיע.`, rule);
   } else if (a.value === 'company') {
     ctx.expect(ctx.monthFirst, key, paidDays * H(params.hours), rule,
       `${what}: ${missing} ימים חסרים, פיצוי על ${paidDays} (מהיום השני)`);
