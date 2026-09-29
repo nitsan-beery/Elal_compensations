@@ -546,6 +546,14 @@ const CHANGE_LOGIC = new Set(['credit_from_scheduled', 'cancelled_no_compensatio
   'lost_hours_credit', 'special_call', 'training_cancelled_flight', 'standby_end_for_bid', 'standby_activation', 'vacation_recall', 'dh_activated']);
 /** לוגיקות שהזיכוי שלהן הוא חלק ממה שמגיע על השינוי עצמו (ולא, למשל, נחיתה מאוחרת). */
 const CHANGE_DUE_LOGIC = new Set([...CHANGE_LOGIC, 'absence_day_credit', 'min_slip_credit']);
+/** ניסוח קצר של מה שמגיע בהערה על שינוי, במקום שם החוק. */
+const DUE_WORDING = {
+  credit_from_scheduled: 'קרדיט הטיסה',
+  lost_hours_credit: 'קרדיט של הטיסה',
+  special_call: 'קריאה מיוחדת',
+  min_slip_credit: 'השלמה לסליפ קצר',
+  higher_of_planned_performed: 'קרדיט נוסף (הגבוה מבין השתיים)',
+};
 
 /**
  * הערה על כל שינוי בין התכנון לביצוע (בעל המוצר, 29/09/2026). שינוי שחוק כבר רשם עליו הערה
@@ -561,23 +569,25 @@ function noteChanges(out, supported) {
     const within = (d) => !!d && ranges.some(([from, to]) => from <= d && d <= to);
     if (out.notes.some((n) => CHANGE_LOGIC.has(logicOf.get(n.ruleId)) && within(n.date))) continue;
 
-    const execSide = c.exec ?? (c.replacedBy?.join(', ') || null);
-    const what = c.plan && execSide ? `${c.plan} → ${execSide}` : c.plan ?? execSide;
+    // קצר ובלי מספרי הטיסות, שכבר מופיעים בשינויים: רק מה מגיע או לא מגיע (בעל המוצר, 29/09/2026).
+    // התוצאה לפי התשובה (למשל "הורדה מהטיסה ביוזמת החברה") כשהיא אינה תיאור של טיסה.
+    const outcome = c.how === 'cancelled' && !c.execId && c.exec ? `${c.exec}, ` : '';
     let due;
     if (out.questions.some((q) => ids.some((id) => q.id.endsWith(`:${id}`)))) {
-      due = 'ממתין לתשובה בשאלה על הסבב.';
+      due = 'ממתין לתשובה בשאלה על הסבב';
     } else {
-      const byRule = new Map();
+      const byWhat = new Map();
       for (const e of out.expectations) {
-        if (!CHANGE_DUE_LOGIC.has(logicOf.get(e.ruleId))) continue;
+        const logic = logicOf.get(e.ruleId);
+        if (!CHANGE_DUE_LOGIC.has(logic)) continue;
         if (e.pairingId ? !ids.includes(e.pairingId) : !within(e.date)) continue;
-        // "קרדיט טיסה לפי התכנון" נשמע מוזר על טיסה שבוצעה (בעל המוצר, 29/09/2026).
-        const title = logicOf.get(e.ruleId) === 'credit_from_scheduled' ? 'קרדיט הטיסה' : e.shortTitle ?? e.ruleTitle;
-        byRule.set(title, (byRule.get(title) ?? 0) + e.min);
+        const what = DUE_WORDING[logic] ?? (logic === 'absence_day_credit' ? `קרדיט ${e.ruleTitle}` : e.shortTitle ?? e.ruleTitle);
+        byWhat.set(what, (byWhat.get(what) ?? 0) + e.min);
       }
-      due = byRule.size ? `מגיע: ${[...byRule].map(([t, min]) => `${t} ${minToHhmm(min)}`).join(', ')}.` : 'אין קרדיט ואין פיצוי.';
+      const items = [...byWhat].map(([what, min]) => `${what} ${minToHhmm(min)} שעות`);
+      due = items.length ? `מגיע ${items.length > 1 ? `${items.slice(0, -1).join(', ')} ו${items.at(-1)}` : items[0]}` : 'לא מגיע קרדיט ולא פיצוי';
     }
-    out.notes.push({ date: c.date, message: `${c.label}: ${what}. ${due}`, ruleId: null, ruleTitle: null });
+    out.notes.push({ date: c.date, message: `${c.label}: ${outcome}${due}.`, ruleId: null, ruleTitle: null });
   }
 }
 
@@ -593,8 +603,8 @@ const DATES_OUTCOME = {
   replaced: 'החלפה ביוזמת החברה',
   voluntary_swap: 'החלפה מרצוני',
   cancelled: 'המתוכנן בוטל, ומה שבוצע לא היה מתוכנן',
-  wet_lease: 'הורדה מהטיסה המקורית',
-  trainee: 'הורדה מהטיסה המקורית',
+  wet_lease: 'הורדה מהטיסה ביוזמת החברה',
+  trainee: 'הורדה מהטיסה ביוזמת החברה',
   swap_777: 'הועבר ל-777 (לא כשיר MFF)',
   other: 'סיבה אחרת',
 };
@@ -602,8 +612,8 @@ const DATES_OUTCOME = {
 /** מה קרה לסבב שלא בוצע, לפי התשובה לשאלה עליו. */
 const CANCELLED_OUTCOME = {
   cancelled: 'בוטל ללא פיצוי',
-  wet_lease: 'הורדה מהטיסה המקורית', // תשובה שנשמרה לפני שהאפשרויות אוחדו
-  trainee: 'הורדה מהטיסה המקורית',
+  wet_lease: 'הורדה מהטיסה ביוזמת החברה', // תשובה שנשמרה לפני שהאפשרויות אוחדו
+  trainee: 'הורדה מהטיסה ביוזמת החברה',
   swap_777: 'הועבר ל-777 (לא כשיר MFF)',
   replaced: 'הוחלף בטיסה אחרת', // בלי קישור: תשובה שנשמרה בגרסה ישנה
 };

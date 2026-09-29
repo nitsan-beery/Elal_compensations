@@ -744,16 +744,19 @@ function higher_of_planned_performed(ctx, params, rule) {
     // הערה בכל החלפה ביוזמת החברה, גם כשהטיסה שבוצעה ארוכה יותר ואין הפרש (בעל המוצר, 29/09/2026).
     const planned = ctx.plannedCredit(match.plan);
     const performed = planned - diff;
+    // בלי מספרי הטיסות: הם כבר בשינויים בין תכנון לביצוע (בעל המוצר, 29/09/2026).
     const longer = diff > 0
-      ? `${flightsOf(match.plan)} המתוכננת (${minToHhmm(planned)} מול ${minToHhmm(performed)} של ${flightsOf(exec)} שבוצעה)`
-      : `${flightsOf(exec)} שבוצעה (${minToHhmm(performed)} מול ${minToHhmm(planned)} של ${flightsOf(match.plan)} המתוכננת)`;
+      ? `המתוכננת (${minToHhmm(planned)} שעות מול ${minToHhmm(performed)} של שבוצעה)`
+      : `שבוצעה (${minToHhmm(performed)} שעות מול ${minToHhmm(planned)} של המתוכננת)`;
     // כאן שם העמודה כן מופיע, לבקשת בעל המוצר (29/09/2026).
-    const extraCredit = `מגיע ${minToHhmm(diff)} כקרדיט נוסף (${column === 'rig' ? 'RIG' : reportColumn})`;
+    const extraCredit = `מגיע ${minToHhmm(diff)} שעות כקרדיט נוסף (${column === 'rig' ? 'RIG' : reportColumn})`;
     const topUp = diff <= 0 ? ''
       : !alreadyMinSlip ? ` ${extraCredit}.`
       : extra > 0 ? ` ${extraCredit}: ${minToHhmm(alreadyMinSlip)} בהשלמה לסליפ קצר ועוד ${minToHhmm(extra)}.`
       : ` ההפרש, ${minToHhmm(diff)}, כבר כלול בהשלמה לסליפ קצר (${minToHhmm(alreadyMinSlip)}).`;
     ctx.note(match.plan.from, `החלפה ביוזמת החברה: מגיע הקרדיט של הטיסה הארוכה מבין השתיים, ${longer}.${topUp}`, rule);
+    // ביום של הטיסה שבוצעה, כשהוא אחר.
+    if (exec.from !== match.plan.from) ctx.note(exec.from, 'החלפה ביוזמת החברה: קרדיט על הטיסה שבוצעה.', rule);
     if (extra <= 0) continue;
 
     // לפעמים ההשלמה נרשמת על סבב סמוך ולא על המחליף עצמו (10/06/2026: LTN 11–12 → OTP 11,
@@ -896,13 +899,18 @@ function voluntary_swap(ctx, params, rule) {
     if (ctx.pairingHandledBy(target, 'swap_conflict_void')) continue;
     ctx.markPairing(target, 'voluntary_swap');
     const date = (match.plan ?? match.exec).from;
+    // ההערה ביום של כל צד: ביום המתוכנן שלא בוצע – אין קרדיט; ביום של הטיסה שבוצעה – הקרדיט שלה
+    // (בעל המוצר, 29/09/2026).
     if (answer.link === 'none') {
-      ctx.note(date, `${describePairing(match.plan)}: הטיסה נמסרה ללא חלופה. אין עליה קרדיט ואין פיצוי.`, rule);
+      ctx.note(date, 'החלפה מרצון: הטיסה נמסרה ללא חלופה, ולא מגיע עליה קרדיט.', rule);
       continue;
     }
-    const flown = match.exec ?? (answer.link ? ctx.pairingById(answer.link) : null);
-    const slip = minSlipTopUp(ctx, flown) ? ', כולל השלמה לסליפ קצר' : '';
-    ctx.note(date, `החלפה מרצון: רק הקרדיט של הטיסה שבוצעה${slip}. אין פיצוי נוסף.`, rule);
+    if (!match.exec) {
+      ctx.note(date, `החלפה מרצון: לא מגיע קרדיט על ${match.plan.dates.length > 1 ? 'הימים האלה' : 'היום הזה'}.`, rule);
+      continue;
+    }
+    const slip = minSlipTopUp(ctx, match.exec) ? ', כולל השלמה לסליפ קצר' : '';
+    ctx.note(date, `החלפה מרצון: קרדיט על הטיסה שבוצעה${slip}.`, rule);
   }
 }
 
@@ -1090,17 +1098,16 @@ function assumeDiversion(ctx, match, rule) {
   if (diff == null || diff > 0) return false;
   ctx.markPairing(match.plan, 'diversion');
   ctx.markPairing(match.exec, 'diversion');
-  ctx.note(match.plan.from, `${describePairing(match.plan)}: בביצוע יש גם נחיתה ב-${extra} (${describePairing(match.exec)}) – ` +
-    'סטיה לשדה משנה. הקרדיט כבר כולל את כל מה שבוצע, ואין פער לתשלום.', rule);
+  ctx.note(match.plan.from, `סטיה לשדה משנה (נחיתה גם ב-${extra}): הקרדיט כבר כולל את כל מה שבוצע, ואין פער לתשלום.`, rule);
   return true;
 }
 
 /** סבב שבוטל ללא קרדיט: ימיו נספרים כימים ללא פעילות, ומה שבוצע בהם לא היה מתוכנן. */
 function noteCancelled(ctx, match, rule, why) {
   ctx.markPairing(match.plan, 'cancelled_no_compensation');
-  ctx.note(match.plan.from, `${describePairing(match.plan)} בוטלה ללא קרדיט${why ? ` (${why})` : ''}. ` +
-    'ימיה נספרים כימים ללא פעילות' +
-    (match.exec ? `, ו${describePairing(match.exec)} היא פעילות שלא תוכננה.` : '.'), rule);
+  ctx.note(match.plan.from, `סבב מתוכנן שלא בוצע: בוטל ללא קרדיט${why ? ` (${why})` : ''}. ` +
+    'ימיו נספרים כימים ללא פעילות' +
+    (match.exec ? ', ומה שבוצע בהם הוא פעילות שלא תוכננה.' : '.'), rule);
 }
 
 /**
