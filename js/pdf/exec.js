@@ -29,7 +29,7 @@ export function looksLikeExec(pages) {
 export async function parseExec(data) {
   const pages = await extractPages(data);
   if (!looksLikeExec(pages)) {
-    throw new Error('הקובץ אינו נראה כמו דוח "Rainmaker – CrewPayDetails". ודא שהעלית את קובץ הביצוע מהרומה.');
+    throw new Error('הקובץ אינו נראה כמו "Rainmaker – CrewPayDetails". ודא שהעלית את קובץ הביצוע מהרומה.');
   }
 
   const warnings = [];
@@ -71,7 +71,7 @@ export async function parseExec(data) {
   // הגרסה המקופלת של הרומה: מסלול בעמודת Details (TLV-MXP) בלי שורות טיסה. בלי מספרים ושעות אין מה להשוות.
   const dayList = Object.values(days);
   if (!dayList.some((d) => d.legs.length) && dayList.some((d) => /\b[A-Z]{3}-[A-Z]{3}\b/.test(d.details ?? ''))) {
-    throw Object.assign(new Error('בדוח הביצוע חסרים פרטי טיסות (מספרים ושעות). הורד מהרומה את הגרסה המפורטת (more: details).'), { exact: true });
+    throw Object.assign(new Error('ברומה חסרים פרטי טיסות (מספרים ושעות). הורד מהרומה את הגרסה המפורטת (more: details).'), { exact: true });
   }
   // האזהרה על עמודות חסרות נבנית ב-evaluate, לפי missingColumns, כדי שגם חודש שנשמר לפני שינוי בכלל יוצג נכון.
   if (header.status && !/closed/i.test(header.status)) {

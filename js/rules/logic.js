@@ -256,9 +256,9 @@ function absence_day_credit(ctx, params, rule) {
           id: `assigned:${day.date}`,
           date: day.date,
           title: `${rule.title} ב-${day.date.slice(8, 10)}/${day.date.slice(5, 7)}: האם היית מוצב לפעילות?`,
-          body: 'אין קובץ תכנון לחודש הזה, והדוח לא מזכה על היום. קרדיט על היום ניתן רק אם היית מוצב בו לפעילות.',
+          body: 'אין קובץ תכנון לחודש הזה, והרומה לא מזכה על היום. קרדיט על היום ניתן רק אם היית מוצב בו לפעילות.',
           options: [
-            { value: 'yes', label: 'כן, הייתי מוצב', hint: `${minToHhmm(credit)} – פער מול הדוח` },
+            { value: 'yes', label: 'כן, הייתי מוצב', hint: `${minToHhmm(credit)} – פער מול הרומה` },
             { value: 'no', label: 'לא הייתי מוצב', hint: 'אין קרדיט' },
           ],
           ruleId: rule.id,
@@ -589,7 +589,7 @@ function special_call(ctx, params, rule) {
         id: `unplanned:${match.exec.id}`,
         date: match.exec.from,
         title: `פעילות ביום שלא תוכננה בו פעילות: ${describePairing(match.exec)}`,
-        body: 'הדוח לא מזכה קריאה מיוחדת, ולכן לא ניתן לדעת אם היא מגיעה. מה קרה?',
+        body: 'הרומה לא מזכה קריאה מיוחדת, ולכן לא ניתן לדעת אם היא מגיעה. מה קרה?',
         options: [
           { value: 'special_call', label: 'קריאה מיוחדת' },
           { value: 'voluntary_swap', label: 'החלפה מרצוני', needsLink: true },
@@ -822,7 +822,7 @@ function lost_hours_credit(ctx, params, rule) {
     if (lost == null) { ctx.review(`${describePairing(match.plan)}: אין שעות מתוכננות בקובץ, לא ניתן לחשב את השעות שהפסיד.`, rule); continue; }
     const key = params.credit_column === 'Rig' ? 'rig' : 'credit';
     const why = assumed
-      ? `הדוח מזכה את השעות שהפסיד, והסיבה אינה בקבצים (${assumed.labels})`
+      ? `הרומה מזכה את השעות שהפסיד, והסיבה אינה בקבצים (${assumed.labels})`
       : params.answer_label;
     const note = `${describePairing(match.plan)}: ${why}. השעות שהפסיד` +
       (match.exec ? `, בנוסף לקרדיט של ${describePairing(match.exec)}.` : '.');
@@ -1038,7 +1038,7 @@ function resolveLinkConflict(ctx, planEntry, execEntry, rule) {
     id,
     date: planMatch.plan.from,
     title: `מה קרה ב${planLabel}?`,
-    body: `יש שתי החלטות סותרות (תשובה, או הנחה מהדוח) על מה שקרה ב${planLabel}. מה נכון?`,
+    body: `יש שתי החלטות סותרות (תשובה, או הנחה מהרומה) על מה שקרה ב${planLabel}. מה נכון?`,
     options: [
       { value: 'plan', label: claimLabel(ctx, planEntry, planLabel, execLabel, planMatch) },
       { value: 'exec', label: claimLabel(ctx, execEntry, planLabel, execLabel, planMatch) },
@@ -1056,8 +1056,8 @@ function claimLabel(ctx, entry, planLabel, execLabel, planMatch) {
   const { value, match } = entry;
   if (value === 'assumed') {
     return match.exec
-      ? `לפי הדוח, ${planLabel} בוטלה ללא קרדיט נוסף (מה שבוצע באותם ימים נחשב קריאה מיוחדת)`
-      : `לפי הדוח, מגיעות על ${planLabel} השעות שהפסיד`;
+      ? `לפי הרומה, ${planLabel} בוטלה ללא קרדיט נוסף (מה שבוצע באותם ימים נחשב קריאה מיוחדת)`
+      : `לפי הרומה, מגיעות על ${planLabel} השעות שהפסיד`;
   }
   if (value === 'special_call') return `${execLabel} היא קריאה מיוחדת עצמאית, ולא קשורה ל${planLabel}`;
   if (value === 'voluntary_swap') return `${planLabel} הוחלפה מרצון עם ${execLabel}`;
@@ -1076,7 +1076,7 @@ function assumeCancelled(ctx, match, rule) {
   if (!match.exec) return !!paidLostHours(ctx, match.plan);
   const sc = ctx.rulesWithLogic('special_call')[0]?.logic?.params?.report_column ?? 'S/C';
   if (!ctx.reportedOn(match.exec, sc)) return false;
-  noteCancelled(ctx, match, rule, `הדוח מזכה קריאה מיוחדת על ${describePairing(match.exec)}`);
+  noteCancelled(ctx, match, rule, `הרומה מזכה קריאה מיוחדת על ${describePairing(match.exec)}`);
   ctx.assumeAnswer(match.plan, 'cancelled');
   return true;
 }
@@ -1299,7 +1299,7 @@ function standby_end_for_bid(ctx, params, rule) {
           title: `טיסה ביומיים האחרונים של כוננות: ${describePairing(pairing)}`,
           body: `בתכנון כוננות ב-${range}, והטיסה יצאה ב-${dayOf(pairing.from)}. ` +
             (run.at(-1) === monthEnd ? 'הכוננות מגיעה לסוף החודש, וייתכן שהיא נמשכת בחודש הבא. ' : '') +
-            'הדוח לא מזכה קריאה מיוחדת. אם החברה אישרה לך לסיים את הכוננות בגלל זכייה במכרז, מגיעה קריאה מיוחדת על ימי הטיסה. אם הכוננות הופעלה, מגיע רק קרדיט הטיסה. מה קרה?',
+            'הרומה לא מזכה קריאה מיוחדת. אם החברה אישרה לך לסיים את הכוננות בגלל זכייה במכרז, מגיעה קריאה מיוחדת על ימי הטיסה. אם הכוננות הופעלה, מגיע רק קרדיט הטיסה. מה קרה?',
           options: [
             { value: 'standby_bid', label: 'סיום כוננות בגלל זכייה במכרז', hint: bidHint(pairing, ctx, sc) },
             { value: 'standby_activated', label: 'הפעלת הכוננות', hint: 'קרדיט הטיסה, בלי קריאה מיוחדת' },

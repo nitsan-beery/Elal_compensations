@@ -689,7 +689,7 @@ async function renderHistory() {
           m.exec ? '<span class="tag">ביצוע</span>' : '',
           s.questions ? `<span class="tag warn">${s.questions === 1 ? 'שאלה פתוחה אחת' : `${s.questions} שאלות פתוחות`}</span>` : '',
           s.gaps ? `<span class="tag bad">${s.gaps === 1 ? 'פער אחד' : `${s.gaps} פערים`}</span>` : '',
-          m.exec && !s.gaps && !s.questions ? '<span class="tag ok">תואם לדוח</span>' : '',
+          m.exec && !s.gaps && !s.questions ? '<span class="tag ok">תואם לרומה</span>' : '',
         ].join(' ');
         return `<li class="month-item">
           <span class="name">${esc(monthName(m.period))}</span> ${tags}

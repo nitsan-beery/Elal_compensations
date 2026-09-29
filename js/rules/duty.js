@@ -163,7 +163,7 @@ function second_unplanned_activity(ctx, params, rule) {
 
   const askRest = (id, date, title) => ctx.ask({
     id, date, title,
-    body: `לסימולטור אין שעות בקבצים, והדוח לא מזכה על הפעילות השנייה. היא מזכה רק אם הייתה מנוחה חוקית (${params.legal_rest_hours} שעות לפחות) בין שתי הפעילויות, כלומר הן לא באותו FDP.`,
+    body: `לסימולטור אין שעות בקבצים, והרומה לא מזכה על הפעילות השנייה. היא מזכה רק אם הייתה מנוחה חוקית (${params.legal_rest_hours} שעות לפחות) בין שתי הפעילויות, כלומר הן לא באותו FDP.`,
     options: [
       { value: 'separate', label: `הייתה מנוחה של ${params.legal_rest_hours} שעות לפחות`, hint: `${minToHhmm(H(params.hours))} על הפעילות השנייה` },
       { value: 'same_fdp', label: 'שתיהן באותו FDP', hint: 'אין פיצוי' },
@@ -203,7 +203,7 @@ function second_unplanned_activity(ctx, params, rule) {
     const a = answered ?? (ctx.paidOn(u, params.report_column, key, H(params.hours), own) ? { value: 'separate' } : null);
     if (!a) askRest(id, day, `${describePairing(u)} לא הייתה בתכנון, ובאותה יממה היה סימולטור. האם הייתה מנוחה ביניהם?`);
     else if (a.value === 'separate') ctx.expectPairing(u, key, H(params.hours), rule, `${describePairing(u)} לא הייתה בתכנון, ובאותה יממה היה סימולטור ` +
-      `(${answered ? 'לפי תשובתך, עם מנוחה חוקית ביניהם' : `הדוח מזכה את הפיצוי`})`);
+      `(${answered ? 'לפי תשובתך, עם מנוחה חוקית ביניהם' : `הרומה מזכה את הפיצוי`})`);
   }
 
   // סימולטור לא מתוכנן ביום טיסה
@@ -216,7 +216,7 @@ function second_unplanned_activity(ctx, params, rule) {
     const a = answered ?? (ctx.paidOnDate(day.date, params.report_column, key, H(params.hours)) ? { value: 'separate' } : null);
     if (!a) askRest(id, day.date, `סימולטור ב-${ddmm(day.date)} לא היה בתכנון, ובאותה יממה בוצעה ${flights.map(describePairing).join(', ')}. האם הייתה מנוחה ביניהם?`);
     else if (a.value === 'separate') ctx.expect(day.date, key, H(params.hours), rule,
-      `סימולטור לא מתוכנן ביממה עם טיסה (${answered ? 'לפי תשובתך, עם מנוחה חוקית ביניהם' : `הדוח מזכה את הפיצוי`})`);
+      `סימולטור לא מתוכנן ביממה עם טיסה (${answered ? 'לפי תשובתך, עם מנוחה חוקית ביניהם' : `הרומה מזכה את הפיצוי`})`);
   }
 }
 
@@ -445,7 +445,7 @@ function night_landings(ctx, params, rule) {
       : ctx.paidOnDate(n.pairing.from, params.report_column, key, hours)));
     if (!unpaid.length) {
       const one = paying.length === 1;
-      ctx.note(null, `${rule.title}: ${planned}, והדוח מזכה ${minToHhmm(hours)} על ` +
+      ctx.note(null, `${rule.title}: ${planned}, והרומה מזכה ${minToHhmm(hours)} על ` +
         `${names(paying)}. לכן ${one ? 'היא בוצעה' : 'הן בוצעו'} בצוות ${crewNames}, ` +
         'ולא נשאלה שאלה על הרכב הצוות.', rule);
     } else {
@@ -642,16 +642,16 @@ function special_date_activity(ctx, params, rule) {
         id,
         date: coded.date,
         title: `${occ.title}: האם היית בפעילות מטעם החברה בין ${hhmm(wFrom)} ל-${hhmm(wTo)}?`,
-        body: `ב-${ddmm(coded.date)} רשום ${ctx.activityCodes(coded).join(', ')}, אין בקבצים שעות לפעילות הזאת, והדוח לא מזכה עליה.`,
+        body: `ב-${ddmm(coded.date)} רשום ${ctx.activityCodes(coded).join(', ')}, אין בקבצים שעות לפעילות הזאת, והרומה לא מזכה עליה.`,
         options: [
-          { value: 'yes', label: 'כן', hint: `${minToHhmm(H(params.hours))} – פער מול הדוח` },
+          { value: 'yes', label: 'כן', hint: `${minToHhmm(H(params.hours))} – פער מול הרומה` },
           { value: 'no', label: 'לא', hint: 'אין פיצוי' },
         ],
         ruleId: rule.id,
       });
     } else if (a.value === 'yes') {
       ctx.expect(coded.date, key, H(params.hours), rule, `${occ.title}: ${ctx.activityCodes(coded).join(', ')} בחלון ${window} ` +
-        `(${answered ? 'לפי תשובתך' : `הדוח מזכה את הפיצוי`})`);
+        `(${answered ? 'לפי תשובתך' : `הרומה מזכה את הפיצוי`})`);
     }
   }
 }
@@ -900,7 +900,7 @@ function consecutive_night_rounds(ctx, params, rule) {
             id,
             date: target ? target.from : payNight,
             title: `${run.length} טיסות סבב לילה עוקבות (${list}): האם התכנון היה לבקשת החברה?`,
-            body: `${what}. על יותר משתי טיסות כאלה ברצף מגיע פיצוי, והדוח לא מזכה אותו. הפיצוי רק כשהרצף תוכנן לבקשת החברה.`,
+            body: `${what}. על יותר משתי טיסות כאלה ברצף מגיע פיצוי, והרומה לא מזכה אותו. הפיצוי רק כשהרצף תוכנן לבקשת החברה.`,
             options: [
               { value: 'company', label: 'לבקשת החברה', hint: minToHhmm(H(params.hours)) },
               { value: 'mine', label: 'לבקשתי (בקשות או מכרז)', hint: 'אין פיצוי' },
@@ -960,17 +960,17 @@ function white_flight(ctx, params, rule) {
           id,
           date: l.date,
           title: `טיסה לבנה: האם ${l.flight} ב-${ddmm(l.date)} בוצעה בצוות מוגבר?`,
-          body: `${what}. הדוח לא מזכה עליה, והיא טיסה לבנה רק אם הצוות היה מוגבר: 3 טייסים ומעלה, ` +
+          body: `${what}. הרומה לא מזכה עליה, והיא טיסה לבנה רק אם הצוות היה מוגבר: 3 טייסים ומעלה, ` +
             'גם 4 כשאחד מהם עוד לא מוגדר קברניט או קצין ראשון.',
           options: [
-            { value: 'yes', label: 'כן, צוות מוגבר (3 טייסים או יותר)', hint: `${minToHhmm(H(params.hours))} – פער מול הדוח` },
+            { value: 'yes', label: 'כן, צוות מוגבר (3 טייסים או יותר)', hint: `${minToHhmm(H(params.hours))} – פער מול הרומה` },
             { value: 'no', label: 'לא', hint: 'אין פיצוי' },
           ],
           ruleId: rule.id,
         });
       } else if (a.value === 'yes') {
         ctx.expectPairing(p, key, H(params.hours), rule,
-          `${rule.title}: ${what} (${answered ? 'צוות מוגבר לפי תשובתך' : `הדוח מזכה את הפיצוי, ולכן צוות מוגבר`})`);
+          `${rule.title}: ${what} (${answered ? 'צוות מוגבר לפי תשובתך' : `הרומה מזכה את הפיצוי, ולכן צוות מוגבר`})`);
       }
     }
   }
@@ -1053,7 +1053,7 @@ function stay_extension(ctx, params, rule) {
         id,
         date: m.exec.from,
         title: `חזרה מאוחרת לבסיס: ${describePairing(m.exec)}`,
-        body: `${what}. הדוח לא מזכה עליה, והפיצוי תלוי בסיבה, שאינה בקבצים. מה קרה?`,
+        body: `${what}. הרומה לא מזכה עליה, והפיצוי תלוי בסיבה, שאינה בקבצים. מה קרה?`,
         options: [
           { value: 'voluntary', label: 'החזרה המאוחרת מרצונך', hint: 'ללא פיצוי' },
           { value: 'force_majeure', label: 'העיכוב מאירוע שלא בשליטת החברה', hint: `מגיע פיצוי רק על ${params.over_hours} שעות` },
@@ -1072,7 +1072,7 @@ function stay_extension(ctx, params, rule) {
     } else if (a.value === 'company') {
       ctx.expectPairing(m.exec, key, unplanned.length * H(params.hours), rule,
         `${what}. ${unplanned.length === 1 ? 'יממה לא מתוכננת' : `${unplanned.length} יממות לא מתוכננות`} ` +
-        `(${unplanned.map(ddmm).join(', ')}), ${answered ? 'לפי תשובתך' : `לפי מה שהדוח מזכה`}.`);
+        `(${unplanned.map(ddmm).join(', ')}), ${answered ? 'לפי תשובתך' : `לפי מה שהרומה מזכה`}.`);
     }
   }
 }
@@ -1183,9 +1183,9 @@ function short_rest_miami(ctx, params, rule) {
         id,
         date: p.from,
         title: `קיצור מנוחה ב-${params.station}: האם שהית שם לילה אחד בלבד?`,
-        body: `${what}. לפי החישוב זה לילה אחד ${window}, והדוח לא מזכה ${minToHhmm(hours)}. ${derived}`,
+        body: `${what}. לפי החישוב זה לילה אחד ${window}, והרומה לא מזכה ${minToHhmm(hours)}. ${derived}`,
         options: [
-          { value: 'yes', label: 'כן, לילה אחד בלבד', hint: `${minToHhmm(hours)} – פער מול הדוח` },
+          { value: 'yes', label: 'כן, לילה אחד בלבד', hint: `${minToHhmm(hours)} – פער מול הרומה` },
           { value: 'no', label: 'לא, יותר מלילה אחד', hint: 'אין פיצוי' },
         ],
         ruleId: rule.id,
@@ -1194,7 +1194,7 @@ function short_rest_miami(ctx, params, rule) {
     }
     ctx.markPairing(p, 'miami_one_night');
     ctx.expectPairing(p, key, hours, rule,
-      `${why} (${answered ? 'לפי תשובתך' : `לפי מה שהדוח מזכה`})`);
+      `${why} (${answered ? 'לפי תשובתך' : `לפי מה שהרומה מזכה`})`);
   }
 }
 
@@ -1245,13 +1245,13 @@ function miami_delay(ctx, params, rule) {
       const opt = (phase) => {
         const sib = siblingFor(phase);
         return { value: phase, label: PHASE_LABEL[phase],
-          hint: sib && enough(sib.logic.params, delay) ? `${minToHhmm(hours)} – פער מול הדוח` : 'אין פיצוי' };
+          hint: sib && enough(sib.logic.params, delay) ? `${minToHhmm(hours)} – פער מול הרומה` : 'אין פיצוי' };
       };
       ctx.ask({
         id,
         date: p.from,
         title: `דחייה ביציאה ל-${params.station}: מתי חלה הדחייה?`,
-        body: `${what}, והמנוחה בתחנה קוצרה ללילה אחד. הדוח לא מזכה ${minToHhmm(hours)}, ` +
+        body: `${what}, והמנוחה בתחנה קוצרה ללילה אחד. הרומה לא מזכה ${minToHhmm(hours)}, ` +
           'והפיצוי תלוי במועד הדחייה, שאינו בקבצים: לפני תחילת זמן התפקיד מגיע פיצוי רק על דחייה של מעל 5 שעות, ' +
           'ואחרי שזמן התפקיד החל – על דחייה של שעתיים ומעלה.',
         options: [opt('before_duty'), opt('after_duty'),
@@ -1263,7 +1263,7 @@ function miami_delay(ctx, params, rule) {
     if (a.value === params.phase) {
       ctx.markPairing(p, 'miami_delay');
       ctx.expectPairing(p, key, hours, rule, `${what}, ${PHASE_LABEL[params.phase]} ` +
-        `(${answered ? 'לפי תשובתך' : `לפי מה שהדוח מזכה`}), בנוסף לקיצור המנוחה של ס' 24.3.`);
+        `(${answered ? 'לפי תשובתך' : `לפי מה שהרומה מזכה`}), בנוסף לקיצור המנוחה של ס' 24.3.`);
       continue;
     }
     // התשובה שייכת לחוק השני. אם גם הוא אינו חל על הדחייה הזאת, ההסבר נרשם כאן, פעם אחת.
@@ -1312,9 +1312,9 @@ function short_rest_las_vegas(ctx, params, rule) {
         id,
         date: p.from,
         title: `קיצור מנוחה ב-${params.station}: האם מגיע פיצוי?`,
-        body: `${what}. ${deal} הדוח לא מזכה ${minToHhmm(hours)}, והסיבה אינה בקבצים. ${derived}`,
+        body: `${what}. ${deal} הרומה לא מזכה ${minToHhmm(hours)}, והסיבה אינה בקבצים. ${derived}`,
         options: [
-          { value: 'yes', label: 'כן, המנוחה קוצרה', hint: `${minToHhmm(hours)} – פער מול הדוח` },
+          { value: 'yes', label: 'כן, המנוחה קוצרה', hint: `${minToHhmm(hours)} – פער מול הרומה` },
           { value: 'full_rest', label: 'לא, קיבלתי את המנוחה החוזית המלאה', hint: 'אין פיצוי' },
           { value: 'not_weekly', label: `החברה אינה טסה ל-${params.station} פעם בשבוע`, hint: 'אין פיצוי' },
         ],
@@ -1329,7 +1329,7 @@ function short_rest_las_vegas(ctx, params, rule) {
       continue;
     }
     ctx.expectPairing(p, key, hours, rule, `${what}. ${deal} הפיצוי נרשם ` +
-      `${answered ? 'לפי תשובתך' : `לפי מה שהדוח מזכה`}. ${derived}`);
+      `${answered ? 'לפי תשובתך' : `לפי מה שהרומה מזכה`}. ${derived}`);
   }
 }
 
@@ -1424,7 +1424,7 @@ function sim_extension(ctx, params, rule) {
           id,
           date: s.date,
           title: `${what}. האם ההארכה הייתה לבקשת החברה?`,
-          body: 'על הארכת אימון בסימולטור לבקשת החברה מגיע פיצוי, והדוח לא מזכה אותו.',
+          body: 'על הארכת אימון בסימולטור לבקשת החברה מגיע פיצוי, והרומה לא מזכה אותו.',
           options: [
             { value: 'company', label: 'לבקשת החברה', hint: minToHhmm(H(params.hours)) },
             { value: 'mine', label: 'לא לבקשת החברה', hint: 'אין פיצוי' },
