@@ -747,9 +747,11 @@ function higher_of_planned_performed(ctx, params, rule) {
     const longer = diff > 0
       ? `${flightsOf(match.plan)} המתוכננת (${minToHhmm(planned)} מול ${minToHhmm(performed)} של ${flightsOf(exec)} שבוצעה)`
       : `${flightsOf(exec)} שבוצעה (${minToHhmm(performed)} מול ${minToHhmm(planned)} של ${flightsOf(match.plan)} המתוכננת)`;
+    // כאן שם העמודה כן מופיע, לבקשת בעל המוצר (29/09/2026).
+    const extraCredit = `מגיע ${minToHhmm(diff)} כקרדיט נוסף (${column === 'rig' ? 'RIG' : reportColumn})`;
     const topUp = diff <= 0 ? ''
-      : !alreadyMinSlip ? ` ההפרש, ${minToHhmm(diff)}, מגיע כקרדיט נוסף.`
-      : extra > 0 ? ` ההפרש, ${minToHhmm(diff)}, מגיע כקרדיט נוסף: ${minToHhmm(alreadyMinSlip)} בהשלמה לסליפ קצר ועוד ${minToHhmm(extra)}.`
+      : !alreadyMinSlip ? ` ${extraCredit}.`
+      : extra > 0 ? ` ${extraCredit}: ${minToHhmm(alreadyMinSlip)} בהשלמה לסליפ קצר ועוד ${minToHhmm(extra)}.`
       : ` ההפרש, ${minToHhmm(diff)}, כבר כלול בהשלמה לסליפ קצר (${minToHhmm(alreadyMinSlip)}).`;
     ctx.note(match.plan.from, `החלפה ביוזמת החברה: מגיע הקרדיט של הטיסה הארוכה מבין השתיים, ${longer}.${topUp}`, rule);
     if (extra <= 0) continue;
