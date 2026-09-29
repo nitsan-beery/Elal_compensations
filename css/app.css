@@ -123,6 +123,15 @@ main { max-width: 1100px; margin: 0 auto; padding: 1rem 16px 3rem; }
 .drop-sub { color: var(--muted); font-size: .85rem; direction: ltr; }
 .drop-state { margin-top: .5rem; font-size: .9rem; word-break: break-word; }
 .drop.loaded .drop-state { color: var(--ok); }
+/* פתיחת הקובץ השמור: כפתור קטן בתוך אזור ההעלאה, מתחת לשם הקובץ. */
+.drop-open {
+  display: inline-flex; align-items: center; gap: .35rem; margin-top: .5rem; padding: .3rem .75rem;
+  font: inherit; font-size: .85rem; color: var(--text); background: var(--surface);
+  border: 1px solid var(--line); border-radius: var(--radius); cursor: pointer;
+}
+.drop-open:hover { border-color: var(--accent); }
+.drop-open[hidden] { display: none; }
+.drop-open svg { width: 1em; height: 1em; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 .hint { color: var(--muted); font-size: .875rem; margin: .5rem 0 1rem; }
 
 /* ---------- תוצאות ---------- */

@@ -56,6 +56,7 @@ const state = {
   result: null,
   filter: 'comp',
   notices: [],
+  files: {}, // kind → {id: "2026-07:plan", url} של קובץ ה-PDF השמור, לכפתור "פתח קובץ"
 };
 
 // ---------- אתחול ----------
@@ -120,6 +121,13 @@ function showView(view) {
 function setupUploads() {
   for (const zone of document.querySelectorAll('.drop')) {
     const input = $('input', zone);
+    // הכפתור בתוך אזור ההעלאה: פותח את הקובץ השמור, ולא את בחירת הקובץ.
+    $('.drop-open', zone).addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const url = state.files[zone.dataset.kind]?.url;
+      if (url) window.open(url, '_blank');
+    });
     input.addEventListener('change', () => {
       if (input.files[0]) handleFile(input.files[0], zone.dataset.kind);
       input.value = '';
@@ -172,6 +180,8 @@ async function handleFile(file, expected) {
     }
     record[kind] = parsed;
     record[`${kind}File`] = file.name;
+    await safe(() => store.putFile(key, kind, file.name, bytes));
+    dropFileLink(kind);
     state.record = record;
     await runAndSave();
   } catch (err) {
@@ -194,7 +204,32 @@ function renderUploadState() {
     $('.drop-state', zone).textContent = loaded
       ? `${r[`${kind}File`] ?? 'נטען מהחודשים השמורים'} · ${monthName(r.period)}`
       : 'לא נבחר קובץ. לחץ או גרור לכאן';
+    refreshFileLink(zone, kind);
   }
+}
+
+/** קובץ ה-PDF השמור של החודש הפתוח, לכפתור "פתח קובץ". חודש שנשמר לפני שהקבצים נשמרו – בלי כפתור. */
+async function refreshFileLink(zone, kind) {
+  const button = $('.drop-open', zone);
+  const r = state.record;
+  const id = r?.[kind] ? `${r.key}:${kind}` : null;
+  if (state.files[kind]?.id !== id) {
+    dropFileLink(kind);
+    if (id) {
+      // הרשומה נכנסת לפני הקריאה מהמסד, כדי שקריאה מקבילה לא תטען את הקובץ שוב.
+      const entry = { id, url: null };
+      state.files[kind] = entry;
+      const file = await safe(() => store.getFile(r.key, kind), null);
+      if (state.files[kind] !== entry) return; // נפתח חודש אחר, או הועלה קובץ חדש, בינתיים
+      if (file) entry.url = URL.createObjectURL(new Blob([file.bytes], { type: 'application/pdf' }));
+    }
+  }
+  button.hidden = !state.files[kind]?.url;
+}
+
+function dropFileLink(kind) {
+  if (state.files[kind]?.url) URL.revokeObjectURL(state.files[kind].url);
+  delete state.files[kind];
 }
 
 // ---------- הרצה ----------
@@ -667,7 +702,7 @@ async function renderHistory() {
     </div>
     <div class="card">
       <h2>גיבוי ושחזור</h2>
-      <p class="small muted">קובץ הגיבוי מכיל את הנתונים שחולצו מהקבצים ואת התשובות שלך, כולל שמות ומספרי סבבים. שמור אותו במקום פרטי. אפשר להעביר איתו את החודשים השמורים בין ה‑iPad למחשב.</p>
+      <p class="small muted">קובץ הגיבוי מכיל את קובצי התכנון והביצוע, את הנתונים שחולצו מהם ואת התשובות שלך, כולל שמות, מספרי טלפון ומספרי סבבים. שמור אותו במקום פרטי. אפשר להעביר איתו את החודשים השמורים בין ה‑iPad למחשב.</p>
       <div class="row">
         <button class="btn" data-action="backup" ${months.length ? '' : 'disabled'}>הורד גיבוי</button>
         <label class="btn">שחזר מקובץ<input type="file" accept="application/json,.json" hidden data-action="restore"></label>
@@ -692,7 +727,11 @@ async function renderHistory() {
     if (!file) return;
     try {
       const c = await store.importBackup(JSON.parse(await file.text()));
-      alert(`שוחזרו ${c.added} חודשים חדשים, ${c.replaced} עודכנו, ${c.skipped} דולגו (הגרסה במכשיר חדשה יותר).`);
+      alert(`שוחזרו ${c.added} חודשים חדשים, ${c.replaced} עודכנו, ${c.skipped} דולגו (הגרסה במכשיר חדשה יותר).` +
+        (c.files ? ` שוחזרו ${c.files === 1 ? 'קובץ PDF אחד' : `${c.files} קובצי PDF`}.` : ''));
+      // ייתכן ששוחזר קובץ לחודש הפתוח: לטעון אותו מחדש לכפתור "פתח קובץ".
+      for (const kind of Object.keys(PARSERS)) dropFileLink(kind);
+      renderUploadState();
     } catch (err) {
       alert(`השחזור נכשל: ${err.message}`);
     }
