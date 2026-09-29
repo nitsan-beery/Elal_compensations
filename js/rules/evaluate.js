@@ -497,27 +497,29 @@ function describeMatch(m) {
 
 /**
  * פעילות לא מתוכננת שהמשתמש ענה שהיא החלפה מרצון: בשינויים היא מוצגת "במקום" הסבב
- * שתוכנן בימים אחרים. כשהיא קושרה לסבב שלא בוצע, שתי השורות מתאחדות לשורה אחת.
+ * שתוכנן בימים אחרים. כשהיא קושרה לסבב שלא בוצע, גם הסבב שלא בוצע נשאר בשינויים, ביום
+ * שלו, עם ההחלפה בצד הביצוע: זה עדיין שינוי (בעל המוצר, 29/09/2026).
  * בלי קישור (טיסה בחודש אחר) – "בחודש אחר" בצד התכנון.
  * סבב שלא בוצע ונענה – התשובה מוצגת בצד הביצוע.
  */
 function showSwaps(out, answers) {
-  const linkOf = new Map(); // execId → planId | null
+  const linkOf = new Map(); // execId → { planId | null, value }
   for (const [id, a] of Object.entries(answers)) {
     if (!LINKED_VALUES.includes(a?.value)) continue;
-    if (id.startsWith('unplanned:') && !linkOf.get(id.slice(10))) linkOf.set(id.slice(10), a.link ?? null);
-    if (id.startsWith('cancelled:') && a.link && a.link !== GAVE_AWAY) linkOf.set(a.link, id.slice(10));
+    if (id.startsWith('unplanned:') && !linkOf.get(id.slice(10))?.planId) linkOf.set(id.slice(10), { planId: a.link ?? null, value: a.value });
+    if (id.startsWith('cancelled:') && a.link && a.link !== GAVE_AWAY) linkOf.set(a.link, { planId: id.slice(10), value: a.value });
   }
-  const drop = new Set();
   for (const c of out.changes) {
     if (c.how !== 'unplanned' || !linkOf.has(c.execId)) continue;
-    const planned = out.changes.find((p) => p.how === 'cancelled' && p.planId === linkOf.get(c.execId));
+    const { planId, value } = linkOf.get(c.execId);
+    const planned = out.changes.find((p) => p.how === 'cancelled' && p.planId === planId);
     c.how = 'swap';
     c.label = 'במקום סבב שתוכנן בימים אחרים';
     c.plan = planned?.plan ?? 'בחודש אחר';
-    if (planned) { c.planId = planned.planId; drop.add(planned); }
+    if (!planned) continue;
+    c.planId = planned.planId;
+    planned.exec = `${value === 'replaced' ? 'החלפה ביוזמת החברה' : 'החלפה מרצוני'} – ${c.exec}`;
   }
-  out.changes = out.changes.filter((c) => !drop.has(c));
 
   // סבב שבמקומו בוצע סבב אחר באותם ימים: אחרי התשובה, השורה אומרת מה קרה ולא רק מה הוחלף.
   for (const c of out.changes) {
