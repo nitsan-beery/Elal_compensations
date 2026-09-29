@@ -205,11 +205,7 @@ function renderUploadState() {
 
 async function runAndSave() {
   const r = state.record;
-  const previousVersion = r.rulesVersion;
   state.result = evaluate({ rulesData: state.rulesData, plan: r.plan, exec: r.exec, answers: r.answers ?? {} });
-  if (previousVersion && previousVersion !== state.result.rulesVersion) {
-    state.notices.push({ kind: 'info', text: `החוקים עודכנו מאז הבדיקה הקודמת של החודש (${previousVersion} → ${state.result.rulesVersion}). החישוב רץ מחדש לפי החוקים שבתוקף לחודש.` });
-  }
   r.rulesVersion = state.result.rulesVersion;
   r.summary = summarize(state.result);
   await safe(() => store.putMonth(r));
