@@ -164,15 +164,10 @@ async function handleFile(file, expected) {
 
     const key = store.monthKey(parsed.period);
     const prev = state.record;
-    if (prev && prev.key !== key && prev[kind === 'plan' ? 'exec' : 'plan']) {
-      state.notices.push({ kind: 'warn', text: `${KIND_LABEL[kind]} הוא של ${monthName(parsed.period)}, והקובץ השני שהיה פתוח הוא של ${monthName(prev.period)}. עברתי ל${monthName(parsed.period)}.` });
-    }
     const record = (prev?.key === key ? prev : await safe(() => store.getMonth(key), null))
       ?? { key, period: parsed.period, plan: null, exec: null, answers: {} };
     if (kind === 'exec' && !record.plan) {
       state.notices.push({ kind: 'warn', text: 'אין קובץ תכנון לחודש הזה, ולכן אין השוואה לתכנון. אפשר להעלות אותו עכשיו.' });
-    } else if (kind === 'exec' && prev?.key !== key && record.plan) {
-      state.notices.push({ kind: 'info', text: `קובץ התכנון של ${monthName(record.period)} נטען מהחודשים השמורים.` });
     }
     record[kind] = parsed;
     record[`${kind}File`] = file.name;
