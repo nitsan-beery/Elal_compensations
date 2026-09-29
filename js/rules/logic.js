@@ -5,7 +5,7 @@
 // מזהה לוגיקה שאינו מופיע כאן נחשב "לא נתמך" ומוצג למשתמש.
 
 import { hoursToMin, minToHhmm } from '../time.js';
-import { describePairing, sameFdp } from '../model.js';
+import { describePairing, describeRoute, fdpParts } from '../model.js';
 import { stationOffset } from '../airports.js';
 import { DUTY_LOGIC, DUTY_PARAMS, execFdpGroups, amountWord } from './duty.js';
 
@@ -559,10 +559,26 @@ function special_call(ctx, params, rule) {
         continue;
       }
       const days = countSpecialCallDays(stay, params, match.exec, ctx.fdp);
-      const explain = `קריאה מיוחדת: ${days.counted.length === 1 ? 'יממה אחת' : `${days.counted.length} יממות`} ` +
-        `(${days.counted.map(dayOf).join(', ')}). ${days.reason}`;
+      const count = (n) => (n === 1 ? 'יממה אחת' : `${n} יממות`);
+      const explain = `קריאה מיוחדת: ${count(days.counted.length)} (${days.counted.map(dayOf).join(', ')}). ${days.reason}`;
+      // כמה FDP נפרדים בסבב: כל יממה נרשמת על ה-FDP שהתחיל בה או לפניה (בעל המוצר, 29/09/2026).
+      const parts = fdpParts(match.exec, ctx.fdp);
+      const perPart = parts.map((part, i) => ({ part,
+        days: days.counted.filter((d) => d >= part.from && (i === parts.length - 1 || d < parts[i + 1].from)) }))
+        .filter((x) => x.days.length);
       // השהייה נוגעת ביותר מיממה אחת (`all`, לא `counted`): הערה קבועה, גם כשתואם לדוח, כדי
       // להסביר איזו יממה נספרת (20–21/07/2025: S/C רק על 20/07, היממה השנייה קצרה מהסף).
+      if (perPart.length > 1) {
+        const each = perPart.map((x) => `${x.days.map(dayOf).join(', ')} על ⁦${describeRoute(x.part)}⁩`).join('; ');
+        ctx.note(match.exec.from, `${describePairing(match.exec)}: FDP נפרדים, מנוחה חוקית ביניהם, והקריאה המיוחדת נרשמת על כל אחד: ${each}.` +
+          (days.ownFdp ? '' : ` ${days.reason}`), rule);
+        for (const x of perPart) {
+          ctx.expectPairing(match.exec, 'sc', x.days.length * H(params.hours), rule,
+            `קריאה מיוחדת על ${describePairing(x.part)}: ${count(x.days.length)} (${x.days.map(dayOf).join(', ')}).`,
+            { date: x.days[0], dates: x.days });
+        }
+        continue;
+      }
       if (days.all.length > 1) ctx.note(match.exec.from, `${describePairing(match.exec)}: ${explain}`, rule);
       ctx.expectPairing(match.exec, 'sc', days.counted.length * H(params.hours), rule, explain);
       continue;
@@ -633,7 +649,7 @@ function countSpecialCallDays(stay, params, pairing, fdp) {
   if (all.length === 1) return { counted: all, all, reason: 'יממה אחת.' };
 
   if (pairing && lastFdpStartsOn(pairing, fdp, all.at(-1))) {
-    return { counted: all, all, reason: `היממה האחרונה (${dayOf(all.at(-1))}) היא FDP נפרד, אחרי מנוחה אמיתית, ולא המשך של ה-FDP הקודם מעבר לחצות: יממת עבודה בפני עצמה, נספרת בלי בדיקת סף.` };
+    return { counted: all, all, ownFdp: true, reason: `היממה האחרונה (${dayOf(all.at(-1))}) פותחת FDP נפרד, אחרי מנוחה חוקית, ולכן נספרת בלי בדיקת סף.` };
   }
 
   const total = stay.end - stay.start;
@@ -650,16 +666,12 @@ function countSpecialCallDays(stay, params, pairing, fdp) {
 }
 
 /**
- * האם ה-FDP האחרון בסבב (המסתיים בנחיתה בבסיס) מתחיל ביממה `lastDate` עצמה: מהלגה האחרונה
- * אחורה, כל עוד יש מנוחה חוקית לפני הלגה (לא `sameFdp`), עדיין באותו FDP. בלי `fdp` (חסר
+ * האם ה-FDP האחרון בסבב (המסתיים בנחיתה בבסיס) מתחיל ביממה `lastDate` עצמה. בלי `fdp` (חסר
  * `legal_rest_hours` בפרמטרים של הסליפ הקצר) אי אפשר לדעת, ומניחים שזה המשך.
  */
 function lastFdpStartsOn(pairing, fdp, lastDate) {
-  if (!fdp) return false;
-  const legs = pairing.legs;
-  let i = legs.length - 1;
-  while (i > 0 && sameFdp(legs[i - 1], legs[i], fdp)) i--;
-  return legs[i].date === lastDate;
+  const parts = fdpParts(pairing, fdp);
+  return parts.length > 1 && parts.at(-1).from === lastDate;
 }
 
 const mod = (n, m) => ((n % m) + m) % m;

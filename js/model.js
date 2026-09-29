@@ -175,6 +175,23 @@ export function pairingParts(p) {
 const isAirReturnLeg = (l) => l.org != null && l.org === l.dst;
 
 /**
+ * חלוקת הסבב ל-FDP: רגל שלפניה מנוחה חוקית (לא `sameFdp`) פותחת FDP חדש. הקרדיט וההשלמה
+ * ל-5 שעות על הסבב כולו, אבל פיצוי (COM, ‏S/C) נרשם על ה-FDP שלו: 19–20/06/2025, ‏S/C על
+ * TLV-LCA ב-19 ועל PFO-LCA-TLV ב-20, והנחיתה המאוחרת רק על השני (בעל המוצר, 29/09/2026).
+ * בלי `fdp`, או כשאין מנוחה בדרך, מוחזר הסבב עצמו.
+ */
+export function fdpParts(p, fdp) {
+  if (!fdp) return [p];
+  const parts = [];
+  p.legs.forEach((leg, i) => {
+    if (!i || !sameFdp(p.legs[i - 1], leg, fdp)) parts.push([]);
+    parts.at(-1).push(leg);
+  });
+  if (parts.length < 2) return [p];
+  return parts.map((legs) => ({ from: legs[0].date, to: legs.at(-1).date, dates: [...new Set(legs.map((l) => l.date))], legs }));
+}
+
+/**
  * מסלול הסבב לפי סדר הרגלים בפועל, כולל הבסיס בקצוות: TLV-SOF-TIV-TLV, לא רק היעדים.
  * רגל שהתחנה שלה אינה התחנה שבה נחתה הרגל הקודמת (מעבר לא-מתועד, כמו LCA→PFO ב-20/06/2025
  * שם הדוח מדלג ישר לרגל הבאה מ-PFO) פותחת קטע חדש, מופרד בפסיק ולא במקף: TLV-LCA, PFO-LCA-TLV

@@ -8,7 +8,7 @@
 
 import { LOGIC, LOGIC_ORDER } from './logic.js';
 import { rulesInEffect, partitionRules, rulesByLogic, classifyCode } from './catalog.js';
-import { buildTimeline, buildPairings, markCarryIn, matchPairings, describePairing, describeRoute, pairingParts, sameFdp } from '../model.js';
+import { buildTimeline, buildPairings, markCarryIn, matchPairings, describePairing, describeRoute, pairingParts, fdpParts } from '../model.js';
 import { hoursToMin } from '../time.js';
 import { OPTIONAL_COLUMNS } from '../pdf/exec.js';
 
@@ -22,6 +22,8 @@ const KEY_COLUMNS = {
   sc: ['S/C'],
 };
 const COMPARED_COLUMNS = ['Credit', 'FLT+DH', 'Rig', 'COM', 'S/C'];
+/** עמודות הפיצוי: בסבב של כמה FDP נפרדים הן נרשמות לכל FDP, ולא לסבב כולו. */
+const COMPENSATION_COLUMNS = ['COM', 'S/C'];
 /** עמודות הקרדיט: רק בהן מוצגת בתווית חזרה לבסיס אחרי המראה שמחוברת לסבב שאחריה. */
 const CREDIT_LABEL_COLUMNS = ['Credit', 'FLT+DH', 'Rig'];
 
@@ -126,7 +128,7 @@ export function evaluate({ rulesData, plan = null, exec = null, answers = {} }) 
   // כמו שאר הטבלאות: לפי תאריך. הערה בלי תאריך (על החודש כולו) בסוף.
   out.notes.sort((a, b) => (a.date ?? '￿').localeCompare(b.date ?? '￿'));
   if (exec) {
-    out.comparison = compare({ out, timeline, execPairings, domicile, codes });
+    out.comparison = compare({ out, timeline, execPairings, domicile, codes, fdp });
     out.totals = compareTotals(out, exec);
     warnMissingColumns(out, exec);
   }
@@ -673,7 +675,7 @@ function reportedValue(day, column) {
   return v[column]?.min ?? 0;
 }
 
-function compare({ out, timeline, execPairings, domicile, codes: catalog }) {
+function compare({ out, timeline, execPairings, domicile, codes: catalog, fdp }) {
   // קבוצות ימים: סבב וימי הפיצול שלו מתאחדים; ימים שחולקים סבב מתאחדים גם הם.
   const parent = new Map(timeline.map((d) => [d.date, d.date]));
   const find = (x) => (parent.get(x) === x ? x : (parent.set(x, find(parent.get(x))), parent.get(x)));
@@ -775,6 +777,27 @@ function compare({ out, timeline, execPairings, domicile, codes: catalog }) {
     });
   };
 
+  /**
+   * סבב אחד בכמה FDP נפרדים (מנוחה חוקית בדרך): הפיצוי (COM, ‏S/C) בשורה לכל FDP, והקרדיט
+   * וה-Rig על הסבב כולו (בעל המוצר, 29/09/2026; 19–20/06/2025: ‏S/C על TLV-LCA ב-19 ועל
+   * PFO-LCA-TLV ב-20, ‏COM של הנחיתה המאוחרת רק על השני). יממה בלי רגל שייכת ל-FDP שלפניה.
+   * רק כשכל ציפייה בעמודה נופלת כולה ב-FDP אחד; אחרת העמודה נשארת שורה אחת לסבב.
+   */
+  const splitByFdp = (dates, inGroup, column) => {
+    if (!COMPENSATION_COLUMNS.includes(column)) return null;
+    const touching = [...new Set(dates.flatMap((d) => pairingOf.get(d) ?? []))];
+    if (touching.length !== 1) return null;
+    const parts = fdpParts(touching[0], fdp);
+    if (parts.length < 2) return null;
+    const partOf = (d) => parts.findLastIndex((p) => p.from <= d);
+    const items = inGroup.filter((e) => KEY_COLUMNS[e.key]?.includes(column));
+    if (items.some((e) => e.dates.some((d) => partOf(d) !== partOf(e.dates[0])))) return null;
+    return parts.map((part, i) => {
+      const own = dates.filter((d) => partOf(d) === i);
+      return { part, dates: own, items: items.filter((e) => own.includes(e.dates[0])) };
+    }).filter((x) => x.dates.length);
+  };
+
   for (const group of groups.values()) {
     group.sort();
     for (const { dates, only, codes, items: inGroup, reported: reportedFor } of splitByPairing(group)) {
@@ -790,6 +813,16 @@ function compare({ out, timeline, execPairings, domicile, codes: catalog }) {
       // עם סכום הקרדיט של כל ימיו, ולא שורה לכל יממה כמו בדוח (בעל המוצר, 28/09/2026). הפירוט לימים
       // נשאר בהערות של הציפיות. הדוח רושם Rig של סבב ביום הראשון שלו.
       for (const column of COMPARED_COLUMNS) {
+        const byFdp = splitByFdp(dates, inGroup, column);
+        if (byFdp) {
+          for (const { part, dates: own, items } of byFdp) {
+            const expected = items.reduce((s, e) => s + e.min, 0);
+            const reported = own.reduce((s, d) => s + reportedOn(d, column), 0);
+            if (!expected && !reported) continue;
+            push({ dates: own, at: own.at(-1), label: labelOf(own, column, [part], codes ? [] : null), column, expected, reported, items });
+          }
+          continue;
+        }
         const items = inGroup.filter((e) => KEY_COLUMNS[e.key]?.includes(column));
         const expected = items.reduce((s, e) => s + e.min, 0);
         const reported = reportedFor(column);
