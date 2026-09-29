@@ -174,16 +174,24 @@ export function pairingParts(p) {
 
 const isAirReturnLeg = (l) => l.org != null && l.org === l.dst;
 
-/** מסלול הסבב לפי סדר הרגלים בפועל, כולל הבסיס בקצוות: TLV-SOF-TIV-TLV, לא רק היעדים. */
+/**
+ * מסלול הסבב לפי סדר הרגלים בפועל, כולל הבסיס בקצוות: TLV-SOF-TIV-TLV, לא רק היעדים.
+ * רגל שהתחנה שלה אינה התחנה שבה נחתה הרגל הקודמת (מעבר לא-מתועד, כמו LCA→PFO ב-20/06/2025
+ * שם הדוח מדלג ישר לרגל הבאה מ-PFO) פותחת קטע חדש, מופרד בפסיק ולא במקף: TLV-LCA, PFO-LCA-TLV
+ * ולא TLV-LCA-PFO-LCA-TLV, כדי לא לרמז על טיסה שאינה בדוח.
+ */
 function route(p) {
   // סבב שכולו חזרה לבסיס אחרי המראה: TLV-TLV ולא רק TLV (15/09/2025 LY571).
   if (p.legs.length && isAirReturnOnly(p)) return `${p.legs[0].org}-${p.legs[0].dst}`;
-  const stops = [];
+  const segments = [];
+  let stops = [];
   for (const l of p.legs) {
+    if (stops.length && stops[stops.length - 1] !== l.org) { segments.push(stops); stops = []; }
     if (!stops.length) stops.push(l.org);
     if (stops[stops.length - 1] !== l.dst) stops.push(l.dst);
   }
-  return stops.join('-');
+  if (stops.length) segments.push(stops);
+  return segments.map((s) => s.join('-')).join(', ');
 }
 
 const dayOf = (iso) => iso.slice(8, 10) + '/' + iso.slice(5, 7);
