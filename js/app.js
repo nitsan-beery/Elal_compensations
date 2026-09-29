@@ -205,13 +205,12 @@ function renderUploadState() {
     const loaded = !!r?.[kind];
     zone.classList.toggle('loaded', loaded);
     $('.drop-state', zone).textContent = 'לא נבחר קובץ. לחץ או גרור לכאן';
-    $('.drop-month', zone).textContent = loaded ? `${FILE_OF[kind]} של ${monthName(r.period)}` : '';
+    // רק החודש והשנה בשתי ספרות, "אוקטובר 26": הכותרת של האזור כבר אומרת איזה קובץ (בעל המוצר, 29/09/2026).
+    $('.drop-month', zone).textContent = loaded ? `${MONTH_NAMES[r.period.month - 1]} ${String(r.period.year).slice(-2)}` : '';
     $('.drop-name', zone).textContent = loaded ? r[`${kind}File`] ?? 'נטען מהחודשים השמורים' : '';
     refreshFileLink(zone, kind);
   }
 }
-
-const FILE_OF = { plan: 'התכנון', exec: 'הרומה' };
 
 /**
  * קובץ ה-PDF השמור של החודש הפתוח, ללחיצה על הקובץ. חודש שנשמר לפני שהקבצים נשמרו – הקובץ מוצג
