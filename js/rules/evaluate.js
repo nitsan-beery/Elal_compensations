@@ -582,9 +582,21 @@ function noteChanges(out, supported) {
         if (!CHANGE_DUE_LOGIC.has(logic)) continue;
         if (e.pairingId ? !ids.includes(e.pairingId) : !within(e.date)) continue;
         const what = DUE_WORDING[logic] ?? (logic === 'absence_day_credit' ? `קרדיט ${e.ruleTitle}` : e.shortTitle ?? e.ruleTitle);
-        byWhat.set(what, (byWhat.get(what) ?? 0) + e.min);
+        if (!byWhat.has(what)) byWhat.set(what, { min: 0, days: new Map() });
+        const g = byWhat.get(what);
+        g.min += e.min;
+        // זיכוי יומי (בלי סבב): כמה ביום ועל אילו ימים, כדי שהסכום יהיה מובן (13/07/2026: 2 × 02:30).
+        if (!e.pairingId) g.days.set(e.date, (g.days.get(e.date) ?? 0) + e.min);
       }
-      const items = [...byWhat].map(([what, min]) => `${what} ${minToHhmm(min)} שעות`);
+      const items = [...byWhat].map(([what, { min, days }]) => {
+        if (days.size < 2 || [...days.values()].reduce((s, m) => s + m, 0) !== min) return `${what} ${minToHhmm(min)} שעות`;
+        const ds = [...days.keys()].sort().map((d) => `${d.slice(8, 10)}/${d.slice(5, 7)}`);
+        const on = `${ds.slice(0, -1).join(', ')} ו-${ds.at(-1)}`;
+        const amounts = new Set(days.values());
+        const each = amounts.size === 1 ? `${minToHhmm([...amounts][0])} שעות ליום על ${on}`
+          : [...days].sort(([a], [b]) => a.localeCompare(b)).map(([d, m]) => `${minToHhmm(m)} ב-${d.slice(8, 10)}/${d.slice(5, 7)}`).join(', ');
+        return `${what} ${each}, סה"כ ${minToHhmm(min)} שעות`;
+      });
       due = items.length ? `מגיע ${items.length > 1 ? `${items.slice(0, -1).join(', ')} ו${items.at(-1)}` : items[0]}` : 'לא מגיע קרדיט ולא פיצוי';
     }
     out.notes.push({ date: c.date, message: `${c.label}: ${outcome}${due}.`, ruleId: null, ruleTitle: null });

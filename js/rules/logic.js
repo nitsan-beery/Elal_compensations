@@ -745,15 +745,15 @@ function higher_of_planned_performed(ctx, params, rule) {
     const performed = planned - diff;
     // בלי מספרי הטיסות: הם כבר בשינויים בין תכנון לביצוע (בעל המוצר, 29/09/2026).
     const longer = diff > 0
-      ? `המתוכננת (${minToHhmm(planned)} שעות מול ${minToHhmm(performed)} של שבוצעה)`
-      : `שבוצעה (${minToHhmm(performed)} שעות מול ${minToHhmm(planned)} של המתוכננת)`;
+      ? `${minToHhmm(planned)} שעות של הטיסה המתוכננת, מול ${minToHhmm(performed)} של הטיסה שבוצעה`
+      : `${minToHhmm(performed)} שעות של הטיסה שבוצעה, מול ${minToHhmm(planned)} של הטיסה המתוכננת`;
     // כאן שם העמודה כן מופיע, לבקשת בעל המוצר (29/09/2026).
     const extraCredit = `מגיע ${minToHhmm(diff)} שעות כקרדיט נוסף (${column === 'rig' ? 'RIG' : reportColumn})`;
     const topUp = diff <= 0 ? ''
       : !alreadyMinSlip ? ` ${extraCredit}.`
       : extra > 0 ? ` ${extraCredit}: ${minToHhmm(alreadyMinSlip)} בהשלמה לסליפ קצר ועוד ${minToHhmm(extra)}.`
       : ` ההפרש, ${minToHhmm(diff)}, כבר כלול בהשלמה לסליפ קצר (${minToHhmm(alreadyMinSlip)}).`;
-    ctx.note(match.plan.from, `החלפה ביוזמת החברה: מגיע הקרדיט של הטיסה הארוכה מבין השתיים, ${longer}.${topUp}`, rule);
+    ctx.note(match.plan.from, `החלפה ביוזמת החברה: מגיע הקרדיט של הטיסה הארוכה מבין השתיים: ${longer}.${topUp}`, rule);
     // ביום של הטיסה שבוצעה, כשהוא אחר.
     if (exec.from !== match.plan.from) ctx.note(exec.from, 'החלפה ביוזמת החברה: קרדיט על הטיסה שבוצעה.', rule);
     if (extra <= 0) continue;
