@@ -5,7 +5,7 @@
 // מזהה לוגיקה שאינו מופיע כאן נחשב "לא נתמך" ומוצג למשתמש.
 
 import { hoursToMin, minToHhmm } from '../time.js';
-import { describePairing, fdpParts } from '../model.js';
+import { describePairing, describeRoute, fdpParts } from '../model.js';
 import { stationOffset } from '../airports.js';
 import { DUTY_LOGIC, DUTY_PARAMS, execFdpGroups, amountWord } from './duty.js';
 
@@ -821,7 +821,8 @@ function lost_hours_credit(ctx, params, rule) {
     const note = `${describePairing(match.plan)}: ${why}. השעות שהפסיד` +
       (match.exec ? `, בנוסף לקרדיט של ${describePairing(match.exec)}.` : '.');
     if (match.exec) ctx.expectPairing(match.exec, key, lost, rule, note);
-    else ctx.expect(assumed?.date ?? match.plan.from, key, lost, rule, note);
+    // בלי טיסה שבוצעה, שורת הפירוט מציגה את הטיסה שתוכננה (בעל המוצר, 29/09/2026).
+    else ctx.expect(assumed?.date ?? match.plan.from, key, lost, rule, note, { plannedRoute: describeRoute(match.plan) });
     ctx.markPairing(match.plan, 'lost_hours_credit');
   }
 }

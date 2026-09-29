@@ -775,7 +775,9 @@ function compare({ out, timeline, execPairings, domicile, codes: catalog, fdp })
       ? [[range(dates), describeRoute(parts[0].part)]]
       : parts.map(({ part, days }) => [range(days), describeRoute(part)]);
     const codes = (dayCodes ?? dates.flatMap((d) => execCodesOf(dayOf(timeline, d), catalog))).join(' ');
-    if (!lines.length) lines.push([range(dates), '']);
+    // בלי סבב שבוצע: הטיסה שתוכננה, כשציפייה עליה נושאת אותה (`plannedRoute`, הורדה מהטיסה).
+    const planned = [...new Set(out.expectations.filter((e) => e.plannedRoute && dates.includes(e.dates[0])).map((e) => e.plannedRoute))];
+    if (!lines.length) lines.push([range(dates), planned.join(', ')]);
     if (codes) lines.at(-1)[1] = [lines.at(-1)[1], codes].filter(Boolean).join(' · ');
     return lines.map((l) => l.filter(Boolean).map((t) => `⁦${t}⁩`).join(' · ')).join('\n');
   };
