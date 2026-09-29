@@ -615,8 +615,8 @@ function noteChanges(out, supported) {
         // (10/06/2026: ה-RIG ‏05:10 של ההחלפה של LTN ב-11/06, בעל המוצר 29/09/2026).
         if (e.forPlan && !ids.includes(e.forPlan)) {
           const on = rangeOf(e.forPlan)?.[0];
-          elsewhere += ` בנוסף, בדוח רשום ביום הזה ${minToHhmm(e.min)} כקרדיט נוסף (${e.key === 'rig' ? 'RIG' : e.key.toUpperCase()}) ` +
-            `על ההחלפה ביוזמת החברה${on ? ` ב-${on.slice(8, 10)}/${on.slice(5, 7)}` : ''}.`;
+          elsewhere += ` בנוסף, ברומה רשום ביום הזה ${minToHhmm(e.min)} כקרדיט נוסף (${e.key === 'rig' ? 'RIG' : e.key.toUpperCase()}) ` +
+            `על החלפה ביוזמת החברה${on ? ` ב-${on.slice(8, 10)}/${on.slice(5, 7)}` : ''}.`;
           continue;
         }
         const what = DUE_WORDING[logic] ?? (logic === 'absence_day_credit' ? `קרדיט ${e.ruleTitle}` : e.shortTitle ?? e.ruleTitle);
