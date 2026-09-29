@@ -123,6 +123,8 @@ export function evaluate({ rulesData, plan = null, exec = null, answers = {} }) 
 
   attachLinkCandidates(out.questions, matches, ctx);
   showSwaps(out, answers);
+  // כמו שאר הטבלאות: לפי תאריך. הערה בלי תאריך (על החודש כולו) בסוף.
+  out.notes.sort((a, b) => (a.date ?? '￿').localeCompare(b.date ?? '￿'));
   if (exec) {
     out.comparison = compare({ out, timeline, execPairings, domicile, codes });
     out.totals = compareTotals(out, exec);
