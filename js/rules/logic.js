@@ -732,14 +732,26 @@ function higher_of_planned_performed(ctx, params, rule) {
     if (params.excluded_when_special_call && ctx.pairingHandledBy(exec, 'special_call')) continue;
 
     const diff = plannedMinusPerformed(ctx, match.plan, exec);
-    if (diff == null || diff <= 0) continue;
+    if (diff == null) continue;
 
     // "הגבוה מבין השתיים" הוא סך הכול, לא תוספת על ההשלמה למינימום שהסבב שבוצע מקבל בזכות
     // עצמו: כשהמתוכנן גבוה גם מהמינימום, הנוסף הוא רק ההפרש שמעבר להשלמה שכבר צפויה
     // (`min_slip_credit` רץ קודם); כשההשלמה למינימום כבר גבוהה מההפרש, אין תוספת נוספת
     // (יוני 2025: ZRH מתוכנן מול LCA שבוצע, בעל המוצר 24/09/2026).
-    const alreadyMinSlip = column === 'rig' ? minSlipTopUp(ctx, exec) : 0;
+    const alreadyMinSlip = diff > 0 && column === 'rig' ? minSlipTopUp(ctx, exec) : 0;
     const extra = diff - alreadyMinSlip;
+
+    // הערה בכל החלפה ביוזמת החברה, גם כשהטיסה שבוצעה ארוכה יותר ואין הפרש (בעל המוצר, 29/09/2026).
+    const planned = ctx.plannedCredit(match.plan);
+    const performed = planned - diff;
+    const longer = diff > 0
+      ? `${flightsOf(match.plan)} המתוכננת (${minToHhmm(planned)} מול ${minToHhmm(performed)} של ${flightsOf(exec)} שבוצעה)`
+      : `${flightsOf(exec)} שבוצעה (${minToHhmm(performed)} מול ${minToHhmm(planned)} של ${flightsOf(match.plan)} המתוכננת)`;
+    const topUp = diff <= 0 ? ''
+      : !alreadyMinSlip ? ` ההפרש, ${minToHhmm(diff)}, מגיע כקרדיט נוסף.`
+      : extra > 0 ? ` ההפרש, ${minToHhmm(diff)}, מגיע כקרדיט נוסף: ${minToHhmm(alreadyMinSlip)} בהשלמה לסליפ קצר ועוד ${minToHhmm(extra)}.`
+      : ` ההפרש, ${minToHhmm(diff)}, כבר כלול בהשלמה לסליפ קצר (${minToHhmm(alreadyMinSlip)}).`;
+    ctx.note(match.plan.from, `החלפה ביוזמת החברה: מגיע הקרדיט של הטיסה הארוכה מבין השתיים, ${longer}.${topUp}`, rule);
     if (extra <= 0) continue;
 
     // לפעמים ההשלמה נרשמת על סבב סמוך ולא על המחליף עצמו (10/06/2026: LTN 11–12 → OTP 11,
