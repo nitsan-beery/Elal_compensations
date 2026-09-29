@@ -5,7 +5,7 @@
 // מזהה לוגיקה שאינו מופיע כאן נחשב "לא נתמך" ומוצג למשתמש.
 
 import { hoursToMin, minToHhmm } from '../time.js';
-import { describePairing, describeRoute, fdpParts } from '../model.js';
+import { describePairing, fdpParts } from '../model.js';
 import { stationOffset } from '../airports.js';
 import { DUTY_LOGIC, DUTY_PARAMS, execFdpGroups, amountWord } from './duty.js';
 
@@ -559,8 +559,7 @@ function special_call(ctx, params, rule) {
         continue;
       }
       const days = countSpecialCallDays(stay, params, match.exec, ctx.fdp);
-      const count = (n) => (n === 1 ? 'יממה אחת' : `${n} יממות`);
-      const explain = `קריאה מיוחדת: ${count(days.counted.length)} (${days.counted.map(dayOf).join(', ')}). ${days.reason}`;
+      const explain = days.reason;
       // כמה FDP נפרדים בסבב: כל יממה נרשמת על ה-FDP שהתחיל בה או לפניה (בעל המוצר, 29/09/2026).
       const parts = fdpParts(match.exec, ctx.fdp);
       const perPart = parts.map((part, i) => ({ part,
@@ -569,17 +568,17 @@ function special_call(ctx, params, rule) {
       // השהייה נוגעת ביותר מיממה אחת (`all`, לא `counted`): הערה קבועה, גם כשתואם לדוח, כדי
       // להסביר איזו יממה נספרת (20–21/07/2025: S/C רק על 20/07, היממה השנייה קצרה מהסף).
       if (perPart.length > 1) {
-        const each = perPart.map((x) => `${x.days.map(dayOf).join(', ')} על ⁦${describeRoute(x.part)}⁩`).join('; ');
-        ctx.note(match.exec.from, `${describePairing(match.exec)}: FDP נפרדים, מנוחה חוקית ביניהם, והקריאה המיוחדת נרשמת על כל אחד: ${each}.` +
-          (days.ownFdp ? '' : ` ${days.reason}`), rule);
+        const each = perPart.map((x) => `${x.days.map(dayOf).join(', ')} על ${flightsOf(x.part)}`).join(', ');
+        ctx.note(match.exec.from, `${flightsOf(match.exec)}: ${perPart.length === 2 ? 'שני' : perPart.length} FDP נפרדים, עם מנוחה חוקית ביניהם, ` +
+          `ולכן מגיעה קריאה מיוחדת על כל אחד: ${each}.` + (days.ownFdp ? '' : ` ${days.reason}`), rule);
         for (const x of perPart) {
           ctx.expectPairing(match.exec, 'sc', x.days.length * H(params.hours), rule,
-            `קריאה מיוחדת על ${describePairing(x.part)}: ${count(x.days.length)} (${x.days.map(dayOf).join(', ')}).`,
+            `${flightsOf(x.part)}: ${x.days.length === 1 ? 'יממה אחת' : `${x.days.length} יממות`} (${x.days.map(dayOf).join(', ')}).`,
             { date: x.days[0], dates: x.days });
         }
         continue;
       }
-      if (days.all.length > 1) ctx.note(match.exec.from, `${describePairing(match.exec)}: ${explain}`, rule);
+      if (days.all.length > 1) ctx.note(match.exec.from, `${flightsOf(match.exec)}: ${explain}`, rule);
       ctx.expectPairing(match.exec, 'sc', days.counted.length * H(params.hours), rule, explain);
       continue;
     }
@@ -645,24 +644,44 @@ function countSpecialCallDays(stay, params, pairing, fdp) {
   const lastDay = Math.floor((stay.end - 1) / 1440);
   const all = [];
   for (let d = firstDay; d <= lastDay; d++) all.push(addDays(stay.first, d));
-  if (stay.cutAtEnd) return { counted: all, all, reason: 'הסבב חוזר בחודש הבא; נספרות היממות עד סוף החודש, והיממה האחרונה נבדקת בחודש הבא.' };
-  if (all.length === 1) return { counted: all, all, reason: 'יממה אחת.' };
+  const list = (ds) => `(${ds.map(dayOf).join(', ')})`;
+  if (stay.cutAtEnd) {
+    return { counted: all, all, reason: `${countDays(all.length)} עד סוף החודש ${list(all)}. הסבב חוזר בחודש הבא, והיממה האחרונה נבדקת בחודש הבא.` };
+  }
+  if (all.length === 1) return { counted: all, all, reason: `יממה אחת ${list(all)}.` };
 
   if (pairing && lastFdpStartsOn(pairing, fdp, all.at(-1))) {
     return { counted: all, all, ownFdp: true, reason: `היממה האחרונה (${dayOf(all.at(-1))}) פותחת FDP נפרד, אחרי מנוחה חוקית, ולכן נספרת בלי בדיקת סף.` };
   }
 
+  // נוסח ההסבר: בעל המוצר, 29/09/2026.
   const total = stay.end - stay.start;
   const inLast = stay.end - lastDay * 1440;
   const gap = H(params.second_day_min_gap_hours);
   const min = H(params.second_day_min_hours);
-  const facts = `שהייה ${minToHhmm(total)}, מתוכה ${minToHhmm(inLast)} ביממה האחרונה`;
-  if (total > gap && inLast >= min) return { counted: all, all, reason: `${facts}: היממה האחרונה נספרת.` };
+  const which = all.length === 2 ? 'השנייה' : 'האחרונה';
+  const need = `שהייה של מעל ${minToHhmm(gap)} שעות, מתוכן לפחות ${minToHhmm(min)} ביממה ${which}`;
+  if (total > gap && inLast >= min) {
+    return { counted: all, all,
+      reason: `${all.length > 2 ? `${countDays(all.length)} ${list(all)}. ` : ''}בוצעה ${need}, ולכן מגיעה קריאה מיוחדת גם על היממה ${which}.` };
+  }
+  const counted = all.slice(0, -1);
   return {
-    counted: all.slice(0, -1),
+    counted,
     all,
-    reason: `${facts}. היממה האחרונה לא נספרת: נדרשים מעל ${minToHhmm(gap)} ברצף ולפחות ${minToHhmm(min)} בה.`,
+    reason: `${counted.length === 1 ? 'נספרת רק יממה אחת' : `נספרות רק ${counted.length} יממות`} ${list(counted)}. ` +
+      `סה"כ זמן שהייה: ${minToHhmm(total)} שעות, מתוכן ${minToHhmm(inLast)} ביממה ${which}. ` +
+      `נדרשת ${need}, ולכן אין קריאה מיוחדת על היממה ${which}.`,
   };
+}
+
+const countDays = (n) => (n === 1 ? 'נספרת יממה אחת' : `נספרות ${n} יממות`);
+
+/** מספרי הטיסות של הסבב לפתיח של הערה: LY5109-LY5110. מספר שחוזר ברצף נכתב פעם אחת. */
+function flightsOf(p) {
+  const nums = p.legs.map((l) => l.flight ?? (l.type === 'DHX' ? 'DH' : null)).filter(Boolean);
+  const unique = nums.filter((f, i) => f !== nums[i - 1]);
+  return unique.length ? `⁦${unique.join('-')}⁩` : describePairing(p);
 }
 
 /**
