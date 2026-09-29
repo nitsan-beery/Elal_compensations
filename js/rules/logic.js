@@ -824,6 +824,7 @@ function lost_hours_credit(ctx, params, rule) {
     // בלי טיסה שבוצעה, שורת הפירוט מציגה את הטיסה שתוכננה (בעל המוצר, 29/09/2026).
     else ctx.expect(assumed?.date ?? match.plan.from, key, lost, rule, note, { plannedRoute: describeRoute(match.plan) });
     ctx.markPairing(match.plan, 'lost_hours_credit');
+    for (const v of assumed?.values ?? []) ctx.assumeAnswer(match.plan, v);
   }
 }
 
@@ -846,7 +847,8 @@ function paidLostHours(ctx, planPairing) {
   // פיצוי אחר על הטיסה עצמה, ואז אי אפשר לייחס אותו לסבב שבוטל – ושואלים.
   const free = (d) => !ctx.execPairings.some((e) => e.dates.includes(d));
   const date = planPairing.dates.find((d) => free(d) && ctx.paidOnDate(d, first.column, key, first.lost));
-  return date ? { rule: rules[0], ...first, date, labels: rules.map((r) => r.logic.params?.answer_label).join(' או ') } : null;
+  return date ? { rule: rules[0], ...first, date, labels: rules.map((r) => r.logic.params?.answer_label).join(' או '),
+    values: rules.map((r) => r.logic.params?.answer_value) } : null;
 }
 
 /** סוג המטוס כמשפחה: B789 → B787, ‏B738 → B737. */
@@ -1069,6 +1071,7 @@ function assumeCancelled(ctx, match, rule) {
   const sc = ctx.rulesWithLogic('special_call')[0]?.logic?.params?.report_column ?? 'S/C';
   if (!ctx.reportedOn(match.exec, sc)) return false;
   noteCancelled(ctx, match, rule, `הדוח מזכה קריאה מיוחדת על ${describePairing(match.exec)}`);
+  ctx.assumeAnswer(match.plan, 'cancelled');
   return true;
 }
 
@@ -1098,6 +1101,7 @@ function assumeDiversion(ctx, match, rule) {
   if (diff == null || diff > 0) return false;
   ctx.markPairing(match.plan, 'diversion');
   ctx.markPairing(match.exec, 'diversion');
+  ctx.assumeAnswer(match.plan, 'diversion');
   ctx.note(match.plan.from, `סטיה לשדה משנה (נחיתה גם ב-${extra}): הקרדיט כבר כולל את כל מה שבוצע, ואין פער לתשלום.`, rule);
   return true;
 }

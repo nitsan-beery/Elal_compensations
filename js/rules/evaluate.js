@@ -106,8 +106,9 @@ export function evaluate({ rulesData, plan = null, exec = null, answers = {} }) 
         'אין חוק נתמך שקובע מה מגיע במקרה הזה. דורש בדיקה ידנית.' });
   }
 
+  const assumed = new Map(); // planId → ערכי התשובה שהאפליקציה הניחה בלי לשאול
   const ctx = makeContext({ out, timeline, domicile, codes, holidays: rulesData.holidays ?? {}, answers, plan, exec, supported, matches, planPairings,
-    period, fleet, fdp,
+    period, fleet, fdp, assumed,
     // בלי דוח ביצוע, הסבבים המתוכננים משמשים לחישוב הקרדיט והרי"ג הצפויים.
     execPairings: exec ? execPairings : planPairings });
 
@@ -124,7 +125,7 @@ export function evaluate({ rulesData, plan = null, exec = null, answers = {} }) 
   }
 
   attachLinkCandidates(out.questions, matches, ctx);
-  showSwaps(out, answers);
+  showSwaps(out, answers, assumed);
   noteChanges(out, supported);
   // כמו שאר הטבלאות: לפי תאריך. הערה בלי תאריך (על החודש כולו) בסוף.
   out.notes.sort((a, b) => (a.date ?? '￿').localeCompare(b.date ?? '￿'));
@@ -138,7 +139,7 @@ export function evaluate({ rulesData, plan = null, exec = null, answers = {} }) 
 
 // ---------- ctx: מה שהלוגיקות רואות ----------
 
-function makeContext({ out, timeline, domicile, codes, holidays, answers, plan, exec, supported, matches, planPairings, period, fleet, execPairings, fdp }) {
+function makeContext({ out, timeline, domicile, codes, holidays, answers, plan, exec, supported, matches, planPairings, period, fleet, execPairings, fdp, assumed }) {
   const absenceBy = new Map(); // date → Set(ruleId)
   const pairingTags = new Map(); // pairing.id → Set(tag)
   const askedIds = new Set();
@@ -173,6 +174,10 @@ function makeContext({ out, timeline, domicile, codes, holidays, answers, plan, 
     hasExec: !!exec,
     hasPlan: !!plan,
     answer: (id) => answers[id] ?? null,
+    /** תשובה על סבב מתוכנן שהאפליקציה מניחה בלי לשאול, כי הדוח כבר זיכה: לשורת השינוי ולהערה עליו. */
+    assumeAnswer(pairing, value) {
+      assumed.set(pairing.id, [...new Set([...(assumed.get(pairing.id) ?? []), value])]);
+    },
 
     /** קודי פעילות ביום (קרקע, סימולטור, כוננות), בלי היעדרות, הערות ו-DUM. לפי הדוח כשיש. */
     activityCodes(day) {
@@ -501,8 +506,10 @@ function describeMatch(m) {
  * שלו, עם ההחלפה בצד הביצוע: זה עדיין שינוי (בעל המוצר, 29/09/2026).
  * בלי קישור (טיסה בחודש אחר) – "בחודש אחר" בצד התכנון.
  * סבב שלא בוצע ונענה – התשובה מוצגת בצד הביצוע.
+ * בלי תשובה, כשהדוח כבר זיכה והאפליקציה הניחה אותה (`assumed`, planId → ערכים), מוצגת ההנחה
+ * באותה לשון (בעל המוצר, 29/09/2026).
  */
-function showSwaps(out, answers) {
+function showSwaps(out, answers, assumed) {
   const linkOf = new Map(); // execId → { planId | null, value }
   for (const [id, a] of Object.entries(answers)) {
     if (!LINKED_VALUES.includes(a?.value)) continue;
@@ -526,13 +533,17 @@ function showSwaps(out, answers) {
     if (c.how !== 'dates') continue;
     const a = answers[`cancelled:${c.planId}`] ?? answers[`replaced:${c.planId}`];
     if (a) c.label = DATES_OUTCOME[a.value] ?? c.label;
+    else if (assumed.has(c.planId)) c.label = outcomeOf(assumed.get(c.planId), DATES_OUTCOME) || c.label;
   }
 
   // סבב שלא בוצע: אחרי התשובה, בצד הביצוע מה שקרה לפיה. ריק רק עד שעונים.
   for (const c of out.changes) {
     if (c.how !== 'cancelled' || c.exec) continue;
     const a = answers[`cancelled:${c.planId}`];
-    if (!a) continue;
+    if (!a) {
+      if (assumed.has(c.planId)) c.exec = outcomeOf(assumed.get(c.planId), CANCELLED_OUTCOME) || null;
+      continue;
+    }
     const linked = a.link && out.changes.find((x) => x.execId === a.link)?.exec;
     c.exec = a.value === 'voluntary_swap' ? (a.link === GAVE_AWAY ? GAVE_AWAY_LABEL : `החלפה מרצוני – ${linked ?? 'טיסה בחודש אחר'}`)
       : a.value === 'replaced' ? `החלפה ביוזמת החברה – ${linked ?? 'טיסה בחודש אחר'}`
@@ -619,7 +630,11 @@ const DATES_OUTCOME = {
   trainee: 'הורדה מהטיסה ביוזמת החברה',
   swap_777: 'הועבר ל-777 (לא כשיר MFF)',
   other: 'סיבה אחרת',
+  diversion: 'סטיה לשדה משנה', // הנחה בלבד (`assumeDiversion`), אינה אפשרות בשאלה
 };
+
+/** ההנחה בלשון התשובות. כמה חוקים יכולים להסביר את אותו זיכוי, ואז כולם מופיעים. */
+const outcomeOf = (values, labels) => [...new Set(values.map((v) => labels[v]).filter(Boolean))].join(' או ');
 
 /** מה קרה לסבב שלא בוצע, לפי התשובה לשאלה עליו. */
 const CANCELLED_OUTCOME = {
