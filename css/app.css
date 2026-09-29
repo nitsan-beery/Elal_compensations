@@ -16,8 +16,8 @@
   --warn-bg: #fff4d6;
   --pending: #4a5a8c;
   --pending-bg: #e9edf8;
-  --plan: #1d5fb0;
-  --exec: #7b3fa0;
+  --plan: #3a7fd0;
+  --exec: #0d3a75;
   --radius: 10px;
   color-scheme: light dark;
 }
@@ -39,8 +39,8 @@
     --warn-bg: #3a2f14;
     --pending: #a9b8ea;
     --pending-bg: #252c44;
-    --plan: #7fb2f0;
-    --exec: #c99be8;
+    --plan: #a9cdf7;
+    --exec: #5b93dc;
   }
 }
 
