@@ -602,6 +602,7 @@ function noteChanges(out, supported) {
     // התוצאה לפי התשובה (למשל "הורדה מהטיסה ביוזמת החברה") כשהיא אינה תיאור של טיסה.
     const outcome = c.how === 'cancelled' && !c.execId && c.exec ? `${c.exec}, ` : '';
     let due;
+    let elsewhere = '';
     if (out.questions.some((q) => ids.some((id) => q.id.endsWith(`:${id}`)))) {
       due = 'ממתין לתשובה בשאלה על הסבב';
     } else {
@@ -610,6 +611,14 @@ function noteChanges(out, supported) {
         const logic = logicOf.get(e.ruleId);
         if (!CHANGE_DUE_LOGIC.has(logic)) continue;
         if (e.pairingId ? !ids.includes(e.pairingId) || !own(e.date) : !within(e.date)) continue;
+        // רשום על הטיסה הזאת, אבל שייך להחלפה של סבב מתוכנן אחר (`forPlan`): לא חלק ממה שמגיע עליה
+        // (10/06/2026: ה-RIG ‏05:10 של ההחלפה של LTN ב-11/06, בעל המוצר 29/09/2026).
+        if (e.forPlan && !ids.includes(e.forPlan)) {
+          const on = rangeOf(e.forPlan)?.[0];
+          elsewhere += ` בנוסף, בדוח רשום ביום הזה ${minToHhmm(e.min)} כקרדיט נוסף (${e.key === 'rig' ? 'RIG' : e.key.toUpperCase()}) ` +
+            `על ההחלפה ביוזמת החברה${on ? ` ב-${on.slice(8, 10)}/${on.slice(5, 7)}` : ''}.`;
+          continue;
+        }
         const what = DUE_WORDING[logic] ?? (logic === 'absence_day_credit' ? `קרדיט ${e.ruleTitle}` : e.shortTitle ?? e.ruleTitle);
         if (!byWhat.has(what)) byWhat.set(what, { min: 0, days: new Map() });
         const g = byWhat.get(what);
@@ -628,7 +637,7 @@ function noteChanges(out, supported) {
       });
       due = items.length ? `מגיע ${items.length > 1 ? `${items.slice(0, -1).join(', ')} ו${items.at(-1)}` : items[0]}` : 'לא מגיע קרדיט ולא פיצוי';
     }
-    out.notes.push({ date: c.date, message: `${c.label}: ${outcome}${due}.`, ruleId: null, ruleTitle: null });
+    out.notes.push({ date: c.date, message: `${c.label}: ${outcome}${due}.${elsewhere}`, ruleId: null, ruleTitle: null });
   }
 }
 

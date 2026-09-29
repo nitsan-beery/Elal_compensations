@@ -753,21 +753,27 @@ function higher_of_planned_performed(ctx, params, rule) {
       : !alreadyMinSlip ? ` ${extraCredit}.`
       : extra > 0 ? ` ${extraCredit}: ${minToHhmm(alreadyMinSlip)} בהשלמה לסליפ קצר ועוד ${minToHhmm(extra)}.`
       : ` ההפרש, ${minToHhmm(diff)}, כבר כלול בהשלמה לסליפ קצר (${minToHhmm(alreadyMinSlip)}).`;
-    ctx.note(match.plan.from, `החלפה ביוזמת החברה: מגיע הקרדיט של הטיסה הארוכה מבין השתיים: ${longer}.${topUp}`, rule);
+
+    // לפעמים ההשלמה נרשמת על סבב סמוך ולא על המחליף עצמו (10/06/2026: LTN 11–12 → OTP 11,
+    // ה-Rig 05:10 נרשם על OTP של 10/06). ההערה אומרת איפה, כדי שהסכום ביום האחר לא ייראה
+    // כזיכוי על הטיסה של אותו יום (בעל המוצר, 29/09/2026).
+    const m = { ...match, exec };
+    const paidOn = extra <= 0 ? null
+      : findShortfallPaid(ctx, m, extra, column, reportColumn) ?? findShortfallPaid(ctx, m, extra, column, reportColumn, true);
+    const moved = paidOn && paidOn !== exec ? paidOn : null;
+    const movedText = moved ? ` בדוח הוא רשום ב-${dayOf(moved.from)}.` : '';
+    ctx.note(match.plan.from, `החלפה ביוזמת החברה: מגיע הקרדיט של הטיסה הארוכה מבין השתיים: ${longer}.${topUp}${movedText}`, rule);
     // ביום של הטיסה שבוצעה, כשהוא אחר.
     if (exec.from !== match.plan.from) ctx.note(exec.from, 'החלפה ביוזמת החברה: קרדיט על הטיסה שבוצעה.', rule);
     if (extra <= 0) continue;
 
-    // לפעמים ההשלמה נרשמת על סבב סמוך ולא על המחליף עצמו (10/06/2026: LTN 11–12 → OTP 11,
-    // ה-Rig 05:10 נרשם על OTP של 10/06).
-    const m = { ...match, exec };
-    const paidOn = findShortfallPaid(ctx, m, extra, column, reportColumn) ?? findShortfallPaid(ctx, m, extra, column, reportColumn, true);
-    const where = paidOn && paidOn !== exec ? `, ונרשם על ${describePairing(paidOn)}` : '';
+    const where = moved ? `, ונרשם על ${describePairing(moved)}` : '';
     const why = alreadyMinSlip
       ? `ההפרש הכולל לפי "הגבוה מבין השתיים" הוא ${minToHhmm(diff)}, ומתוכו ${minToHhmm(alreadyMinSlip)} כבר בהשלמה למינימום שמוצגת בנפרד; הנוסף כאן ${minToHhmm(extra)}`
       : 'ההפרש לפי "הגבוה מבין השתיים"';
+    // `forPlan`: הציפייה שייכת להחלפה של הסבב המתוכנן, גם כשהיא רשומה על סבב אחר (`noteChanges`).
     ctx.expectPairing(paidOn ?? exec, column, extra, rule,
-      `המתוכנן (${describePairing(match.plan)}) גבוה מהמבוצע. ${why}${where}.`);
+      `המתוכנן (${describePairing(match.plan)}) גבוה מהמבוצע. ${why}${where}.`, moved ? { forPlan: match.plan.id } : undefined);
   }
 }
 
