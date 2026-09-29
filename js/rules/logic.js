@@ -40,7 +40,7 @@ function credit_from_scheduled(ctx, params, rule) {
     const airReturnMatch = ctx.matches.find((m) => m.exec === pairing);
     if (airReturnMatch?.how === 'air_return') {
       const top = minSlipTopUp(ctx, pairing);
-      ctx.note(pairing.from, `חזרה לבסיס אחרי ההמראה: מגיע קרדיט לפי זמן הטיסה בפועל, ${minToHhmm(sumLegs(pairing))}` +
+      ctx.note(pairing.from, `חזרה לבסיס אחרי היציאה: מגיע קרדיט לפי זמן הטיסה בפועל, ${minToHhmm(sumLegs(pairing))}` +
         (top ? `, ועוד השלמה לסליפ קצר ${minToHhmm(top)}` : '') + '.', rule);
     }
     const days = new Map(); // date → {min, why[]}
@@ -57,7 +57,7 @@ function credit_from_scheduled(ctx, params, rule) {
       if (!ctx.hasExec) { add(leg.date, leg.skdDur); continue; }
       const dur = legCreditDur(leg, pairing, ctx.domicile);
       const basis = isAirReturn(leg)
-        ? `${leg.flight} חזרה ל-${leg.org} אחרי ההמראה: קרדיט לפי זמן הביצוע בפועל, ${minToHhmm(dur)}`
+        ? `${leg.flight} חזרה ל-${leg.org} אחרי היציאה: קרדיט לפי זמן הביצוע בפועל, ${minToHhmm(dur)}`
         : dur !== leg.skdDur
           ? `${leg.flight}: לג שאינו נוגע בבסיס, קרדיט לפי הביצוע ${minToHhmm(dur)} ולא ${minToHhmm(leg.skdDur)} מתוכננות`
           : null;
