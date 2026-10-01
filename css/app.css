@@ -240,7 +240,14 @@ tr.detail td { background: var(--surface-2); font-size: .85rem; color: var(--mut
 .rules-tools input[type="search"], .rules-tools select {
   padding: .4rem .6rem; border: 1px solid var(--line); border-radius: 8px; background: var(--surface);
 }
-.rules-tools input[type="search"] { flex: 1 1 14rem; min-width: 0; }
+.rules-tools .search-box { position: relative; flex: 1 1 14rem; min-width: 0; display: flex; }
+.rules-tools input[type="search"] { flex: 1; min-width: 0; padding-inline-end: 2rem; }
+.rules-tools input[type="search"]::-webkit-search-cancel-button { -webkit-appearance: none; appearance: none; }
+.search-clear {
+  position: absolute; inset-block: 0; inset-inline-end: .2rem; width: 1.8rem; border: 0; background: none;
+  color: var(--muted); font-size: 1.3rem; line-height: 1; cursor: pointer;
+}
+.search-clear[hidden] { display: none; }
 .rule { border: 1px solid var(--line); border-radius: 8px; padding: .7rem .8rem; margin-bottom: .6rem; background: var(--surface); }
 .rule.inactive { opacity: .65; }
 .rule-head { display: flex; flex-wrap: wrap; gap: .35rem .6rem; align-items: center; }

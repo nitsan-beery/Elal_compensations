@@ -798,7 +798,10 @@ function renderRules() {
         </div>
         <p class="small muted">${esc(data.precedence ?? '')}</p>
         <div class="rules-tools no-print">
-          <input type="search" placeholder="חיפוש בחוקים…" aria-label="חיפוש">
+          <span class="search-box">
+            <input type="search" placeholder="חיפוש בחוקים…" aria-label="חיפוש">
+            <button type="button" class="search-clear" data-action="clear-search" aria-label="נקה חיפוש" title="נקה חיפוש" hidden>×</button>
+          </span>
           <select aria-label="קטגוריה">
             <option value="">כל הקטגוריות</option>
             ${Object.entries(CATEGORY_LABEL).map(([k, v]) => `<option value="${k}">${v}</option>`).join('')}
@@ -813,7 +816,20 @@ function renderRules() {
       </div>
       <div data-role="list"></div>`;
     root.dataset.built = '1';
-    $('input[type="search"]', root).addEventListener('input', (e) => { rulesUi.q = e.target.value; renderRuleList(); });
+    const searchInput = $('input[type="search"]', root);
+    const clearSearch = $('[data-action="clear-search"]', root);
+    searchInput.addEventListener('input', (e) => {
+      rulesUi.q = e.target.value;
+      clearSearch.hidden = !rulesUi.q;
+      renderRuleList();
+    });
+    clearSearch.addEventListener('click', () => {
+      searchInput.value = '';
+      rulesUi.q = '';
+      clearSearch.hidden = true;
+      renderRuleList();
+      searchInput.focus();
+    });
     $('select', root).addEventListener('change', (e) => { rulesUi.category = e.target.value; renderRuleList(); });
     $('input[type="checkbox"]', root).addEventListener('change', (e) => { rulesUi.showCancelled = e.target.checked; syncCancelledOption(root); renderRuleList(); });
     $('[data-action="export-json"]', root).addEventListener('click', exportRulesJson);
