@@ -67,7 +67,7 @@ export function evaluate({ rulesData, plan = null, exec = null, answers = {} }) 
   const matches = mode === 'full'
     ? matchPairings(planPairings, execPairings)
     : mode === 'exec' ? execPairings.map((e) => ({ plan: null, exec: e, how: 'noplan' })) : [];
-  explainByActivity(matches, timeline, codes, sickCodeTest(supported));
+  explainByActivity(matches, timeline, codes, sickCodeTest(supported), movableCodeTest(supported));
 
   const out = {
     period,
@@ -451,9 +451,14 @@ function fleetOf(plan) {
  * פעילות קרקע (בעל המוצר, 27/09/2026): מחלה מתוארת "בוטל עקב מחלה", כוננות "בוטל והוצבת
  * לכוננות", ושילוב של שתיהן (21/06/2026: SCK_F ‏21/06 ואחריו SBY_S ‏22/06) מפרט את התאריך של
  * כל אחת, כדי להבחין ביניהן. פעילות קרקע שאין חוק נתמך לקוד שלה עוברת לבדיקה ידנית.
+ *
+ * פעילות קרקע מזוהה גם בקוד המקוצר של הרומה (CPT_B הוא CPT_BAS; 17/06/2025: TBS שהוחלף ב-CPT_B).
+ * פעילות שאפשר להזיז בלי פיצוי (HOME, `moved_ok_prefixes`) אינה מסבירה למה הסבב לא בוצע, כי
+ * היא יכולה לזוז לימיו גם בלי קשר אליו, ולכן השאלה נשאלת (בעל המוצר, 01/10/2026).
  */
-function explainByActivity(matches, timeline, codes, isSick) {
-  const ground = new Set(codes.ground_activity ?? []);
+function explainByActivity(matches, timeline, codes, isSick, isMovable) {
+  const groundCodes = new Set(codes.ground_activity ?? []);
+  const ground = { has: (c) => !isMovable(c) && (groundCodes.has(c) || groundCodes.has(expandCode(c, codes))) };
   const reportLeave = new Set(Object.entries(codes.plan_to_report ?? {})
     .filter(([full]) => (codes.leave ?? []).includes(full)).map(([, short]) => short));
   for (const c of codes.leave ?? []) reportLeave.add(c);
@@ -469,7 +474,7 @@ function explainByActivity(matches, timeline, codes, isSick) {
     }
     if (!found.length) continue;
     const kinds = new Set(found.map((f) => f.kind));
-    if (kinds.has('other')) continue; // קוד לא מוכר: לא מסיקים ממנו, והשאלה תישאל
+    if (kinds.has('other')) continue; // קוד לא מוכר, או פעילות שאפשר להזיז: לא מסיקים ממנו, והשאלה תישאל
     m.replacedBy = found;
     m.byLeave = kinds.has('leave') || kinds.has('sick'); // היעדרות או מחלה, גם כשמעורבת גם כוננות
     m.how = kinds.has('ground') ? 'replaced_by_ground'
@@ -482,6 +487,12 @@ function explainByActivity(matches, timeline, codes, isSick) {
 
 /** קוד כוננות: כל קוד שמתחיל ב-SBY. כוננות אינה פעילות קרקע, גם ש-SBY_S/SBY_L ברשימת הקודים ל-`ground_activity` (בעל המוצר, 27/09/2026). */
 const isStandbyCode = (code) => code.startsWith('SBY');
+
+/** פעילות קרקע שאפשר להזיז ליום אחר בחודש בלי פיצוי: `moved_ok_prefixes` של החוקים הנתמכים (HOME). */
+function movableCodeTest(supported) {
+  const prefixes = supported.flatMap((r) => r.logic.params?.moved_ok_prefixes ?? []);
+  return (c) => prefixes.some((p) => c.startsWith(p));
+}
 
 /** קודי מחלה (כולל מחלת בן משפחה): הקודים של חוקי זיכוי היום שמסמנים את עמודת SICK או SCKFM בדוח. */
 function sickCodeTest(supported) {
