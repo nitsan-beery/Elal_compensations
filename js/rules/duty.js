@@ -152,8 +152,8 @@ function same_fdp_rounds(ctx, params, rule) {
 
     const why = `${describePairing(p1)} ו-${describePairing(p2)}: ${minToHhmm(Math.max(rest, 0))} בין הנחיתה (${hhmm(s1.end)}) ` +
       `להתייצבות (${hhmm(s2.start - report)}), פחות ממנוחה חוקית של ${params.legal_rest_hours} שעות. שתי טיסות סבב באותו FDP`;
-    // ההסבר שמוצג מתחת לטיסה, ליד שם החוק (בעל המוצר, 01/10/2026).
-    const explain = `${minToHhmm(Math.max(rest, 0))} בין הנחיתה (${hhmm(s1.end)}) להתייצבות (${hhmm(s2.start - report)}).`;
+    // מתחת לטיסה רק שם החוק, בלי השעות (בעל המוצר, 01/10/2026).
+    const explain = '';
     if (!ctx.hasExec) {
       ctx.expectPairing(p2, keyFor(params.report_column), H(params.hours), rule, why, { explain });
       continue;
