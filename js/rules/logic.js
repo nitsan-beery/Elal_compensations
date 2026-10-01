@@ -819,9 +819,15 @@ function lost_hours_credit(ctx, params, rule) {
       : params.answer_label;
     const note = `${describePairing(match.plan)}: ${why}. השעות שהפסיד` +
       (match.exec ? `, בנוסף לקרדיט של ${describePairing(match.exec)}.` : '.');
-    if (match.exec) ctx.expectPairing(match.exec, key, lost, rule, note);
+    // ההסבר בשורת הפירוט קצר, ושם החוק בתגית שאחריו משלים אותו (בעל המוצר, 01/10/2026). כשהרומה
+    // זיכתה בלי שנשאלה שאלה: "…האפליקציה מניחה" ואחריו התגית; כשכמה חוקים מתאימים, כולם בשמם.
+    // אחרי תשובה: רק התגית, ועל טיסה שבוצעה במקום – גם של איזו טיסה השעות.
+    const explain = assumed
+      ? 'הרומה מזכה את השעות והסיבה אינה בקבצים. האפליקציה מניחה' + (assumed.titles.length > 1 ? ` אחת מאלה: ${assumed.titles.join(' או ')}.` : '')
+      : match.exec ? `השעות של ${describePairing(match.plan)}.` : '';
+    if (match.exec) ctx.expectPairing(match.exec, key, lost, rule, note, { explain });
     // בלי טיסה שבוצעה, שורת הפירוט מציגה את הטיסה שתוכננה (בעל המוצר, 29/09/2026).
-    else ctx.expect(assumed?.date ?? match.plan.from, key, lost, rule, note, { plannedRoute: describeRoute(match.plan) });
+    else ctx.expect(assumed?.date ?? match.plan.from, key, lost, rule, note, { plannedRoute: describeRoute(match.plan), explain });
     ctx.markPairing(match.plan, 'lost_hours_credit');
     for (const v of assumed?.values ?? []) ctx.assumeAnswer(match.plan, v);
   }
@@ -847,7 +853,7 @@ function paidLostHours(ctx, planPairing) {
   const free = (d) => !ctx.execPairings.some((e) => e.dates.includes(d));
   const date = planPairing.dates.find((d) => free(d) && ctx.paidOnDate(d, first.column, key, first.lost));
   return date ? { rule: rules[0], ...first, date, labels: rules.map((r) => r.logic.params?.answer_label).join(' או '),
-    values: rules.map((r) => r.logic.params?.answer_value) } : null;
+    titles: rules.map((r) => r.title), values: rules.map((r) => r.logic.params?.answer_value) } : null;
 }
 
 /** סוג המטוס כמשפחה: B789 → B787, ‏B738 → B737. */
