@@ -40,8 +40,8 @@ function credit_from_scheduled(ctx, params, rule) {
     const airReturnMatch = ctx.matches.find((m) => m.exec === pairing);
     if (airReturnMatch?.how === 'air_return') {
       const top = minSlipTopUp(ctx, pairing);
-      ctx.note(pairing.from, `חזרה לבסיס אחרי היציאה: מגיע קרדיט לפי זמן הטיסה בפועל, ${minToHhmm(sumLegs(pairing, ctx.domicile))}` +
-        (top ? `, ועוד השלמה לסליפ קצר ${minToHhmm(top)}` : '') + '.', rule);
+      // בלי סכומים: הם בטבלת הפירוט, בשורה של הטיסה (בעל המוצר, 01/10/2026).
+      ctx.note(pairing.from, `חזרה לבסיס אחרי היציאה: קרדיט לפי זמן הטיסה בפועל${top ? ' והשלמה לסליפ קצר' : ''}.`, rule);
     }
     const days = new Map(); // date → {min, why[]}
     const add = (date, min, why) => {
@@ -570,9 +570,6 @@ function special_call(ctx, params, rule) {
         continue;
       }
       const days = countSpecialCallDays(stay, params, match.exec, ctx.fdp);
-      // הסכום בהערה של ההדרכה שבוטלה (בעל המוצר, 01/10/2026).
-      const amount = minToHhmm(days.counted.length * H(params.hours));
-      if (training) ctx.amendNote(match.exec, `, פיצוי של ${amount}.`);
       // כל יממה שמגיעה עליה קריאה מיוחדת היא שורה משלה בטבלת הפירוט (`perDay`), בלי הסבר: הסכום
       // והחוק כבר בשורה (בעל המוצר, 01/10/2026). רק יממה שנספרה אחרי בדיקת הסף מוסברת בשורה שלה
       // (`lastWhy`). יממה שלא עמדה בסף אין לה שורה, ולכן ההסבר עליה בהערות, ביום שלה (`skipped`;
@@ -740,16 +737,10 @@ function higher_of_planned_performed(ctx, params, rule) {
     // הערה בכל החלפה ביוזמת החברה, גם כשהטיסה שבוצעה ארוכה יותר ואין הפרש (בעל המוצר, 29/09/2026).
     const planned = ctx.plannedCredit(match.plan);
     const performed = planned - diff;
-    // בלי מספרי הטיסות: הם כבר בשינויים בין תכנון לביצוע (בעל המוצר, 29/09/2026).
-    const longer = diff > 0
-      ? `${minToHhmm(planned)} של הטיסה המתוכננת, מול ${minToHhmm(performed)} של הטיסה שבוצעה`
-      : `${minToHhmm(performed)} של הטיסה שבוצעה, מול ${minToHhmm(planned)} של הטיסה המתוכננת`;
-    // כאן שם העמודה כן מופיע, לבקשת בעל המוצר (29/09/2026).
-    const extraCredit = `מגיע ${minToHhmm(diff)} כקרדיט נוסף (${column === 'rig' ? 'RIG' : reportColumn})`;
-    const topUp = diff <= 0 ? ''
-      : !alreadyMinSlip ? ` ${extraCredit}.`
-      : extra > 0 ? ` ${extraCredit}: ${minToHhmm(alreadyMinSlip)} בהשלמה לסליפ קצר ועוד ${minToHhmm(extra)}.`
-      : ` ההפרש, ${minToHhmm(diff)}, כבר כלול בהשלמה לסליפ קצר (${minToHhmm(alreadyMinSlip)}).`;
+    // ההערה היא כותרת בלבד, בלי סכומים: ההשוואה והתוספת בטבלת הפירוט, בשורה של התוספת. רק כשאין
+    // שורה כזאת ההערה אומרת למה: הטיסה שבוצעה היא הארוכה, או שההפרש כבר בהשלמה לסליפ קצר
+    // (בעל המוצר, 01/10/2026).
+    const which = diff <= 0 ? ': הטיסה שבוצעה' : extra <= 0 ? ': ההפרש כבר כלול בהשלמה לסליפ קצר' : '';
 
     // לפעמים ההשלמה נרשמת על סבב סמוך ולא על המחליף עצמו (10/06/2026: LTN 11–12 → OTP 11,
     // ה-Rig 05:10 נרשם על OTP של 10/06). ההערה אומרת איפה, כדי שהסכום ביום האחר לא ייראה
@@ -758,8 +749,7 @@ function higher_of_planned_performed(ctx, params, rule) {
     const paidOn = extra <= 0 ? null
       : findShortfallPaid(ctx, m, extra, column, reportColumn) ?? findShortfallPaid(ctx, m, extra, column, reportColumn, true);
     const moved = paidOn && paidOn !== exec ? paidOn : null;
-    const movedText = moved ? ` ברומה הוא רשום ב-${dayOf(moved.from)}.` : '';
-    ctx.note(match.plan.from, `החלפה ביוזמת החברה: מגיע הקרדיט של הטיסה הארוכה מבין השתיים: ${longer}.${topUp}${movedText}`, rule);
+    ctx.note(match.plan.from, `החלפה ביוזמת החברה: קרדיט של הטיסה הארוכה מבין השתיים${which}.`, rule);
     // ביום של הטיסה שבוצעה, כשהוא אחר.
     if (exec.from !== match.plan.from) ctx.note(exec.from, 'החלפה ביוזמת החברה: קרדיט על הטיסה שבוצעה.', rule);
     if (extra <= 0) continue;
@@ -1230,7 +1220,7 @@ function training_cancelled_flight(ctx, params, rule) {
     if (training.length && !marked.has(pairing)) {
       marked.add(pairing);
       ctx.markPairing(pairing, 'training_cancelled');
-      ctx.note(day.date, `${training.join(', ')} תוכנן ל-${dayOf(day.date)}, ובמקומו הוצבת לטיסה: מגיעה קריאה מיוחדת (ס' 17.ג).`, rule, { dueFor: pairing.id });
+      ctx.note(day.date, `${training.join(', ')} בוטל והוצבת לטיסה: קריאה מיוחדת.`, rule);
     }
 
     const own = ctx.matches.find((m) => m.exec === pairing);
@@ -1319,7 +1309,7 @@ function standby_end_for_bid(ctx, params, rule) {
       }
       if (answer.value === 'standby_bid') {
         ctx.markPairing(pairing, 'standby_bid');
-        ctx.note(pairing.from, `סיום כוננות (${range}) בגלל זכייה במכרז: מגיע קרדיט הטיסה וקריאה מיוחדת על ימי הטיסה.`, rule);
+        ctx.note(pairing.from, `סיום כוננות (${range}) בגלל זכייה במכרז: קרדיט הטיסה וקריאה מיוחדת על ימי הטיסה.`, rule);
       } else if (answer.value === 'standby_activated') {
         // הקרדיט על ימי ההפעלה נבדק בחוק ההפעלה מכוננות.
         ctx.markPairing(pairing, 'standby_activated');
@@ -1380,7 +1370,7 @@ function standby_activation(ctx, params, rule) {
       ctx.markPairing(pairing, 'standby_activated');
       const flown = run.filter((d) => pairing.from <= d && d <= pairing.to);
       const beyond = pairing.to > run.at(-1);
-      ctx.note(pairing.from, `הפעלה מהכוננות (${range}): מגיע קרדיט הטיסה, בלי קריאה מיוחדת.`, rule);
+      ctx.note(pairing.from, `הפעלה מהכוננות (${range}): קרדיט הטיסה, בלי קריאה מיוחדת.`, rule);
       if (beyond) {
         ctx.review(`${describePairing(pairing)}: הופעלת מהכוננות (${range}), והחזרה אחרי סוף הכוננות. החברה רשאית להפעיל ` +
           'כונן רק כשהחזרה מתוכננת להסתיים בתוך הכוננות (2018 ס\' 88). דורש בדיקה ידנית.', rule);
@@ -1397,7 +1387,7 @@ function standby_activation(ctx, params, rule) {
         ctx.review(`${describePairing(pairing)}: על ${what} מגיע הגבוה מבין קרדיט הטיסה (${credit == null ? 'לא ידוע' : minToHhmm(credit)}) ` +
           `לבין ${flown.length} × ${minToHhmm(value.min)} (${value.rule.title}; 2018 ס' 98). הכוננות גבוהה יותר, ועוד לא ראינו איך זה נרשם ברומה. דורש בדיקה ידנית.`, rule);
       } else {
-        ctx.note(pairing.from, `הפעלה מהכוננות: קרדיט הטיסה, ${minToHhmm(credit)}, גבוה מערך ${what} (${flown.length} × ${minToHhmm(value.min)}), ולכן אין תוספת.`, rule);
+        ctx.note(pairing.from, 'הפעלה מהכוננות: קרדיט הטיסה גבוה מערך הכוננות, ולכן אין תוספת.', rule);
       }
     }
   }

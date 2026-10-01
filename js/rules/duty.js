@@ -36,7 +36,7 @@ export function applyOtherReason(ctx, answer, rule, { what, date, pairing = null
   if (typeof answer.creditMin !== 'number') return false;
   const min = answer.creditMin;
   const note = `${what}: "${answer.text}"`;
-  ctx.note(date, `${note} – ${min > 0 ? `מגיע קרדיט ${minToHhmm(min)}` : 'לא מגיע קרדיט'}.`, rule, { byUser: true, ruleTitle: null });
+  ctx.note(date, `${note} – ${min > 0 ? 'קרדיט נוסף' : 'לא מגיע קרדיט'}.`, rule, { byUser: true, ruleTitle: null });
   // בשורת ההשוואה: "סיבה אחרת" ולא שם החוק, שאינו מתאר את מה שקרה ("טיסה שבוטלה ללא פיצוי").
   const shown = { ...extra, ruleTitle: 'סיבה אחרת, לפי תשובת המשתמש' };
   if (min > 0 && pairing) ctx.expectPairing(pairing, 'rig', min, rule, note, shown);

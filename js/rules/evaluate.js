@@ -280,13 +280,6 @@ function makeContext({ out, timeline, domicile, codes, holidays, answers, plan, 
       noteKeys.add(k);
       out.notes.push({ date, message, ...ruleRef(rule), ...extra });
     },
-    /**
-     * חוק שרשם הערה על סבב בלי לדעת כמה מגיע (`extra.dueFor`, מזהה הסבב) משאיר אותה פתוחה,
-     * והחוק שקובע את הסכום משלים אותה, במקום הערה שנייה על אותו פיצוי (בעל המוצר, 01/10/2026).
-     */
-    amendNote(pairing, text) {
-      for (const n of out.notes) if (n.dueFor === pairing.id) n.message = n.message.replace(/[.]$/, '') + text;
-    },
     ask(question) {
       if (askedIds.has(question.id) || answers[question.id]) return;
       askedIds.add(question.id);
@@ -614,6 +607,9 @@ const DUE_WORDING = {
  * מה מגיע על כל שינוי בין התכנון לביצוע, מתחת לשורה שלו בטבלת השינויים ולא בהערות (`notes` של
  * השינוי; בעל המוצר, 01/10/2026). הערה שחוק רשם על השינוי עוברת לשם (`placed`); לשאר נבנה משפט
  * כללי: מה מגיע עליו לפי החוקים, שלא מגיע דבר, או שממתינים לתשובה.
+ *
+ * ההערה היא כותרת, בלי סכומים: כל סכום כתוב בטבלת הפירוט, בשורה של הטיסה או היום, והכפילות
+ * מיותרת (בעל המוצר, 01/10/2026).
  */
 function explainChanges(out, supported) {
   const logicOf = new Map(supported.map((r) => [r.id, r.logic.id]));
@@ -642,45 +638,26 @@ function explainChanges(out, supported) {
 
     // קצר ובלי מספרי הטיסות, שכבר מופיעים בשינויים: רק מה מגיע או לא מגיע (בעל המוצר, 29/09/2026).
     // התוצאה לפי התשובה (למשל "הורדה מהטיסה ביוזמת החברה") כשהיא אינה תיאור של טיסה.
-    const outcome = c.how === 'cancelled' && !c.execId && c.exec ? `${c.exec}, ` : '';
+    const outcome = c.how === 'cancelled' && !c.execId && c.exec ? `${c.exec}: ` : '';
     let due;
-    let elsewhere = '';
     if (out.questions.some((q) => ids.some((id) => q.id.endsWith(`:${id}`)))) {
       due = 'ממתין לתשובה בשאלה על הסבב';
     } else {
-      const byWhat = new Map();
+      const items = new Set();
       for (const e of out.expectations) {
         const logic = logicOf.get(e.ruleId);
         if (!CHANGE_DUE_LOGIC.has(logic)) continue;
         if (e.pairingId ? !ids.includes(e.pairingId) || !own(e.date) : !within(e.date)) continue;
-        // רשום על הטיסה הזאת, אבל שייך להחלפה של סבב מתוכנן אחר (`forPlan`): לא חלק ממה שמגיע עליה
-        // (10/06/2026: ה-RIG ‏05:10 של ההחלפה של LTN ב-11/06, בעל המוצר 29/09/2026).
-        if (e.forPlan && !ids.includes(e.forPlan)) {
-          const on = rangeOf(e.forPlan)?.[0];
-          elsewhere += ` בנוסף, ברומה רשום ביום הזה ${minToHhmm(e.min)} כקרדיט נוסף (${e.key === 'rig' ? 'RIG' : e.key.toUpperCase()}) ` +
-            `על החלפה ביוזמת החברה${on ? ` ב-${on.slice(8, 10)}/${on.slice(5, 7)}` : ''}.`;
-          continue;
-        }
-        const what = DUE_WORDING[logic] ?? (logic === 'absence_day_credit' ? `קרדיט ${e.ruleTitle}` : e.shortTitle ?? e.ruleTitle);
-        if (!byWhat.has(what)) byWhat.set(what, { min: 0, days: new Map() });
-        const g = byWhat.get(what);
-        g.min += e.min;
-        // זיכוי יומי (בלי סבב): כמה ביום ועל אילו ימים, כדי שהסכום יהיה מובן (13/07/2026: 2 × 02:30).
-        if (!e.pairingId) g.days.set(e.date, (g.days.get(e.date) ?? 0) + e.min);
+        // רשום על הטיסה הזאת, אבל שייך להחלפה של סבב מתוכנן אחר (`forPlan`): לא חלק ממה שמגיע עליה,
+        // ובפירוט הוא מוצג על הטיסה שהחליפה (10/06/2026: ה-RIG ‏05:10 של ההחלפה של LTN ב-11/06).
+        if (e.forPlan && !ids.includes(e.forPlan)) continue;
+        items.add(DUE_WORDING[logic] ?? (logic === 'absence_day_credit' ? `קרדיט ${e.shortTitle ?? e.ruleTitle}` : e.shortTitle ?? e.ruleTitle));
       }
-      const items = [...byWhat].map(([what, { min, days }]) => {
-        if (days.size < 2 || [...days.values()].reduce((s, m) => s + m, 0) !== min) return `${what} ${minToHhmm(min)}`;
-        const ds = [...days.keys()].sort().map((d) => `${d.slice(8, 10)}/${d.slice(5, 7)}`);
-        const on = `${ds.slice(0, -1).join(', ')} ו-${ds.at(-1)}`;
-        const amounts = new Set(days.values());
-        const each = amounts.size === 1 ? `${minToHhmm([...amounts][0])} ליום על ${on}`
-          : [...days].sort(([a], [b]) => a.localeCompare(b)).map(([d, m]) => `${minToHhmm(m)} ב-${d.slice(8, 10)}/${d.slice(5, 7)}`).join(', ');
-        return `${what} ${each}, סה"כ ${minToHhmm(min)}`;
-      });
       // בלי "מגיע" בראש המשפט, כמו בהערות שהחוקים רושמים על שינוי (בעל המוצר, 01/10/2026).
-      due = items.length ? (items.length > 1 ? `${items.slice(0, -1).join(', ')} ו${items.at(-1)}` : items[0]) : 'לא מגיע קרדיט ולא פיצוי';
+      const list = [...items];
+      due = list.length ? (list.length > 1 ? `${list.slice(0, -1).join(', ')} ו${list.at(-1)}` : list[0]) : 'לא מגיע קרדיט ולא פיצוי';
     }
-    c.notes = [{ message: `${outcome}${due}.${elsewhere}`, byUser: false }];
+    c.notes = [{ message: `${outcome}${due}.`, byUser: false }];
   }
 }
 
