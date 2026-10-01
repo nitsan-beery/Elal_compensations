@@ -591,16 +591,23 @@ function cancelStatus(ctx, planPairing) {
 /**
  * תאריך אירוע שאינו קבוע משנה לשנה ואינו בקבצים, כמו פתיחת שנת הלימודים: המשתמש בוחר
  * אותו ביומן (בקשת בעל המוצר, 24/09/2026). ברירת המחדל היא `default_day` בחודש, ואם הוא
- * חל באחד מימי `skip_weekdays` – היום שאחריו. עד שנבחר תאריך אין מה לבדוק, והשאלה היא
- * הפריט הפתוח. אחרי הבחירה החוק נבדק כרגיל: לפי הביצוע כשיש, ואחרת לפי התכנון.
+ * חל באחד מימי `skip_weekdays` – היום שאחריו. עד שנבחר תאריך השאלה היא הפריט הפתוח, ואחרי
+ * הבחירה החוק נבדק כרגיל: לפי הביצוע כשיש, ואחרת לפי התכנון. שואלים רק כשהרומה לא זיכתה
+ * (בעל המוצר, 01/10/2026): כשהיא כבר מזכה את הפיצוי על פעילות בחלון של ברירת המחדל, התאריך
+ * מונח בלי לשאול. `chosen` – התאריך נבחר ביומן.
  */
-function askOccasionDate(ctx, occ, rule) {
+function occasionDate(ctx, occ) {
   const ask = occ.ask_date;
-  const id = `${ask.id}:${ctx.period.year}`;
-  const answered = ctx.answer(id);
-  if (answered?.value) return answered.value;
+  const answered = ctx.answer(`${ask.id}:${ctx.period.year}`);
+  if (answered?.value) return { date: answered.value, chosen: true };
   let def = isoDate(ctx.period.year, ctx.period.month, ask.default_day ?? 1);
   while ((ask.skip_weekdays ?? []).includes(weekday(def))) def = addDays(def, 1);
+  return { date: def, chosen: false };
+}
+
+function askOccasionDate(ctx, occ, rule, def) {
+  const ask = occ.ask_date;
+  const id = `${ask.id}:${ctx.period.year}`;
   ctx.ask({
     id,
     date: def,
@@ -611,7 +618,6 @@ function askOccasionDate(ctx, occ, rule) {
     dateInput: { value: def, min: ctx.monthFirst, max: ctx.timeline.at(-1).date },
     ruleId: rule.id,
   });
-  return null;
 }
 
 /**
@@ -632,10 +638,13 @@ function special_date_activity(ctx, params, rule) {
 
   for (const occ of params.occasions ?? []) {
     let date = occ.dates?.[String(ctx.period.year)];
-    // תאריך שאינו קבוע משנה לשנה ואינו בקבצים: המשתמש בוחר אותו ביומן.
+    // תאריך שאינו קבוע משנה לשנה ואינו בקבצים: המשתמש בוחר אותו ביומן. עד הבחירה נבדקת
+    // ברירת המחדל, רק כדי לראות אם הרומה כבר מזכה עליה; אם לא – שואלים, ולא בודקים דבר.
+    let askDate = null;
     if (!date && occ.ask_date && (occ.months ?? []).includes(ctx.period.month)) {
-      date = askOccasionDate(ctx, occ, rule);
-      if (!date) continue;
+      const picked = occasionDate(ctx, occ);
+      date = picked.date;
+      if (!picked.chosen) askDate = () => askOccasionDate(ctx, occ, rule, picked.date);
     }
     if (!date) {
       if ((occ.months ?? []).includes(ctx.period.month)) {
@@ -645,13 +654,14 @@ function special_date_activity(ctx, params, rule) {
     }
     const wFrom = at(addDays(date, occ.from.day_offset), parseClock(occ.from.time));
     const wTo = at(addDays(date, occ.to.day_offset), parseClock(occ.to.time));
-    if (wTo <= monthStart || wFrom >= monthEnd) continue;
+    if (wTo <= monthStart || wFrom >= monthEnd) { askDate?.(); continue; }
     const window = `${ddmm(dateOf(wFrom))} ${hhmm(wFrom)} – ${ddmm(dateOf(wTo))} ${hhmm(wTo)}`;
     // הפיצוי נרשם גם כהערה, כדי שיהיה ברור על מה הוא (בעל המוצר, 01/10/2026).
     const oneDay = dateOf(wFrom) === dateOf(wTo - 1);
     const head = oneDay ? `${occ.title} (${ddmm(date)})` : occ.title;
     const span = oneDay ? `בין ${hhmm(wFrom)} ל-${hhmm(wTo)}` : `בחלון ${window}`;
-    const due = `מגיע ${amountWord(params.report_column)} ${minToHhmm(H(params.hours))}`;
+    const due = `מגיע ${amountWord(params.report_column)} ${minToHhmm(H(params.hours))}` +
+      (askDate ? '. התאריך הונח בלי לשאול, כי הרומה כבר מזכה את הפיצוי' : '');
 
     let hit = null;
     for (const p of pairings) {
@@ -661,15 +671,16 @@ function special_date_activity(ctx, params, rule) {
       if (start < wTo && end > wFrom) { hit = p; break; }
     }
     if (hit) {
+      if (askDate && !ctx.paidOn(hit, params.report_column, key, H(params.hours))) { askDate(); continue; }
       ctx.expectPairing(hit, key, H(params.hours), rule, `${occ.title}: ${describePairing(hit)} בחלון ${window}`);
       ctx.note(date, `${head}: ${describePairing(hit)} בפעילות ${span}. ${due}.`, rule);
       continue;
     }
-    if (params.flight_activity_only) continue;
+    if (params.flight_activity_only) { askDate?.(); continue; }
 
     const days = ctx.timeline.filter((d) => d.date >= dateOf(wFrom) && d.date <= dateOf(wTo - 1));
     const coded = days.find((d) => ctx.activityCodes(d).length);
-    if (!coded) continue;
+    if (!coded || (askDate && !ctx.paidOnDate(coded.date, params.report_column, key, H(params.hours)))) { askDate?.(); continue; }
     const id = `occasion:${rule.id}:${date}`;
     const answered = ctx.answer(id);
     const a = answered ?? (ctx.paidOnDate(coded.date, params.report_column, key, H(params.hours)) ? { value: 'yes' } : null);
