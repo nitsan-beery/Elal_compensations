@@ -57,6 +57,7 @@ const state = {
   filter: 'comp',
   notices: [],
   files: {}, // kind → {id: "2026-07:plan", url} של קובץ ה-PDF השמור, ללחיצה על הקובץ באזור ההעלאה
+  sections: { key: null, open: new Map() }, // אילו חלקים בתוצאות של החודש הפתוח פתוחים ואילו מכווצים
 };
 
 // ---------- אתחול ----------
@@ -310,9 +311,17 @@ async function openMonth(key, { quiet = false } = {}) {
 
 // ---------- תוצאות ----------
 
-function renderResults() {
+/**
+ * מה שהמשתמש פתח או כיווץ נשאר כך בין ציור לציור של אותו חודש (בעל המוצר, 01/10/2026): שינוי
+ * תשובה, תשובה חדשה וסינון אינם מחזירים את החלקים לברירת המחדל. חודש אחר מתחיל מברירת המחדל.
+ * `keepDom` false: המצב שעל המסך אינו של המשתמש (ההדפסה פותחת הכול), ולכן לא נקרא ממנו.
+ */
+function renderResults(keepDom = true) {
   const root = $('#results');
   const res = state.result;
+  const key = state.record?.key ?? null;
+  if (state.sections.key !== key) state.sections = { key, open: new Map() };
+  else if (keepDom) for (const d of root.querySelectorAll('details[data-section]')) state.sections.open.set(d.dataset.section, d.open);
   const parts = [state.notices.map((n) => `<div class="notice ${n.kind}">${esc(n.text)}</div>`).join('')];
   if (!res) { root.innerHTML = parts.join(''); return; }
 
@@ -326,6 +335,9 @@ function renderResults() {
   parts.push(renderNotes(res));
   parts.push(renderAnswered());
   root.innerHTML = parts.join('');
+  for (const d of root.querySelectorAll('details[data-section]')) {
+    if (state.sections.open.has(d.dataset.section)) d.open = state.sections.open.get(d.dataset.section);
+  }
   bindResults(root);
 }
 
@@ -496,7 +508,7 @@ function renderComparison(res) {
   };
   const rows = all.filter(FILTERS[state.filter] ?? FILTERS.all);
   const chip = (id, label) => `<button class="chip" data-filter="${id}" aria-pressed="${state.filter === id}">${label} (${counts[id]})</button>`;
-  return `<details class="card" open>
+  return `<details class="card" data-section="detail" open>
     <summary><h2 style="display:inline">פירוט</h2></summary>
     <div class="filters">${chip('comp', 'רק פיצויים')}${chip('all', 'הכול')}${chip('bad', 'פערים')}</div>
     <div class="table-wrap"><table>
@@ -534,7 +546,7 @@ function renderExpectations(res) {
   ];
   // הקרדיט של כל טיסה הוא רק רעש: הסך הכול בשורה העליונה, ובטבלה רק הפיצויים.
   const shown = rows.filter((e) => !CREDIT_KEYS.has(e.key));
-  return `<details class="card" open>
+  return `<details class="card" data-section="expected" open>
     <summary><h2 style="display:inline">קרדיט ופיצויים צפויים</h2></summary>
     <p class="small">סה"כ קרדיט: <span class="num">${minToHhmm(sumKeys(CREDIT_KEYS))}</span> · סה"כ COM: <span class="num">${minToHhmm(sumKeys(COM_KEYS))}</span></p>
     ${second.length ? `<p class="small">${second.join(' · ')}</p>` : ''}
@@ -559,7 +571,7 @@ const datesFirst = (text) => text.replace(/⁦(\S+) ([^⁩]*)⁩/g, '⁦$1⁩ �
 function renderChanges(res) {
   const changes = res.changes.filter((c) => c.how !== 'exact' && c.how !== 'noplan');
   if (res.mode !== 'full') return '';
-  return `<details class="card" ${changes.length ? 'open' : ''}>
+  return `<details class="card" data-section="changes" ${changes.length ? 'open' : ''}>
     <summary><h2 style="display:inline">שינויים בין תכנון לביצוע <span class="count">${changes.length}</span></h2></summary>
     ${changes.length ? `<ul class="list">${changes.map((c) => `<li>
       <strong class="num">${ddmm(c.date)}</strong> ${esc(c.label)}
@@ -571,7 +583,7 @@ function renderChanges(res) {
 function renderAnswered() {
   const answers = Object.entries(state.record?.answers ?? {});
   if (!answers.length) return '';
-  return `<details class="card">
+  return `<details class="card" data-section="answered">
     <summary><h2 style="display:inline">תשובות שנשמרו <span class="count">${answers.length}</span></h2></summary>
     <ul class="list">${answers.map(([id, a]) => `<li class="row">
       <span>${esc(describeQuestionId(id))}: <strong>${esc(a.value === 'partial' && a.count ? `ויתרתי מרצוני על ${a.count === 1 ? 'יום אחד' : `${a.count} ימים`}` : answerLabel(a.value))}</strong>
@@ -586,7 +598,7 @@ function renderAnswered() {
 
 function renderNotes(res) {
   if (!res.notes.length) return '';
-  return `<details class="card">
+  return `<details class="card" data-section="notes">
     <summary><h2 style="display:inline">הערות <span class="count">${res.notes.length}</span></h2></summary>
     <ul class="list">${res.notes.map((n) => `<li>${n.date ? `<strong class="num">${ddmm(n.date)}</strong> ` : ''}${esc(n.message)}${n.byUser ? ' <span class="small muted">לפי תשובת המשתמש</span>' : ''}${n.ruleTitle ? ` <span class="tag">${esc(n.ruleTitle)}</span>` : ''}</li>`).join('')}</ul>
   </details>`;
@@ -619,7 +631,7 @@ function bindResults(root) {
     const restore = () => {
       window.removeEventListener('afterprint', restore);
       state.filter = prevFilter;
-      renderResults();
+      renderResults(false);
     };
     window.addEventListener('afterprint', restore);
     window.print();
