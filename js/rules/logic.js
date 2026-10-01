@@ -33,14 +33,14 @@ const H = (hours) => hoursToMin(hours) ?? 0;
 function credit_from_scheduled(ctx, params, rule) {
   const monthEnd = ctx.timeline.at(-1).date;
   for (const pairing of ctx.execPairings) {
-    if (sumLegs(pairing) == null) {
+    if (sumLegs(pairing, ctx.domicile) == null) {
       ctx.review(`${describePairing(pairing)}: חסרות שעות מתוכננות (SkdDur) ברומה, ולא ניתן לחשב קרדיט.`, rule);
       continue;
     }
     const airReturnMatch = ctx.matches.find((m) => m.exec === pairing);
     if (airReturnMatch?.how === 'air_return') {
       const top = minSlipTopUp(ctx, pairing);
-      ctx.note(pairing.from, `חזרה לבסיס אחרי היציאה: מגיע קרדיט לפי זמן הטיסה בפועל, ${minToHhmm(sumLegs(pairing))}` +
+      ctx.note(pairing.from, `חזרה לבסיס אחרי היציאה: מגיע קרדיט לפי זמן הטיסה בפועל, ${minToHhmm(sumLegs(pairing, ctx.domicile))}` +
         (top ? `, ועוד השלמה לסליפ קצר ${minToHhmm(top)}` : '') + '.', rule);
     }
     const days = new Map(); // date → {min, why[]}
@@ -143,8 +143,14 @@ function splitAtMidnight(leg, domicile) {
   return { shift, before: clock + dur <= 1440 ? null : 1440 - clock };
 }
 
-const sumLegs = (pairing) => pairing.legs.reduce((acc, l) => {
-  const dur = isAirReturn(l) ? l.actDur ?? l.skdDur : l.skdDur;
+/**
+ * הקרדיט של סבב שבוצע, כפי ש-`credit_from_scheduled` מזכה אותו (`legCreditDur`): כולל רגל שאינה נוגעת
+ * בבסיס, שמזוכה לפי הביצוע. כל חוק שמשווה מול "קרדיט הטיסה שבוצעה" (הגבוה מבין השתיים, השלמה
+ * לסליפ קצר, כוננות שהופעלה) משווה מול הסכום הזה, כדי שהסך הכול לא יעבור את מה שמגיע
+ * (09/09/2024: ‏TLV-SOF-TIV-TLV מזוכה 06:54 ולא 06:33 המתוכננות; 01/10/2026).
+ */
+const sumLegs = (pairing, domicile) => pairing.legs.reduce((acc, l) => {
+  const dur = legCreditDur(l, pairing, domicile);
   return acc == null || dur == null ? null : acc + dur;
 }, 0);
 
@@ -177,9 +183,9 @@ function minSlipGroups(ctx, params) {
  * מסבב קצר באותו FDP (2018 ס' 27.2 מדבר על סליפ; 04/08/2025: BUS 06:16 ו-LCA 02:20 → Rig 02:40).
  * סבב שהקרדיט שלו אינו ידוע, או אפס, אינו נבדק.
  */
-function minSlipShortfall(group, min) {
+function minSlipShortfall(group, min, domicile) {
   return group.reduce((sum, p) => {
-    const credit = sumLegs(p);
+    const credit = sumLegs(p, domicile);
     return credit == null || credit === 0 ? sum : sum + Math.max(0, min - credit);
   }, 0);
 }
@@ -193,7 +199,7 @@ function minSlipTopUp(ctx, execPairing) {
   if (!rule) return 0;
   const params = rule.logic.params ?? {};
   const group = minSlipGroups(ctx, params).find((g) => g.some((p) => p.id === execPairing.id));
-  return group ? minSlipShortfall(group, H(params.min_credit_hours)) : 0;
+  return group ? minSlipShortfall(group, H(params.min_credit_hours), ctx.domicile) : 0;
 }
 
 /**
@@ -201,7 +207,7 @@ function minSlipTopUp(ctx, execPairing) {
  * ו-LCA 02:15) הדוח רשם Rig 02:41, ארבע דקות פחות מ-02:45 של קריאה זו, וזה הפער היחיד שנשאר.
  */
 function expectMinSlip(ctx, group, min, params, rule) {
-  const shortfall = minSlipShortfall(group, min);
+  const shortfall = minSlipShortfall(group, min, ctx.domicile);
   if (!shortfall) return;
   const note = group.length === 1
     ? `השלמה ל-${params.min_credit_hours} שעות`
@@ -239,7 +245,7 @@ function absence_day_credit(ctx, params, rule) {
         if (onFlightDay.has(pairing)) continue;
         onFlightDay.add(pairing);
         const days = ctx.timeline.filter((d) => pairing.dates.includes(d.date) && matchesCode(d, params, ctx)).length;
-        const flown = sumLegs(pairing);
+        const flown = sumLegs(pairing, ctx.domicile);
         if (flown == null || flown < credit * days) {
           ctx.review(`${describePairing(pairing)}: ${rule.title} ביום שבו הופעלת לסליפ. הקרדיט הוא הגבוה מבין הסליפ ` +
             `(${flown == null ? 'לא ידוע' : minToHhmm(flown)}) לבין ${days} ימים × ${minToHhmm(credit)}. דורש בדיקה ידנית.`, rule);
@@ -773,7 +779,7 @@ function higher_of_planned_performed(ctx, params, rule) {
 /** ההפרש בין הקרדיט המתוכנן לבין מה שבוצע במקומו, או null כשאי אפשר לחשב את אחד מהם. */
 function plannedMinusPerformed(ctx, planPairing, execPairing) {
   const planned = ctx.plannedCredit(planPairing);
-  const performed = execPairing ? sumLegs(execPairing) : null;
+  const performed = execPairing ? sumLegs(execPairing, ctx.domicile) : null;
   return planned == null || performed == null ? null : planned - performed;
 }
 
@@ -1378,7 +1384,7 @@ function standby_activation(ctx, params, rule) {
 
       // הכוננות רשומה בדוח בימי הטיסה: חוק זיכוי היום כבר משווה בין הטיסה לכוננות.
       if (value && flown.some((d) => ctx.execCodes(ctx.timeline.find((x) => x.date === d)).some((c) => codeIn(c, value.rule.logic.params.report_codes, value.rule.logic.params.report_code_prefixes)))) continue;
-      const credit = sumLegs(pairing);
+      const credit = sumLegs(pairing, ctx.domicile);
       const what = `${flown.length === 1 ? 'יום הכוננות שבו' : `${flown.length} ימי הכוננות שבהם`} טסת (${flown.map(dayOf).join(', ')})`;
       if (!value) {
         ctx.review(`${describePairing(pairing)}: על ${what} מגיע הגבוה מבין קרדיט הטיסה לבין ערך ימי הכוננות (2018 ס' 98). ` +
