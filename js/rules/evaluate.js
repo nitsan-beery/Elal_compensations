@@ -663,7 +663,8 @@ function explainChanges(out, supported) {
           : [...days].sort(([a], [b]) => a.localeCompare(b)).map(([d, m]) => `${minToHhmm(m)} ב-${d.slice(8, 10)}/${d.slice(5, 7)}`).join(', ');
         return `${what} ${each}, סה"כ ${minToHhmm(min)}`;
       });
-      due = items.length ? `מגיע ${items.length > 1 ? `${items.slice(0, -1).join(', ')} ו${items.at(-1)}` : items[0]}` : 'לא מגיע קרדיט ולא פיצוי';
+      // בלי "מגיע" בראש המשפט, כמו בהערות שהחוקים רושמים על שינוי (בעל המוצר, 01/10/2026).
+      due = items.length ? (items.length > 1 ? `${items.slice(0, -1).join(', ')} ו${items.at(-1)}` : items[0]) : 'לא מגיע קרדיט ולא פיצוי';
     }
     c.notes = [{ message: `${outcome}${due}.${elsewhere}`, byUser: false }];
   }
