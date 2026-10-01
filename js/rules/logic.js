@@ -455,6 +455,8 @@ function unexplained_report_amount(ctx, params, rule) {
     const extra = ctx.reportedOn(p, params.report_column) - ctx.expectedAround(p, key);
     if (extra !== H(params.hours)) continue;
     ctx.expectPairing(p, key, extra, rule, `${describePairing(p)}: ${minToHhmm(extra)} שאף חוק אחר אינו מסביר. ${params.hint}`, { hint: true });
+    // לא "מגיע": הפיצוי כבר ברומה, ואין בקבצים מה שמסביר אותו.
+    ctx.note(p.from, `ברומה רשום פיצוי ${minToHhmm(extra)} שאף חוק אחר אינו מסביר. ${params.hint}`, rule);
   }
 }
 

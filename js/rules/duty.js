@@ -152,8 +152,11 @@ function same_fdp_rounds(ctx, params, rule) {
 
     const why = `${describePairing(p1)} ו-${describePairing(p2)}: ${minToHhmm(Math.max(rest, 0))} בין הנחיתה (${hhmm(s1.end)}) ` +
       `להתייצבות (${hhmm(s2.start - report)}), פחות ממנוחה חוקית של ${params.legal_rest_hours} שעות. שתי טיסות סבב באותו FDP`;
+    const due = `שתי טיסות סבב באותו FDP: ${minToHhmm(Math.max(rest, 0))} בין הנחיתה (${hhmm(s1.end)}) להתייצבות (${hhmm(s2.start - report)}). ` +
+      `מגיע ${amountWord(params.report_column)} ${minToHhmm(H(params.hours))}.`;
     if (!ctx.hasExec) {
       ctx.expectPairing(p2, keyFor(params.report_column), H(params.hours), rule, why);
+      ctx.note(p2.from, due, rule, { ruleTitle: null });
       continue;
     }
     const [e1, e2] = [performedAsPlanned(ctx, p1), performedAsPlanned(ctx, p2)];
@@ -163,6 +166,7 @@ function same_fdp_rounds(ctx, params, rule) {
     }
     // `jointWith`: הפיצוי על שתי הטיסות יחד, ובטבלת הפירוט הוא שורה אחת לשני הסבבים (04/08/2025).
     ctx.expectPairing(e2, keyFor(params.report_column), H(params.hours), rule, why, { jointWith: [e1.id] });
+    ctx.note(e2.from, due, rule, { ruleTitle: null });
   }
 }
 
@@ -656,12 +660,9 @@ function special_date_activity(ctx, params, rule) {
     const wTo = at(addDays(date, occ.to.day_offset), parseClock(occ.to.time));
     if (wTo <= monthStart || wFrom >= monthEnd) { askDate?.(); continue; }
     const window = `${ddmm(dateOf(wFrom))} ${hhmm(wFrom)} – ${ddmm(dateOf(wTo))} ${hhmm(wTo)}`;
-    // הפיצוי נרשם גם כהערה, כדי שיהיה ברור על מה הוא (בעל המוצר, 01/10/2026).
-    const oneDay = dateOf(wFrom) === dateOf(wTo - 1);
-    const head = oneDay ? `${occ.title} (${ddmm(date)})` : occ.title;
-    const span = oneDay ? `בין ${hhmm(wFrom)} ל-${hhmm(wTo)}` : `בחלון ${window}`;
-    const due = `מגיע ${amountWord(params.report_column)} ${minToHhmm(H(params.hours))}` +
-      (askDate ? '. התאריך הונח בלי לשאול, כי הרומה כבר מזכה את הפיצוי' : '');
+    // הפיצוי נרשם גם כהערה, קצרה: שהייתה פעילות מטעם החברה בשעות האלה, וכמה מגיע (בעל המוצר, 01/10/2026).
+    const span = dateOf(wFrom) === dateOf(wTo - 1) ? `בין ${hhmm(wFrom)} ל-${hhmm(wTo)}` : `בחלון ${window}`;
+    const due = `${occ.title}: ${ctx.hasExec ? 'בוצעה' : 'מתוכננת'} פעילות מטעם החברה ${span}. מגיע ${amountWord(params.report_column)} ${minToHhmm(H(params.hours))}.`;
 
     let hit = null;
     for (const p of pairings) {
@@ -673,7 +674,7 @@ function special_date_activity(ctx, params, rule) {
     if (hit) {
       if (askDate && !ctx.paidOn(hit, params.report_column, key, H(params.hours))) { askDate(); continue; }
       ctx.expectPairing(hit, key, H(params.hours), rule, `${occ.title}: ${describePairing(hit)} בחלון ${window}`);
-      ctx.note(date, `${head}: ${describePairing(hit)} בפעילות ${span}. ${due}.`, rule);
+      ctx.note(date, due, rule, { ruleTitle: null });
       continue;
     }
     if (params.flight_activity_only) { askDate?.(); continue; }
@@ -699,7 +700,7 @@ function special_date_activity(ctx, params, rule) {
     } else if (a.value === 'yes') {
       ctx.expect(coded.date, key, H(params.hours), rule, `${occ.title}: ${ctx.activityCodes(coded).join(', ')} בחלון ${window} ` +
         `(${answered ? 'לפי תשובתך' : `הרומה מזכה את הפיצוי`})`);
-      ctx.note(date, `${head}: ${ctx.activityCodes(coded).join(', ')} ${span}${answered ? ', ולפי תשובתך היית בפעילות מטעם החברה' : ''}. ${due}.`, rule);
+      ctx.note(date, due, rule, { ruleTitle: null });
     }
   }
 }
