@@ -335,6 +335,9 @@ function makeContext({ out, timeline, domicile, codes, holidays, answers, plan, 
       return rule ? hoursToMin(rule.logic.params?.min_credit_hours) : null;
     },
 
+    /** הימים שבהם הסבב רשום בדוח, כולל יום שהקרדיט התפצל אליו: הימים של השורה שלו בפירוט. */
+    reportDates: (pairing) => reportDates(pairing, timeline, domicile),
+
     /** סכום עמודה בדוח על ימי הסבב, כולל יום שהקרדיט התפצל אליו. */
     reportedOn(pairing, column) {
       return reportDates(pairing, timeline, domicile)

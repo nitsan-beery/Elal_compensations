@@ -203,18 +203,22 @@ function minSlipTopUp(ctx, execPairing) {
 }
 
 /**
- * כל סבב ב-FDP מקבל השלמה למינימום לפי הקרדיט שלו בלבד. ב-25/11/2025 וב-30/12/2025 (BUS 05:04
- * ו-LCA 02:15) הדוח רשם Rig 02:41, ארבע דקות פחות מ-02:45 של קריאה זו, וזה הפער היחיד שנשאר.
+ * כל סבב ב-FDP מקבל השלמה למינימום לפי הקרדיט שלו בלבד, והיא רשומה עליו: ההסבר בשורה שלו הוא
+ * "השלמה ל-5 שעות", בלי להזכיר את שאר הסבבים שב-FDP, שאינם קשורים אליה (04/08/2025: רק LCA קצר;
+ * בעל המוצר, 01/10/2026). ב-25/11/2025 וב-30/12/2025 (BUS 05:04 ו-LCA 02:15) הדוח רשם Rig 02:41,
+ * ארבע דקות פחות מ-02:45 של קריאה זו, וזה הפער היחיד שנשאר.
  */
 function expectMinSlip(ctx, group, min, params, rule) {
-  const shortfall = minSlipShortfall(group, min, ctx.domicile);
-  if (!shortfall) return;
-  const note = group.length === 1
-    ? `השלמה ל-${params.min_credit_hours} שעות`
-    : `השלמה ל-${params.min_credit_hours} שעות לכל סבב קצר, על ${group.length} סבבים באותו FDP (${group.map(describePairing).join(', ')})`;
-  // בהסבר שבשורה בלי רשימת הסבבים, שכבר כתובים בה.
-  ctx.expectPairing(group.at(-1), 'rig', shortfall, rule, note,
-    { reason: `השלמה ל-${params.min_credit_hours} שעות`, explain: `${note.replace(/ \(.*\)$/, '')}.` });
+  const note = `השלמה ל-${params.min_credit_hours} שעות`;
+  for (const p of group) {
+    const shortfall = minSlipShortfall([p], min, ctx.domicile);
+    if (!shortfall) continue;
+    // סבב אחר מה-FDP שרשום ברומה באותם ימים חולק איתו שורה בפירוט, ולכן ההסבר אומר על איזו טיסה
+    // ההשלמה (25/11/2025). כשלסבב הקצר שורה משלו, מספר הטיסה כבר כתוב בה (04/08/2025).
+    const days = ctx.reportDates(p).join();
+    const shared = group.some((o) => o !== p && ctx.reportDates(o).join() === days);
+    ctx.expectPairing(p, 'rig', shortfall, rule, note, { reason: note, explain: `${shared ? `${flightsOf(p)}: ` : ''}${note}.` });
+  }
 }
 
 // ---------- ימי היעדרות וזיכוי ----------
