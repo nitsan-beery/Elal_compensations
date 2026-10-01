@@ -607,7 +607,10 @@ function explainChanges(out, supported) {
   for (const c of out.changes) {
     if (c.how === 'exact' || c.how === 'noplan') continue;
     const ids = [c.planId, c.execId].filter(Boolean);
-    const ranges = ids.map(rangeOf).filter(Boolean);
+    // סבב שבוצע במקום סבב שתוכנן בימים אחרים, כשלסבב שלא בוצע יש שורה משלו: כל שורה עם ההערה של הימים
+    // שלה, ולא "לא מגיע קרדיט על היום הזה" גם מתחת לטיסה שבוצעה (09/09/2024, בעל המוצר 01/10/2026).
+    const planRow = !!c.execId && !!c.planId && out.changes.some((p) => p !== c && p.planId === c.planId && !p.execId);
+    const ranges = (planRow ? [c.execId] : ids).map(rangeOf).filter(Boolean);
     // שורה אחת מכמה על אותו סבב (`splitChangesByFdp`): רק מה שנרשם בימים שלה.
     const own = (d) => c.until === undefined || (c.date <= d && (!c.until || d < c.until));
     const within = (d) => !!d && own(d) && ranges.some(([from, to]) => from <= d && d <= to);
