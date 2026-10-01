@@ -753,14 +753,17 @@ function attachLinkCandidates(questions, matches, ctx) {
 /**
  * קודי היום בדוח הביצוע, בלי מסלולי הטיסה ("TLV-AMS"). רגל שחוזרת לשדה המוצא
  * (TLV→TLV) מופיעה במסלולים כ-"LEG" (15/02/2026), ולכן גם הוא מסלול ביום שיש בו רגל כזו.
- * קוד מ-`ignored_report_codes` (UNF_B) אינו מזכה בכלום ואינו מוצג, ולכן מושמט כאן.
+ * קוד מ-`ignored_report_codes` (UNF_B), או שמתחיל ב-`ignored_report_code_prefixes` (DUM: ‏DUM_A
+ * לצד LCA ב-08/01/2026), אינו מזכה בכלום ואינו מוצג, ולכן מושמט כאן.
  */
 function execCodesOf(day, codes) {
   const details = day?.exec?.details;
   if (!details) return [];
   const hasReturnLeg = (day.exec.legs ?? []).some((l) => l.org && l.org === l.dst);
   const hidden = new Set(codes?.ignored_report_codes ?? []);
-  return details.split(/[,\s]+/).filter((t) => t && !/^[A-Z]{3}-[A-Z]{3}$/.test(t) && !(hasReturnLeg && t === 'LEG') && !hidden.has(t));
+  const hiddenPrefixes = codes?.ignored_report_code_prefixes ?? [];
+  return details.split(/[,\s]+/).filter((t) => t && !/^[A-Z]{3}-[A-Z]{3}$/.test(t) && !(hasReturnLeg && t === 'LEG') &&
+    !hidden.has(t) && !hiddenPrefixes.some((p) => t.startsWith(p)));
 }
 
 /** קוד היעדרות: ברשימה, או מתחיל בקידומת היעדרות (SCK_F, 21/06/2026). */
