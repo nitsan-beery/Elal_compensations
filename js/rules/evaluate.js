@@ -127,13 +127,16 @@ export function evaluate({ rulesData, plan = null, exec = null, answers = {} }) 
   attachLinkCandidates(out.questions, matches, ctx);
   showSwaps(out, answers, assumed);
   splitChangesByFdp(out, matches, ctx, fdp);
-  noteCompensations(out, noteChanges(out, supported));
+  explainChanges(out, supported);
+  explainCompensations(out);
   if (exec) {
     out.comparison = compare({ out, timeline, execPairings, domicile, codes, fdp });
-    noteUnexplained(out);
+    explainUnexplained(out);
     out.totals = compareTotals(out, exec);
     warnMissingColumns(out, exec);
   }
+  // מה שמוסבר בטבלת השינויים אינו חוזר בהערות (בעל המוצר, 01/10/2026).
+  out.notes = out.notes.filter((n) => !n.placed);
   // כמו שאר הטבלאות: לפי תאריך. הערה בלי תאריך (על החודש כולו) בסוף.
   out.notes.sort((a, b) => (a.date ?? '￿').localeCompare(b.date ?? '￿'));
   return out;
@@ -594,12 +597,11 @@ const DUE_WORDING = {
 };
 
 /**
- * הערה על כל שינוי בין התכנון לביצוע (בעל המוצר, 29/09/2026). שינוי שחוק כבר רשם עליו הערה
- * מוסבר שם; לשאר נרשמת הערה כללית: מה השתנה, ומה מגיע עליו לפי החוקים, או שממתינים לתשובה.
- * מחזירה את הציפיות שההערות האלה כבר מפרטות.
+ * מה מגיע על כל שינוי בין התכנון לביצוע, מתחת לשורה שלו בטבלת השינויים ולא בהערות (`notes` של
+ * השינוי; בעל המוצר, 01/10/2026). הערה שחוק רשם על השינוי עוברת לשם (`placed`); לשאר נבנה משפט
+ * כללי: מה מגיע עליו לפי החוקים, שלא מגיע דבר, או שממתינים לתשובה.
  */
-function noteChanges(out, supported) {
-  const noted = new Set();
+function explainChanges(out, supported) {
   const logicOf = new Map(supported.map((r) => [r.id, r.logic.id]));
   const rangeOf = (id) => String(id ?? '').match(/^(\d{4}-\d{2}-\d{2})\.\.(\d{4}-\d{2}-\d{2}):/)?.slice(1) ?? null;
   for (const c of out.changes) {
@@ -609,7 +611,17 @@ function noteChanges(out, supported) {
     // שורה אחת מכמה על אותו סבב (`splitChangesByFdp`): רק מה שנרשם בימים שלה.
     const own = (d) => c.until === undefined || (c.date <= d && (!c.until || d < c.until));
     const within = (d) => !!d && own(d) && ranges.some(([from, to]) => from <= d && d <= to);
-    if (out.notes.some((n) => CHANGE_LOGIC.has(logicOf.get(n.ruleId)) && within(n.date))) continue;
+    const ruled = out.notes.filter((n) => !n.aside && CHANGE_LOGIC.has(logicOf.get(n.ruleId)) && within(n.date));
+    if (ruled.length) {
+      // שם השינוי כבר בשורה שלו, ולכן הוא יורד מראש ההערה.
+      const leads = [c.label, c.label.replace('מרצוני', 'מרצון')].map((l) => `${l}: `);
+      c.notes = ruled.map((n) => {
+        n.placed = true;
+        const lead = leads.find((l) => n.message.startsWith(l));
+        return { message: lead ? n.message.slice(lead.length) : n.message, byUser: !!n.byUser };
+      });
+      continue;
+    }
 
     // קצר ובלי מספרי הטיסות, שכבר מופיעים בשינויים: רק מה מגיע או לא מגיע (בעל המוצר, 29/09/2026).
     // התוצאה לפי התשובה (למשל "הורדה מהטיסה ביוזמת החברה") כשהיא אינה תיאור של טיסה.
@@ -636,7 +648,6 @@ function noteChanges(out, supported) {
         if (!byWhat.has(what)) byWhat.set(what, { min: 0, days: new Map() });
         const g = byWhat.get(what);
         g.min += e.min;
-        noted.add(e);
         // זיכוי יומי (בלי סבב): כמה ביום ועל אילו ימים, כדי שהסכום יהיה מובן (13/07/2026: 2 × 02:30).
         if (!e.pairingId) g.days.set(e.date, (g.days.get(e.date) ?? 0) + e.min);
       }
@@ -651,40 +662,32 @@ function noteChanges(out, supported) {
       });
       due = items.length ? `מגיע ${items.length > 1 ? `${items.slice(0, -1).join(', ')} ו${items.at(-1)}` : items[0]}` : 'לא מגיע קרדיט ולא פיצוי';
     }
-    out.notes.push({ date: c.date, message: `${c.label}: ${outcome}${due}.${elsewhere}`, ruleId: null, ruleTitle: null });
+    c.notes = [{ message: `${outcome}${due}.${elsewhere}`, byUser: false }];
   }
-  return noted;
 }
 
-/** ציפייה לפיצוי, להבדיל מקרדיט: COM ו-S/C. */
-const isCompensation = (e) => e.key === 'com' || e.key === 'sc';
+/** ציפייה שיש לה שורה משלה בטבלת הפירוט, עם הסבר: פיצוי (COM ו-S/C) ו-Rig. */
+const EXPLAINED_KEYS = new Set(['com', 'sc', 'rig']);
 
 /**
- * כל פיצוי (COM ו-S/C, לא Rig) מופיע בהערות עם ההסבר שלו (בעל המוצר, 01/10/2026). חוק שרשם
- * הערה משלו באותו יום (או על החודש כולו), ושינוי שההערה עליו כבר מפרטת את הפיצוי (`noted`),
- * אינם נרשמים שוב. לשאר: שם החוק, ההסבר של הציפייה בלי תיאור הסבב שבראשו, והסכום. שם החוק
- * כבר בראש ההערה, ולכן היא בלי תגית החוק (`ruleTitle`).
+ * כל פיצוי וכל Rig מוסבר בשורה שלו, מתחת לטיסה, ולא בהערות (`explain`; בעל המוצר, 01/10/2026):
+ * בטבלת הפירוט, ובתכנון לבד בטבלת הצפוי. חוק שיש לו נוסח משלו מעביר אותו בציפייה (`extra.explain`);
+ * לשאר: ההסבר של הציפייה בלי תיאור הסבב שבראשו, והסכום. שם החוק מוצג ליד, ולכן אינו בהסבר.
  */
-function noteCompensations(out, noted) {
-  const before = [...out.notes];
+function explainCompensations(out) {
   for (const e of out.expectations) {
-    if (!isCompensation(e) || noted.has(e)) continue;
-    const dates = e.dates ?? [e.date];
-    if (before.some((n) => n.ruleId && n.ruleId === e.ruleId && (n.date == null || dates.includes(n.date)))) continue;
-    if (e.pairingId && before.some((n) => n.dueFor === e.pairingId)) continue; // הושלמה ב-`amendNote`
-    // תיאור הסבב (או שני הסבבים) שבראש ההסבר מיותר בהערה: התאריך כבר לצידה.
+    if (!EXPLAINED_KEYS.has(e.key) || e.explain) continue;
+    // תיאור הסבב (או שני הסבבים) שבראש ההסבר מיותר: הוא כבר בשורה.
     const why = String(e.note ?? '').replace(/^\u2066[^\u2069]*\u2069(?: (?:→ |ו-)\u2066[^\u2069]*\u2069)*: /, '').replace(/\.$/, '');
-    const message = `${e.shortTitle ?? e.ruleTitle}${why ? `: ${why}` : ''}. מגיע פיצוי ${minToHhmm(e.min)}.`;
-    if (out.notes.some((n) => n.date === e.date && n.message === message)) continue;
-    out.notes.push({ date: e.date, message, ruleId: e.ruleId, ruleTitle: null });
+    e.explain = `${why ? `${why}. ` : ''}מגיע ${e.key === 'rig' ? 'קרדיט' : 'פיצוי'} ${minToHhmm(e.min)}.`;
   }
 }
 
-/** פיצוי שרשום ברומה ואף חוק אינו מסביר: גם הוא בהערות. שורה שממתינה לתשובה אינה ממצא עדיין. */
-function noteUnexplained(out) {
+/** פיצוי שרשום ברומה ואף חוק אינו מסביר: גם הוא בשורה שלו (`notes`). שורה שממתינה לתשובה אינה ממצא עדיין. */
+function explainUnexplained(out) {
   for (const row of out.comparison) {
     if (!COMPENSATION_COLUMNS.includes(row.column) || row.pending || row.reported <= row.expected) continue;
-    out.notes.push({ date: row.dates[0], message: `ברומה רשום פיצוי ${minToHhmm(row.reported - row.expected)} שאף חוק אינו מסביר.`, ruleId: null, ruleTitle: null });
+    row.notes = [`ברומה רשום פיצוי ${minToHhmm(row.reported - row.expected)} שאף חוק אינו מסביר.`];
   }
 }
 

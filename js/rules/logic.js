@@ -454,9 +454,9 @@ function unexplained_report_amount(ctx, params, rule) {
   for (const p of ctx.execPairings) {
     const extra = ctx.reportedOn(p, params.report_column) - ctx.expectedAround(p, key);
     if (extra !== H(params.hours)) continue;
-    ctx.expectPairing(p, key, extra, rule, `${describePairing(p)}: ${minToHhmm(extra)} שאף חוק אחר אינו מסביר. ${params.hint}`, { hint: true });
     // לא "מגיע": הפיצוי כבר ברומה, ואין בקבצים מה שמסביר אותו.
-    ctx.note(p.from, `ברומה רשום פיצוי ${minToHhmm(extra)} שאף חוק אחר אינו מסביר. ${params.hint}`, rule);
+    ctx.expectPairing(p, key, extra, rule, `${describePairing(p)}: ${minToHhmm(extra)} שאף חוק אחר אינו מסביר. ${params.hint}`,
+      { hint: true, explain: `ברומה רשום פיצוי ${minToHhmm(extra)} שאף חוק אחר אינו מסביר. ${params.hint}` });
   }
 }
 
@@ -493,16 +493,14 @@ function late_landing_home(ctx, params, rule) {
         continue;
       }
       const steps = Math.ceil((delay - grace) / step);
+      const stepsWord = steps === 1 ? 'מדרגה אחת' : `${steps} מדרגות`;
+      // ההסבר מוצג מתחת לטיסה בטבלת הפירוט, ולא בהערות (בעל המוצר, 01/10/2026). מספר הטיסה
+      // נכתב רק כשהיא אינה לבדה בשורה: הפיצוי נרשם לכל FDP, ושורה של רגל אחת כבר נושאת אותו.
+      const part = ctx.execPairings.flatMap((p) => fdpParts(p, ctx.fdp)).find((x) => x.legs.some((l) => l.flight === leg.flight && l.date === day.date));
+      const who = part?.legs.length === 1 ? '' : `${leg.flight} `;
       // `flight`: לאיזה סבב שייך הפיצוי, כשהיום משותף לשני סבבים (טבלת הפירוט).
-      ctx.expect(day.date, 'com', steps * perStep, rule, `${leg.flight}: איחור ${delay} דק' → ${steps} מדרגות`, { flight: leg.flight });
-      if (delay >= noteFrom) {
-        const stepsWord = steps === 1 ? 'מדרגה אחת' : `${steps} מדרגות`;
-        ctx.note(
-          day.date,
-          `${leg.flight} נחתה באיחור של ${delayText(delay)}. ${stepsWord} (כל ${step} דק' או חלק מהן), פיצוי של ${minToHhmm(steps * perStep)}.`,
-          rule,
-        );
-      }
+      ctx.expect(day.date, 'com', steps * perStep, rule, `${leg.flight}: איחור ${delay} דק' → ${steps} מדרגות`, { flight: leg.flight,
+        explain: `${who}נחתה באיחור של ${delayText(delay)}. ${stepsWord} (כל ${step} דק' או חלק מהן), פיצוי של ${minToHhmm(steps * perStep)}.` });
     }
   }
 }
@@ -569,20 +567,19 @@ function special_call(ctx, params, rule) {
       const perPart = parts.map((part, i) => ({ part,
         days: days.counted.filter((d) => d >= part.from && (i === parts.length - 1 || d < parts[i + 1].from)) }))
         .filter((x) => x.days.length);
-      // השהייה נוגעת ביותר מיממה אחת (`all`, לא `counted`): הערה קבועה, גם כשתואם לדוח, כדי
-      // להסביר איזו יממה נספרת (20–21/07/2025: S/C רק על 20/07, היממה השנייה קצרה מהסף).
-      // בכמה FDP השינויים מציגים שורה לכל FDP, והערה על כל אחת אומרת שמגיעה עליו קריאה מיוחדת
-      // (`splitChangesByFdp` ב-evaluate.js, בעל המוצר 29/09/2026). הערה כאן רק על יממה שנבדקה מול הסף.
+      // איזו יממה נספרת ולמה מוסבר בשורת הפיצוי בטבלת הפירוט, ולא בהערה (בעל המוצר, 01/10/2026;
+      // 20–21/07/2025: S/C רק על 20/07, היממה השנייה קצרה מהסף). בכמה FDP יש שורה לכל FDP, גם
+      // בשינויים (`splitChangesByFdp` ב-evaluate.js, בעל המוצר 29/09/2026), וההסבר על היממה שנבדקה
+      // מול הסף מופיע בכל אחת מהן.
       if (perPart.length > 1) {
-        if (!days.ownFdp) ctx.note(match.exec.from, `${flightsOf(match.exec)} קריאה מיוחדת: ${explain} מגיע פיצוי ${amount}.`, rule);
         for (const x of perPart) {
-          ctx.expectPairing(match.exec, 'sc', x.days.length * H(params.hours), rule,
+          const min = x.days.length * H(params.hours);
+          ctx.expectPairing(match.exec, 'sc', min, rule,
             `${flightsOf(x.part)}: ${x.days.length === 1 ? 'יממה אחת' : `${x.days.length} יממות`} (${x.days.map(dayOf).join(', ')}).`,
-            { date: x.days[0], dates: x.days });
+            { date: x.days[0], dates: x.days, ...(days.ownFdp ? {} : { explain: `${explain} מגיע פיצוי ${minToHhmm(min)}.` }) });
         }
         continue;
       }
-      if (days.all.length > 1) ctx.note(match.exec.from, `${flightsOf(match.exec)} קריאה מיוחדת: ${explain} מגיע פיצוי ${amount}.`, rule);
       ctx.expectPairing(match.exec, 'sc', days.counted.length * H(params.hours), rule, explain);
       continue;
     }
@@ -778,9 +775,14 @@ function higher_of_planned_performed(ctx, params, rule) {
     const why = alreadyMinSlip
       ? `ההפרש הכולל לפי "הגבוה מבין השתיים" הוא ${minToHhmm(diff)}, ומתוכו ${minToHhmm(alreadyMinSlip)} כבר בהשלמה למינימום שמוצגת בנפרד; הנוסף כאן ${minToHhmm(extra)}`
       : 'ההפרש לפי "הגבוה מבין השתיים"';
-    // `forPlan`: הציפייה שייכת להחלפה של הסבב המתוכנן, גם כשהיא רשומה על סבב אחר (`noteChanges`).
+    // `forPlan`: הציפייה שייכת להחלפה של הסבב המתוכנן, גם כשהיא רשומה על סבב אחר (`explainChanges`).
+    // ההסבר בשורת ה-Rig בטבלת הפירוט (בעל המוצר, 01/10/2026). כשההפרש רשום ברומה על סבב אחר,
+    // השורה היא של הסבב ההוא, וההסבר אומר על איזו החלפה מדובר.
+    const explain = alreadyMinSlip ? undefined
+      : moved ? `מגיע הקרדיט של הטיסה הארוכה מבין השתיים בהחלפה ביוזמת החברה ב-${dayOf(match.plan.from)}: ${longer}. ההפרש, ${minToHhmm(extra)}, רשום ברומה על הטיסה הזאת.`
+      : `מגיע הקרדיט של הטיסה הארוכה מבין השתיים: ${longer}. מגיע קרדיט ${minToHhmm(extra)}.`;
     ctx.expectPairing(paidOn ?? exec, column, extra, rule,
-      `המתוכנן (${describePairing(match.plan)}) גבוה מהמבוצע. ${why}${where}.`, moved ? { forPlan: match.plan.id } : undefined);
+      `המתוכנן (${describePairing(match.plan)}) גבוה מהמבוצע. ${why}${where}.`, { ...(moved ? { forPlan: match.plan.id } : {}), ...(explain ? { explain } : {}) });
   }
 }
 
@@ -1244,8 +1246,10 @@ function training_cancelled_flight(ctx, params, rule) {
       const movedTo = ctx.timeline.filter((d) => d.date !== day.date && ctx.execCodes(d).some((c) => c.startsWith(prefix)) &&
         !(d.plan?.codes ?? []).some((c) => c.startsWith(prefix)));
       if (movedTo.length) {
+        // `aside`: הטיסה של אותם ימים אינה קשורה להזזה, ולכן ההערה נשארת בהערות ולא עוברת לשורת
+        // השינוי של הטיסה (07/06/2026: HOME_RGT שזז, ו-BER שהוא החלפה מרצון של FRA).
         ctx.note(day.date, `${code} תוכנן ל-${dayOf(day.date)} ובוצע ב-${movedTo.map((d) => dayOf(d.date)).join(', ')}${placed}. ` +
-          'הזזה בתוך החודש אינה מזכה בפיצוי.', rule);
+          'הזזה בתוך החודש אינה מזכה בפיצוי.', rule, { aside: !placed });
       } else {
         ctx.review(`${code} תוכנן ל-${dayOf(day.date)}${placed}. ` +
           `${code} לא בוצע ביום אחר בחודש. דורש בדיקה ידנית.`, rule);

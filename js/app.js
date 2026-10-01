@@ -278,11 +278,18 @@ function shownComparison(res) {
 }
 const isGap = (c) => c.ok === false || c.marks.length > 0;
 
-/** הסיבה לפיצוי שאינו קרדיט (Rig, ‏COM, ‏S/C), ליד שם העמודה: `reason` כשיש, אחרת `short_title` של החוק, אחרת שמו. */
-function reasonOf(c) {
+/**
+ * שורת פיצוי או Rig מוסברת בטבלה עצמה, ולא בהערות (בעל המוצר, 01/10/2026): מתחת לעמודה שם החוק,
+ * כמו התגית בהערות, ומתחת לטיסה ההסבר (`explain` של כל ציפייה, ו-`notes` של השורה: פיצוי
+ * שברומה ואף חוק אינו מסביר).
+ */
+function rulesOf(c) {
   if (!COMP_COLUMNS.has(c.column)) return '';
-  const reasons = [...new Set(c.items.map((e) => e.reason ?? e.shortTitle ?? e.ruleTitle).filter(Boolean))];
-  return reasons.length ? `<span class="reason">${esc(reasons.join(' · '))}</span>` : '';
+  return [...new Set(c.items.map((e) => e.ruleTitle).filter(Boolean))].map((t) => `<span class="tag">${esc(t)}</span>`).join('');
+}
+function explainOf(c) {
+  if (!COMP_COLUMNS.has(c.column)) return '';
+  return [...new Set([...c.items.map((e) => e.explain), ...(c.notes ?? [])].filter(Boolean))].map((t) => `<div class="explain">${esc(t)}</div>`).join('');
 }
 
 function summarize(res) {
@@ -518,13 +525,13 @@ function renderComparison(res) {
         const cls = gap || (c.pending ? 'pending' : '');
         const status = gap ? `<span class="status ${gap}">✗</span>` : c.pending ? '<span class="status pending">ממתין</span>' : '<span class="status ok">✓</span>';
         const why = [
-          // שורה תקינה מציגה רק הערה שמסבירה פיצוי בלי ודאות (hint).
-          ...c.items.filter((e) => (c.ok !== true || e.hint) && (e.ruleTitle || e.note))
+          // שורת פיצוי או Rig כבר מוסברת מתחת לטיסה. שורת קרדיט מפורטת רק כשיש בה פער.
+          ...c.items.filter((e) => !COMP_COLUMNS.has(c.column) && c.ok !== true && (e.ruleTitle || e.note))
             .map((e) => `${esc(e.ruleTitle ?? '')}${e.note ? `: ${esc(e.note)}` : ''}${e.min != null && c.unit !== 'count' ? ` <span class="num">${minToHhmm(e.min)}</span>` : ''}`),
           ...c.marks.map((m) => `${esc(m.column)}: צפוי <span class="num">${hm(m.expected, m.unit)}</span>, ברומה <span class="num">${hm(m.reported, m.unit)}</span>`),
         ].join('<br>');
         return `<tr class="${cls}">
-          <td>${esc(c.label).replace(/\n/g, '<br>')}</td><td class="col">${esc(c.column)}${reasonOf(c)}</td>
+          <td>${esc(c.label).replace(/\n/g, '<br>')}${explainOf(c)}</td><td class="col">${esc(c.column)}${rulesOf(c)}</td>
           <td class="num">${hm(c.expected, c.unit)}</td><td class="num">${hm(c.reported, c.unit)}</td>
           <td class="num">${c.ok ? '' : (c.diff > 0 ? '+' : '') + hm(c.diff, c.unit)}</td><td>${status}</td></tr>
           ${why ? `<tr class="detail"><td colspan="6">${why}</td></tr>` : ''}`;
@@ -532,6 +539,9 @@ function renderComparison(res) {
     </table></div>
   </details>`;
 }
+
+/** הסבב של ציפייה, מתחת לשם החוק: שלה, או תיאור הסבב שבראש ההסבר של ציפייה לפי תאריך (ב-`explain` הוא כבר אינו מופיע). */
+const pairingOf = (e) => e.pairing ?? String(e.note ?? '').match(/^⁦[^⁩]*⁩/)?.[0] ?? null;
 
 // בתכנון לבד בלבד. עם דוח ביצוע ספירת הימים מוצגת בסיכום החודשי מול הדוח.
 function renderExpectations(res) {
@@ -554,10 +564,10 @@ function renderExpectations(res) {
       <thead><tr><th>תאריך</th><th>חוק</th><th>סוג</th><th>צפוי</th><th>הסבר</th></tr></thead>
       <tbody>${shown.map((e) => `<tr>
         <td class="num">${e.dates.length > 1 ? `${ddmm(e.dates[0])}–${ddmm(e.dates.at(-1))}` : ddmm(e.date)}</td>
-        <td>${esc(e.ruleTitle)}${e.pairing ? `<div class="small muted">${esc(e.pairing)}</div>` : ''}</td>
+        <td>${esc(e.ruleTitle)}${pairingOf(e) ? `<div class="small muted">${esc(pairingOf(e))}</div>` : ''}</td>
         <td>${esc(KEY_LABEL[e.key] ?? e.key)}</td>
         <td class="num">${minToHhmm(e.min)}</td>
-        <td class="small">${esc(e.note ?? '')}</td></tr>`).join('')}</tbody>
+        <td class="small">${esc(e.explain ?? e.note ?? '')}</td></tr>`).join('')}</tbody>
     </table></div>`}
   </details>`;
 }
@@ -576,6 +586,7 @@ function renderChanges(res) {
     ${changes.length ? `<ul class="list">${changes.map((c) => `<li>
       <strong class="num">${ddmm(c.date)}</strong> ${esc(c.label)}
       <div class="small"><span class="side-plan">תכנון: ${esc(datesFirst(c.plan ?? '—'))}</span> · <span class="side-exec">ביצוע: ${esc(datesFirst(c.exec ?? (c.replacedBy?.join(', ') || '—')))}</span></div>
+      ${(c.notes ?? []).map((n) => `<div class="explain">${esc(n.message)}${n.byUser ? ' <span class="muted">לפי תשובת המשתמש</span>' : ''}</div>`).join('')}
     </li>`).join('')}</ul>` : '<p class="muted">כל הסבבים בוצעו כמתוכנן.</p>'}
   </details>`;
 }

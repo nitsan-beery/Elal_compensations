@@ -185,7 +185,10 @@ table { width: 100%; border-collapse: collapse; font-size: .92rem; }
 th, td { padding: .4rem .5rem; border-bottom: 1px solid var(--line); text-align: right; vertical-align: top; }
 th { font-weight: 600; color: var(--muted); font-size: .82rem; white-space: nowrap; }
 td.col { direction: ltr; text-align: right; white-space: nowrap; }
-td.col .reason { display: block; direction: rtl; white-space: normal; font-size: .85em; color: var(--muted); }
+/* שם החוק מתחת לעמודה, כמו התגית בהערות; שם ארוך נשבר ולא מרחיב את העמודה. */
+td.col .tag { display: block; width: fit-content; max-width: 11rem; margin: .2rem 0 0 auto; direction: rtl; white-space: normal; border-radius: .6rem; }
+/* ההסבר מתחת לטיסה בטבלת הפירוט, ומתחת לשינוי בטבלת השינויים. */
+.explain { margin-top: .2rem; font-size: .85rem; color: var(--muted); }
 tr.bad td { background: var(--bad-bg); }
 tr.gain td { background: var(--ok-bg); }
 tr.pending td { background: var(--pending-bg); }

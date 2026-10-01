@@ -20,13 +20,22 @@ console.log(`חוקים נתמכים: ${r.rules.supported.length} · לא נתמ
 for (const w of r.warnings) console.log('אזהרה:', w);
 
 console.log('\n== שינויים ==');
-for (const c of r.changes) console.log(`${c.date.slice(8)}  ${c.label.padEnd(34)} תכנון: ${c.plan ?? '—'}  |  ביצוע: ${c.exec ?? '—'}${c.replacedBy ? '  ← ' + c.replacedBy.join(', ') : ''}`);
+for (const c of r.changes) {
+  console.log(`${c.date.slice(8)}  ${c.label.padEnd(34)} תכנון: ${c.plan ?? '—'}  |  ביצוע: ${c.exec ?? '—'}${c.replacedBy ? '  ← ' + c.replacedBy.join(', ') : ''}`);
+  for (const n of c.notes ?? []) console.log(`      ${n.message}${n.byUser ? ' (לפי תשובת המשתמש)' : ''}`);
+}
 
 console.log('\n== השוואה מול הדוח ==');
 for (const row of r.comparison) {
   const mark = row.pending ? '…' : row.ok ? '✓' : '✗';
   console.log(`${mark} ${row.label.padEnd(40)} ${row.column.padEnd(7)} צפוי ${hm(row.expected, row.unit).padStart(6)}  בדוח ${hm(row.reported, row.unit).padStart(6)}${row.ok ? '' : `  פער ${hm(row.diff, row.unit)}`}`);
+  for (const x of [...row.items.map((e) => e.explain && `[${e.ruleTitle}] ${e.explain}`), ...(row.notes ?? [])]) if (x) console.log(`      > ${x}`);
   if (row.ok === false) for (const e of row.items) console.log(`      · ${e.ruleTitle ?? ''}: ${e.note ?? ''} ${e.min != null ? minToHhmm(e.min) : ''}`);
+}
+
+if (r.mode === 'plan') {
+  console.log('\n== פיצויים צפויים ==');
+  for (const e of r.expectations) if (e.explain) console.log(`${e.date.slice(8)}  ${e.key.padEnd(4)} ${minToHhmm(e.min)}  [${e.ruleTitle}] ${e.explain}`);
 }
 
 console.log('\n== סיכומים ==');
