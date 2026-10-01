@@ -279,17 +279,19 @@ function shownComparison(res) {
 const isGap = (c) => c.ok === false || c.marks.length > 0;
 
 /**
- * שורת פיצוי או Rig מוסברת בטבלה עצמה, ולא בהערות (בעל המוצר, 01/10/2026): מתחת לעמודה שם החוק,
- * כמו התגית בהערות, ומתחת לטיסה ההסבר (`explain` של כל ציפייה, ו-`notes` של השורה: פיצוי
- * שברומה ואף חוק אינו מסביר).
+ * שורת פיצוי או Rig מוסברת בטבלה עצמה, ולא בהערות (בעל המוצר, 01/10/2026): מתחת לטיסה ההסבר
+ * (`explain` של כל ציפייה) ואחריו שם החוק בתגית, כמו בהערות. הסכום אינו בהסבר, כי הוא כבר בשורה;
+ * רק כשכמה חוקים חולקים שורה כתוב ליד כל אחד החלק שלו. קריאה מיוחדת היא תגית בלבד. `notes` של
+ * השורה: פיצוי שברומה ואף חוק אינו מסביר.
  */
-function rulesOf(c) {
-  if (!COMP_COLUMNS.has(c.column)) return '';
-  return [...new Set(c.items.map((e) => e.ruleTitle).filter(Boolean))].map((t) => `<span class="tag">${esc(t)}</span>`).join('');
-}
 function explainOf(c) {
   if (!COMP_COLUMNS.has(c.column)) return '';
-  return [...new Set([...c.items.map((e) => e.explain), ...(c.notes ?? [])].filter(Boolean))].map((t) => `<div class="explain">${esc(t)}</div>`).join('');
+  const share = (e) => (c.items.length > 1 && c.unit !== 'count' ? ` · <span class="num">${minToHhmm(e.min)}</span>` : '');
+  const lines = [
+    ...c.items.map((e) => `${esc(share(e) ? (e.explain ?? '').replace(/\.$/, '') : e.explain ?? '')}${share(e)}${e.ruleTitle ? ` <span class="tag">${esc(e.ruleTitle)}</span>` : ''}`.trim()),
+    ...(c.notes ?? []).map(esc),
+  ];
+  return [...new Set(lines.filter(Boolean))].map((l) => `<div class="explain">${l}</div>`).join('');
 }
 
 function summarize(res) {
@@ -531,7 +533,7 @@ function renderComparison(res) {
           ...c.marks.map((m) => `${esc(m.column)}: צפוי <span class="num">${hm(m.expected, m.unit)}</span>, ברומה <span class="num">${hm(m.reported, m.unit)}</span>`),
         ].join('<br>');
         return `<tr class="${cls}">
-          <td>${esc(c.label).replace(/\n/g, '<br>')}${explainOf(c)}</td><td class="col">${esc(c.column)}${rulesOf(c)}</td>
+          <td>${esc(c.label).replace(/\n/g, '<br>')}${explainOf(c)}</td><td class="col">${esc(c.column)}</td>
           <td class="num">${hm(c.expected, c.unit)}</td><td class="num">${hm(c.reported, c.unit)}</td>
           <td class="num">${c.ok ? '' : (c.diff > 0 ? '+' : '') + hm(c.diff, c.unit)}</td><td>${status}</td></tr>
           ${why ? `<tr class="detail"><td colspan="6">${why}</td></tr>` : ''}`;

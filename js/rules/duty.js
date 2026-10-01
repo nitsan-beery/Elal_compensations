@@ -153,8 +153,7 @@ function same_fdp_rounds(ctx, params, rule) {
     const why = `${describePairing(p1)} ו-${describePairing(p2)}: ${minToHhmm(Math.max(rest, 0))} בין הנחיתה (${hhmm(s1.end)}) ` +
       `להתייצבות (${hhmm(s2.start - report)}), פחות ממנוחה חוקית של ${params.legal_rest_hours} שעות. שתי טיסות סבב באותו FDP`;
     // ההסבר שמוצג מתחת לטיסה, ליד שם החוק (בעל המוצר, 01/10/2026).
-    const explain = `${minToHhmm(Math.max(rest, 0))} בין הנחיתה (${hhmm(s1.end)}) להתייצבות (${hhmm(s2.start - report)}). ` +
-      `מגיע ${amountWord(params.report_column)} ${minToHhmm(H(params.hours))}.`;
+    const explain = `${minToHhmm(Math.max(rest, 0))} בין הנחיתה (${hhmm(s1.end)}) להתייצבות (${hhmm(s2.start - report)}).`;
     if (!ctx.hasExec) {
       ctx.expectPairing(p2, keyFor(params.report_column), H(params.hours), rule, why, { explain });
       continue;
@@ -659,11 +658,10 @@ function special_date_activity(ctx, params, rule) {
     const wTo = at(addDays(date, occ.to.day_offset), parseClock(occ.to.time));
     if (wTo <= monthStart || wFrom >= monthEnd) { askDate?.(); continue; }
     const window = `${ddmm(dateOf(wFrom))} ${hhmm(wFrom)} – ${ddmm(dateOf(wTo))} ${hhmm(wTo)}`;
-    // ההסבר שמוצג מתחת לטיסה, קצר: שהייתה פעילות מטעם החברה בשעות האלה, וכמה מגיע (בעל המוצר,
+    // ההסבר שמוצג מתחת לטיסה, קצר: שהייתה פעילות מטעם החברה בשעות האלה, בלי הסכום (בעל המוצר,
     // 01/10/2026). שם האירוע בראשו רק כשהוא אינו שם החוק, שמוצג ליד (ערב יום הזיכרון).
     const span = dateOf(wFrom) === dateOf(wTo - 1) ? `בין ${hhmm(wFrom)} ל-${hhmm(wTo)}` : `בחלון ${window}`;
-    const explain = `${occ.title === rule.title ? '' : `${occ.title}: `}${ctx.hasExec ? 'בוצעה' : 'מתוכננת'} פעילות מטעם החברה ${span}. ` +
-      `מגיע ${amountWord(params.report_column)} ${minToHhmm(H(params.hours))}.`;
+    const explain = `${occ.title === rule.title ? '' : `${occ.title}: `}${ctx.hasExec ? 'בוצעה' : 'מתוכננת'} פעילות מטעם החברה ${span}.`;
 
     let hit = null;
     for (const p of pairings) {

@@ -29,13 +29,13 @@ console.log('\n== השוואה מול הדוח ==');
 for (const row of r.comparison) {
   const mark = row.pending ? '…' : row.ok ? '✓' : '✗';
   console.log(`${mark} ${row.label.padEnd(40)} ${row.column.padEnd(7)} צפוי ${hm(row.expected, row.unit).padStart(6)}  בדוח ${hm(row.reported, row.unit).padStart(6)}${row.ok ? '' : `  פער ${hm(row.diff, row.unit)}`}`);
-  for (const x of [...row.items.map((e) => e.explain && `[${e.ruleTitle}] ${e.explain}`), ...(row.notes ?? [])]) if (x) console.log(`      > ${x}`);
+  if (['Rig', 'COM', 'S/C'].includes(row.column)) for (const x of [...row.items.map((e) => `${e.explain ?? ''} [${e.ruleTitle}]`.trim()), ...(row.notes ?? [])]) console.log(`      > ${x}`);
   if (row.ok === false) for (const e of row.items) console.log(`      · ${e.ruleTitle ?? ''}: ${e.note ?? ''} ${e.min != null ? minToHhmm(e.min) : ''}`);
 }
 
 if (r.mode === 'plan') {
   console.log('\n== פיצויים צפויים ==');
-  for (const e of r.expectations) if (e.explain) console.log(`${e.date.slice(8)}  ${e.key.padEnd(4)} ${minToHhmm(e.min)}  [${e.ruleTitle}] ${e.explain}`);
+  for (const e of r.expectations) if (e.explain != null) console.log(`${e.date.slice(8)}  ${e.key.padEnd(4)} ${minToHhmm(e.min)}  ${e.explain} [${e.ruleTitle}]`);
 }
 
 console.log('\n== סיכומים ==');

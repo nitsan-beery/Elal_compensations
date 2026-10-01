@@ -671,15 +671,16 @@ const EXPLAINED_KEYS = new Set(['com', 'sc', 'rig']);
 
 /**
  * כל פיצוי וכל Rig מוסבר בשורה שלו, מתחת לטיסה, ולא בהערות (`explain`; בעל המוצר, 01/10/2026):
- * בטבלת הפירוט, ובתכנון לבד בטבלת הצפוי. חוק שיש לו נוסח משלו מעביר אותו בציפייה (`extra.explain`);
- * לשאר: ההסבר של הציפייה בלי תיאור הסבב שבראשו, והסכום. שם החוק מוצג ליד, ולכן אינו בהסבר.
+ * בטבלת הפירוט, ובתכנון לבד בטבלת הצפוי. חוק שיש לו נוסח משלו מעביר אותו בציפייה (`extra.explain`,
+ * וריק כשאין מה להוסיף: קריאה מיוחדת); לשאר: ההסבר של הציפייה בלי תיאור הסבב שבראשו. הסכום
+ * אינו בהסבר, כי הוא כבר בשורה, וגם לא שם החוק, שמוצג אחריו.
  */
 function explainCompensations(out) {
   for (const e of out.expectations) {
-    if (!EXPLAINED_KEYS.has(e.key) || e.explain) continue;
+    if (!EXPLAINED_KEYS.has(e.key) || e.explain != null) continue;
     // תיאור הסבב (או שני הסבבים) שבראש ההסבר מיותר: הוא כבר בשורה.
     const why = String(e.note ?? '').replace(/^\u2066[^\u2069]*\u2069(?: (?:→ |ו-)\u2066[^\u2069]*\u2069)*: /, '').replace(/\.$/, '');
-    e.explain = `${why ? `${why}. ` : ''}מגיע ${e.key === 'rig' ? 'קרדיט' : 'פיצוי'} ${minToHhmm(e.min)}.`;
+    e.explain = why ? `${why}.` : '';
   }
 }
 
@@ -842,7 +843,26 @@ function compare({ out, timeline, execPairings, domicile, codes: catalog, fdp })
     const dates = reportDates(p, timeline, domicile);
     for (const d of dates) { union(dates[0], d); pairingOf.set(d, [...(pairingOf.get(d) ?? []), p]); }
   }
-  for (const e of out.expectations) for (const d of e.dates) if (parent.has(d)) union(e.dates[0], d);
+
+  /**
+   * ציפייה שמוצגת על סבב אחר מזה שעליו הרומה רשמה אותה (`showOn`: ההפרש של החלפה ביוזמת החברה,
+   * שמוצג על הטיסה שהחליפה; בעל המוצר, 01/10/2026; 10–11/06/2026). גם מה שהרומה רשמה עובר איתה,
+   * כדי שהשורה של הסבב האחר לא תציג סכום בלי הסבר: `shift` הוא התיקון לכל יום ועמודה.
+   */
+  const shift = new Map();
+  const raw = (d, column) => reportedValue(dayOf(timeline, d), column);
+  const bump = (d, column, min) => shift.set(`${d}|${column}`, (shift.get(`${d}|${column}`) ?? 0) + min);
+  const expectations = out.expectations.map((e) => {
+    const to = e.showOn && execPairings.find((p) => p.id === e.showOn);
+    if (!to) return e;
+    const column = KEY_COLUMNS[e.key][0];
+    const from = execPairings.find((p) => p.id === e.pairingId);
+    const days = from ? reportDates(from, timeline, domicile) : e.dates;
+    bump(days.find((d) => raw(d, column) >= e.min) ?? days[0], column, -e.min);
+    bump(to.from, column, e.min);
+    return { ...e, date: to.from, dates: [...to.dates], pairingId: to.id, pairing: describePairing(to) };
+  });
+  for (const e of expectations) for (const d of e.dates) if (parent.has(d)) union(e.dates[0], d);
 
   const groups = new Map();
   for (const d of timeline) {
@@ -868,12 +888,12 @@ function compare({ out, timeline, execPairings, domicile, codes: catalog, fdp })
       : parts.map(({ part, days }) => [range(days), describeRoute(part)]);
     const codes = (dayCodes ?? dates.flatMap((d) => execCodesOf(dayOf(timeline, d), catalog))).join(' ');
     // בלי סבב שבוצע: הטיסה שתוכננה, כשציפייה עליה נושאת אותה (`plannedRoute`, הורדה מהטיסה).
-    const planned = [...new Set(out.expectations.filter((e) => e.plannedRoute && dates.includes(e.dates[0])).map((e) => e.plannedRoute))];
+    const planned = [...new Set(expectations.filter((e) => e.plannedRoute && dates.includes(e.dates[0])).map((e) => e.plannedRoute))];
     if (!lines.length) lines.push([range(dates), planned.join(', ')]);
     if (codes) lines.at(-1)[1] = [lines.at(-1)[1], codes].filter(Boolean).join(' · ');
     return lines.map((l) => l.filter(Boolean).map((t) => `⁦${t}⁩`).join(' · ')).join('\n');
   };
-  const reportedOn = (d, column) => reportedValue(dayOf(timeline, d), column);
+  const reportedOn = (d, column) => raw(d, column) + (shift.get(`${d}|${column}`) ?? 0);
 
   /**
    * קבוצה של כמה סבבים שחולקים יום מתפצלת לשורה לכל סבב (בעל המוצר, 28/09/2026): LY548 מאתונה
@@ -887,8 +907,8 @@ function compare({ out, timeline, execPairings, domicile, codes: catalog, fdp })
    * שלה ועוד 03:45 של HOME_RGT.
    */
   const splitByPairing = (dates) => {
-    const inGroup = out.expectations.filter((e) => dates.includes(e.dates[0]));
-    const whole = [{ dates, only: null, items: inGroup, reported: (column) => dates.reduce((s, d) => s + reportedOn(d, column), 0) }];
+    const inGroup = expectations.filter((e) => dates.includes(e.dates[0]));
+    const whole = [{ dates, only: null, items: inGroup, reported: (column) => dates.reduce((s, d) => s + reportedOn(d, column), 0), reportedDay: reportedOn }];
     // פעילות יום: ציפייה עם קוד ובלי סבב, ביום שיש בו סבב. מתנהגת כמו סבב של יום אחד.
     const activityOf = (e) => (e.code && !e.pairingId && !e.flight && pairingOf.has(e.dates[0]) ? `${e.code}@${e.dates[0]}` : null);
     const activities = new Map();
@@ -931,8 +951,9 @@ function compare({ out, timeline, execPairings, domicile, codes: catalog, fdp })
       const own = dates.filter((d) => ps.some((p) => occupants(d).includes(p)));
       // שורה משותפת כוללת רק את הציפיות המשותפות; ימים שאינם משותפים שייכים לשורה של כל סבב.
       const onlyShared = ps.length > 1;
+      const reportedDay = (d, column) => (shared.includes(d) ? expectedOn(d, column, key) : onlyShared ? 0 : reportedOn(d, column));
       return { dates: own, only: ps.filter((p) => !p.activity), codes: codesOf(ps, own), items: inGroup.filter((e) => owner.get(e) === key),
-        reported: (column) => own.reduce((s, d) => s + (shared.includes(d) ? expectedOn(d, column, key) : onlyShared ? 0 : reportedOn(d, column)), 0) };
+        reported: (column) => own.reduce((s, d) => s + reportedDay(d, column), 0), reportedDay };
     });
   };
 
@@ -957,9 +978,28 @@ function compare({ out, timeline, execPairings, domicile, codes: catalog, fdp })
     }).filter((x) => x.dates.length);
   };
 
+  /**
+   * פיצוי שנרשם יום-יום (`perDay`: קריאה מיוחדת) הוא שורה לכל יום שמגיע עליו (בעל המוצר, 01/10/2026),
+   * עם ה-FDP של אותו יום כשהסבב בכמה FDP. רק כשכל הציפיות בעמודה הן כאלה. כשהרומה רשמה את הסכום
+   * כולו אבל לא באותם ימים, הוא מיוחס לימים לפי הצפוי, כדי שלא ייווצרו שני פערים שמתקזזים.
+   */
+  const splitByDay = (dates, inGroup, column, only, codes, reportedDay) => {
+    if (!COMPENSATION_COLUMNS.includes(column)) return null;
+    const items = inGroup.filter((e) => KEY_COLUMNS[e.key]?.includes(column));
+    if (!items.length || !items.every((e) => e.perDay)) return null;
+    const touching = only ?? [...new Set(dates.flatMap((d) => pairingOf.get(d) ?? []))];
+    const parts = touching.length === 1 ? fdpParts(touching[0], fdp) : null;
+    const expectedOn = (d) => items.filter((e) => e.dates[0] === d).reduce((s, e) => s + e.min, 0);
+    const matches = dates.reduce((s, d) => s + reportedDay(d, column), 0) === items.reduce((s, e) => s + e.min, 0);
+    return dates.map((d) => ({ d, expected: expectedOn(d), reported: matches ? expectedOn(d) : reportedDay(d, column) }))
+      .filter((x) => x.expected || x.reported)
+      .map(({ d, expected, reported }) => ({ dates: [d], at: d, column, expected, reported, items: items.filter((e) => e.dates[0] === d),
+        label: labelOf([d], column, parts ? [parts.findLast((p) => p.from <= d) ?? parts[0]] : only, codes ? [] : null) }));
+  };
+
   for (const group of groups.values()) {
     group.sort();
-    for (const { dates, only, codes, items: inGroup, reported: reportedFor } of splitByPairing(group)) {
+    for (const { dates, only, codes, items: inGroup, reported: reportedFor, reportedDay } of splitByPairing(group)) {
       // פער בקבוצה שיש עליה שאלה פתוחה אינו ממצא עדיין: הצפוי תלוי בתשובה.
       const asked = out.questions.some((q) => dates.includes(q.date));
       const push = (row) => {
@@ -972,6 +1012,8 @@ function compare({ out, timeline, execPairings, domicile, codes: catalog, fdp })
       // עם סכום הקרדיט של כל ימיו, ולא שורה לכל יממה כמו בדוח (בעל המוצר, 28/09/2026). הפירוט לימים
       // נשאר בהערות של הציפיות. הדוח רושם Rig של סבב ביום הראשון שלו.
       for (const column of COMPARED_COLUMNS) {
+        const byDay = splitByDay(dates, inGroup, column, only, codes, reportedDay);
+        if (byDay) { byDay.forEach(push); continue; }
         const byFdp = splitByFdp(dates, inGroup, column);
         if (byFdp) {
           for (const { part, dates: own, items } of byFdp) {

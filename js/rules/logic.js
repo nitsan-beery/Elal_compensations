@@ -206,8 +206,9 @@ function expectMinSlip(ctx, group, min, params, rule) {
   const note = group.length === 1
     ? `השלמה ל-${params.min_credit_hours} שעות`
     : `השלמה ל-${params.min_credit_hours} שעות לכל סבב קצר, על ${group.length} סבבים באותו FDP (${group.map(describePairing).join(', ')})`;
+  // בהסבר שבשורה בלי רשימת הסבבים, שכבר כתובים בה.
   ctx.expectPairing(group.at(-1), 'rig', shortfall, rule, note,
-    { reason: `השלמה ל-${params.min_credit_hours} שעות` });
+    { reason: `השלמה ל-${params.min_credit_hours} שעות`, explain: `${note.replace(/ \(.*\)$/, '')}.` });
 }
 
 // ---------- ימי היעדרות וזיכוי ----------
@@ -456,7 +457,7 @@ function unexplained_report_amount(ctx, params, rule) {
     if (extra !== H(params.hours)) continue;
     // לא "מגיע": הפיצוי כבר ברומה, ואין בקבצים מה שמסביר אותו.
     ctx.expectPairing(p, key, extra, rule, `${describePairing(p)}: ${minToHhmm(extra)} שאף חוק אחר אינו מסביר. ${params.hint}`,
-      { hint: true, explain: `ברומה רשום פיצוי ${minToHhmm(extra)} שאף חוק אחר אינו מסביר. ${params.hint}` });
+      { hint: true, explain: `ברומה רשום פיצוי שאף חוק אחר אינו מסביר. ${params.hint}` });
   }
 }
 
@@ -500,7 +501,7 @@ function late_landing_home(ctx, params, rule) {
       const who = part?.legs.length === 1 ? '' : `${leg.flight} `;
       // `flight`: לאיזה סבב שייך הפיצוי, כשהיום משותף לשני סבבים (טבלת הפירוט).
       ctx.expect(day.date, 'com', steps * perStep, rule, `${leg.flight}: איחור ${delay} דק' → ${steps} מדרגות`, { flight: leg.flight,
-        explain: `${who}נחתה באיחור של ${delayText(delay)}. ${stepsWord} (כל ${step} דק' או חלק מהן), פיצוי של ${minToHhmm(steps * perStep)}.` });
+        explain: `${who}נחתה באיחור של ${delayText(delay)}. ${stepsWord} (כל ${step} דק' או חלק מהן).` });
     }
   }
 }
@@ -522,7 +523,8 @@ function long_flight_day(ctx, params, rule) {
     }
     for (const [date, { legs, min: flown }] of byDate) {
       if (legs < 2 || flown <= over) continue;
-      ctx.expect(date, 'com', H(params.hours), rule, `${describePairing(pairing)}: זמן טיסה ${minToHhmm(flown)} ביום`);
+      ctx.expect(date, 'com', H(params.hours), rule, `${describePairing(pairing)}: זמן טיסה ${minToHhmm(flown)} ביום`,
+        { explain: `זמן טיסה ${minToHhmm(flown)}.` });
     }
   }
 }
@@ -558,29 +560,22 @@ function special_call(ctx, params, rule) {
         continue;
       }
       const days = countSpecialCallDays(stay, params, match.exec, ctx.fdp);
-      const explain = days.reason;
-      // הסכום בכל הערה על הקריאה המיוחדת (בעל המוצר, 01/10/2026), גם בזו של ההדרכה שבוטלה.
+      // הסכום בהערה של ההדרכה שבוטלה (בעל המוצר, 01/10/2026).
       const amount = minToHhmm(days.counted.length * H(params.hours));
       if (training) ctx.amendNote(match.exec, `, פיצוי של ${amount}.`);
-      // כמה FDP נפרדים בסבב: כל יממה נרשמת על ה-FDP שהתחיל בה או לפניה (בעל המוצר, 29/09/2026).
+      // כל יממה שמגיעה עליה קריאה מיוחדת היא שורה משלה בטבלת הפירוט (`perDay`), בלי הסבר: הסכום
+      // והחוק כבר בשורה (בעל המוצר, 01/10/2026). רק יממה שנספרה אחרי בדיקת הסף מוסברת בשורה שלה
+      // (`lastWhy`). יממה שלא עמדה בסף אין לה שורה, ולכן ההסבר עליה בהערות, ביום שלה (`skipped`;
+      // 20–21/07/2025: S/C רק על 20/07). `aside`: ההערה נשארת בהערות ואינה עוברת לשורת השינוי.
+      // בכמה FDP נפרדים כל יממה נרשמת על ה-FDP שהתחיל בה או לפניה (בעל המוצר, 29/09/2026).
       const parts = fdpParts(match.exec, ctx.fdp);
-      const perPart = parts.map((part, i) => ({ part,
-        days: days.counted.filter((d) => d >= part.from && (i === parts.length - 1 || d < parts[i + 1].from)) }))
-        .filter((x) => x.days.length);
-      // איזו יממה נספרת ולמה מוסבר בשורת הפיצוי בטבלת הפירוט, ולא בהערה (בעל המוצר, 01/10/2026;
-      // 20–21/07/2025: S/C רק על 20/07, היממה השנייה קצרה מהסף). בכמה FDP יש שורה לכל FDP, גם
-      // בשינויים (`splitChangesByFdp` ב-evaluate.js, בעל המוצר 29/09/2026), וההסבר על היממה שנבדקה
-      // מול הסף מופיע בכל אחת מהן.
-      if (perPart.length > 1) {
-        for (const x of perPart) {
-          const min = x.days.length * H(params.hours);
-          ctx.expectPairing(match.exec, 'sc', min, rule,
-            `${flightsOf(x.part)}: ${x.days.length === 1 ? 'יממה אחת' : `${x.days.length} יממות`} (${x.days.map(dayOf).join(', ')}).`,
-            { date: x.days[0], dates: x.days, ...(days.ownFdp ? {} : { explain: `${explain} מגיע פיצוי ${minToHhmm(min)}.` }) });
-        }
-        continue;
+      const partOf = (d) => parts.findLast((p) => p.from <= d) ?? parts[0];
+      if (days.skipped) ctx.note(days.skipped.date, `${flightsOf(match.exec)}: ${days.skipped.why}`, rule, { aside: true });
+      if (days.cut) ctx.note(match.exec.from, `${flightsOf(match.exec)}: ${days.cut}`, rule, { aside: true });
+      for (const d of days.counted) {
+        ctx.expectPairing(match.exec, 'sc', H(params.hours), rule, `${flightsOf(partOf(d))}: יממה ${dayOf(d)}.`,
+          { date: d, dates: [d], perDay: true, explain: days.lastWhy && d === days.counted.at(-1) ? days.lastWhy : '' });
       }
-      ctx.expectPairing(match.exec, 'sc', days.counted.length * H(params.hours), rule, explain);
       continue;
     }
     // טיסה לא מתוכננת בלי S/C: לא מנחשים, שואלים.
@@ -647,38 +642,26 @@ function countSpecialCallDays(stay, params, pairing, fdp) {
   const lastDay = Math.floor((stay.end - 1) / 1440);
   const all = [];
   for (let d = firstDay; d <= lastDay; d++) all.push(addDays(stay.first, d));
-  const list = (ds) => `(${ds.map(dayOf).join(', ')})`;
-  if (stay.cutAtEnd) {
-    return { counted: all, all, reason: `${countDays(all.length)} עד סוף החודש ${list(all)}. הסבב חוזר בחודש הבא, והיממה האחרונה נבדקת בחודש הבא.` };
-  }
-  if (all.length === 1) return { counted: all, all, reason: `יממה אחת ${list(all)}.` };
+  // הסבב חוזר בחודש הבא: כל היממות עד סוף החודש נספרות (`cut`: הערה על כך).
+  if (stay.cutAtEnd) return { counted: all, all, cut: 'הסבב חוזר בחודש הבא, והיממה האחרונה נבדקת בחודש הבא.' };
+  if (all.length === 1) return { counted: all, all };
+  // היממה האחרונה פותחת FDP נפרד, אחרי מנוחה חוקית, ולכן נספרת בלי בדיקת סף.
+  if (pairing && lastFdpStartsOn(pairing, fdp, all.at(-1))) return { counted: all, all, ownFdp: true };
 
-  if (pairing && lastFdpStartsOn(pairing, fdp, all.at(-1))) {
-    return { counted: all, all, ownFdp: true, reason: `היממה האחרונה (${dayOf(all.at(-1))}) פותחת FDP נפרד, אחרי מנוחה חוקית, ולכן נספרת בלי בדיקת סף.` };
-  }
-
-  // נוסח ההסבר: בעל המוצר, 29/09/2026.
+  // `lastWhy`: ההסבר בשורה של היממה האחרונה, כשהיא נספרת. `skipped`: היממה שלא נספרה, ולמה.
   const total = stay.end - stay.start;
   const inLast = stay.end - lastDay * 1440;
   const gap = H(params.second_day_min_gap_hours);
   const min = H(params.second_day_min_hours);
   const which = all.length === 2 ? 'השנייה' : 'האחרונה';
   const need = `שהייה של מעל ${minToHhmm(gap)}, מתוכן לפחות ${minToHhmm(min)} ביממה ${which}`;
-  if (total > gap && inLast >= min) {
-    return { counted: all, all,
-      reason: `${all.length > 2 ? `${countDays(all.length)} ${list(all)}. ` : ''}בוצעה ${need}, ולכן מגיעה קריאה מיוחדת גם על היממה ${which}.` };
-  }
-  const counted = all.slice(0, -1);
+  if (total > gap && inLast >= min) return { counted: all, all, lastWhy: `בוצעה ${need}.` };
   return {
-    counted,
+    counted: all.slice(0, -1),
     all,
-    reason: `${counted.length === 1 ? 'נספרת רק יממה אחת' : `נספרות רק ${counted.length} יממות`} ${list(counted)}. ` +
-      `סה"כ זמן שהייה ${minToHhmm(total)}, מתוכן ${minToHhmm(inLast)} ביממה ${which}. ` +
-      `נדרשת ${need}, ולכן אין קריאה מיוחדת על היממה ${which}.`,
+    skipped: { date: all.at(-1), why: `אין קריאה מיוחדת על היממה ${which}. סה"כ זמן שהייה ${minToHhmm(total)}, מתוכן ${minToHhmm(inLast)} ביממה ${which}. נדרשת ${need}.` },
   };
 }
-
-const countDays = (n) => (n === 1 ? 'נספרת יממה אחת' : `נספרות ${n} יממות`);
 
 /** מספרי הטיסות של הסבב לפתיח של הערה: LY5109-LY5110. מספר שחוזר ברצף נכתב פעם אחת. */
 function flightsOf(p) {
@@ -776,13 +759,14 @@ function higher_of_planned_performed(ctx, params, rule) {
       ? `ההפרש הכולל לפי "הגבוה מבין השתיים" הוא ${minToHhmm(diff)}, ומתוכו ${minToHhmm(alreadyMinSlip)} כבר בהשלמה למינימום שמוצגת בנפרד; הנוסף כאן ${minToHhmm(extra)}`
       : 'ההפרש לפי "הגבוה מבין השתיים"';
     // `forPlan`: הציפייה שייכת להחלפה של הסבב המתוכנן, גם כשהיא רשומה על סבב אחר (`explainChanges`).
-    // ההסבר בשורת ה-Rig בטבלת הפירוט (בעל המוצר, 01/10/2026). כשההפרש רשום ברומה על סבב אחר,
-    // השורה היא של הסבב ההוא, וההסבר אומר על איזו החלפה מדובר.
-    const explain = alreadyMinSlip ? undefined
-      : moved ? `מגיע הקרדיט של הטיסה הארוכה מבין השתיים בהחלפה ביוזמת החברה ב-${dayOf(match.plan.from)}: ${longer}. ההפרש, ${minToHhmm(extra)}, רשום ברומה על הטיסה הזאת.`
-      : `מגיע הקרדיט של הטיסה הארוכה מבין השתיים: ${longer}. מגיע קרדיט ${minToHhmm(extra)}.`;
+    // `showOn`: בטבלת הפירוט השורה מוצגת על הטיסה שהחליפה, עם מה שהרומה רשמה על הסבב האחר, וההסבר
+    // אומר איפה זה ברומה (בעל המוצר, 01/10/2026; 10–11/06/2026). לחוקים הציפייה נשארת על הסבב
+    // שעליו הרומה רשמה אותה, כדי שהסכום שם לא ייראה להם כזיכוי בלי הסבר.
+    const explain = `החלפה ביוזמת החברה, מגיע הקרדיט של הטיסה הארוכה מבין השתיים (${minToHhmm(planned)} לעומת ${minToHhmm(performed)}).` +
+      (alreadyMinSlip ? ` מתוך ההפרש, ${minToHhmm(alreadyMinSlip)} כבר בהשלמה לסליפ קצר.` : '') +
+      (moved ? ` הקרדיט הזה מופיע ברומה ב-${dayOf(moved.from)}.` : '');
     ctx.expectPairing(paidOn ?? exec, column, extra, rule,
-      `המתוכנן (${describePairing(match.plan)}) גבוה מהמבוצע. ${why}${where}.`, { ...(moved ? { forPlan: match.plan.id } : {}), ...(explain ? { explain } : {}) });
+      `המתוכנן (${describePairing(match.plan)}) גבוה מהמבוצע. ${why}${where}.`, { explain, ...(moved ? { forPlan: match.plan.id, showOn: exec.id } : {}) });
   }
 }
 
