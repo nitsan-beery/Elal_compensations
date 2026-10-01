@@ -525,7 +525,9 @@ function describeMatch(m) {
 /**
  * פעילות לא מתוכננת שהמשתמש ענה שהיא החלפה מרצון: בשינויים היא מוצגת "במקום" הסבב
  * שתוכנן בימים אחרים. כשהיא קושרה לסבב שלא בוצע, גם הסבב שלא בוצע נשאר בשינויים, ביום
- * שלו, עם ההחלפה בצד הביצוע: זה עדיין שינוי (בעל המוצר, 29/09/2026).
+ * שלו, עם ההחלפה בצד הביצוע: זה עדיין שינוי (בעל המוצר, 29/09/2026). בצד הביצוע רק הטיסה
+ * שבוצעה במקומו, בלי "החלפה מרצוני" או "החלפה ביוזמת החברה" לפניה: הסיבה כתובה בהערה שמתחת
+ * לשורה (בעל המוצר, 01/10/2026; 08/09/2024).
  * בלי קישור (טיסה בחודש אחר) – "בחודש אחר" בצד התכנון.
  * סבב שלא בוצע ונענה – התשובה מוצגת בצד הביצוע.
  * בלי תשובה, כשהדוח כבר זיכה והאפליקציה הניחה אותה (`assumed`, planId → ערכים), מוצגת ההנחה
@@ -540,14 +542,14 @@ function showSwaps(out, answers, assumed) {
   }
   for (const c of out.changes) {
     if (c.how !== 'unplanned' || !linkOf.has(c.execId)) continue;
-    const { planId, value } = linkOf.get(c.execId);
+    const { planId } = linkOf.get(c.execId);
     const planned = out.changes.find((p) => p.how === 'cancelled' && p.planId === planId);
     c.how = 'swap';
     c.label = 'במקום סבב שתוכנן בימים אחרים';
     c.plan = planned?.plan ?? 'בחודש אחר';
     if (!planned) continue;
     c.planId = planned.planId;
-    planned.exec = `${value === 'replaced' ? 'החלפה ביוזמת החברה' : 'החלפה מרצוני'} – ${c.exec}`;
+    planned.exec = c.exec;
   }
 
   // סבב שבמקומו בוצע סבב אחר באותם ימים: אחרי התשובה, השורה אומרת מה קרה ולא רק מה הוחלף.
@@ -567,8 +569,8 @@ function showSwaps(out, answers, assumed) {
       continue;
     }
     const linked = a.link && out.changes.find((x) => x.execId === a.link)?.exec;
-    c.exec = a.value === 'voluntary_swap' ? (a.link === GAVE_AWAY ? GAVE_AWAY_LABEL : `החלפה מרצוני – ${linked ?? 'טיסה בחודש אחר'}`)
-      : a.value === 'replaced' ? `החלפה ביוזמת החברה – ${linked ?? 'טיסה בחודש אחר'}`
+    c.exec = a.value === 'voluntary_swap' ? (a.link === GAVE_AWAY ? GAVE_AWAY_LABEL : linked ?? 'טיסה בחודש אחר')
+      : a.value === 'replaced' ? linked ?? 'טיסה בחודש אחר'
       : a.value === 'other' ? `סיבה אחרת${a.text ? `: ${a.text}` : ''}`
       : CANCELLED_OUTCOME[a.value] ?? a.value;
   }
