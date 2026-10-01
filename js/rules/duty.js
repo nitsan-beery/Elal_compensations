@@ -647,6 +647,11 @@ function special_date_activity(ctx, params, rule) {
     const wTo = at(addDays(date, occ.to.day_offset), parseClock(occ.to.time));
     if (wTo <= monthStart || wFrom >= monthEnd) continue;
     const window = `${ddmm(dateOf(wFrom))} ${hhmm(wFrom)} – ${ddmm(dateOf(wTo))} ${hhmm(wTo)}`;
+    // הפיצוי נרשם גם כהערה, כדי שיהיה ברור על מה הוא (בעל המוצר, 01/10/2026).
+    const oneDay = dateOf(wFrom) === dateOf(wTo - 1);
+    const head = oneDay ? `${occ.title} (${ddmm(date)})` : occ.title;
+    const span = oneDay ? `בין ${hhmm(wFrom)} ל-${hhmm(wTo)}` : `בחלון ${window}`;
+    const due = `מגיע ${amountWord(params.report_column)} ${minToHhmm(H(params.hours))}`;
 
     let hit = null;
     for (const p of pairings) {
@@ -657,6 +662,7 @@ function special_date_activity(ctx, params, rule) {
     }
     if (hit) {
       ctx.expectPairing(hit, key, H(params.hours), rule, `${occ.title}: ${describePairing(hit)} בחלון ${window}`);
+      ctx.note(date, `${head}: ${describePairing(hit)} בפעילות ${span}. ${due}.`, rule);
       continue;
     }
     if (params.flight_activity_only) continue;
@@ -682,6 +688,7 @@ function special_date_activity(ctx, params, rule) {
     } else if (a.value === 'yes') {
       ctx.expect(coded.date, key, H(params.hours), rule, `${occ.title}: ${ctx.activityCodes(coded).join(', ')} בחלון ${window} ` +
         `(${answered ? 'לפי תשובתך' : `הרומה מזכה את הפיצוי`})`);
+      ctx.note(date, `${head}: ${ctx.activityCodes(coded).join(', ')} ${span}${answered ? ', ולפי תשובתך היית בפעילות מטעם החברה' : ''}. ${due}.`, rule);
     }
   }
 }
@@ -729,9 +736,20 @@ function free_days_waived(ctx, params, rule) {
   // X ב-1 לחודש בלי טיסה ביום: ייתכן שזו נחיתה של סבב מהחודש הקודם, שאינו בתכנון. עד התשובה
   // היום לא נספר. שואלים רק כשהתשובה יכולה להוריד את מספר הימים מתחת למינימום (החלטת בעל
   // המוצר, 23/09/2026), גם כשחסר יום אחד בלבד ולא מגיע עליו זיכוי: המספר עצמו צריך להיות נכון.
+  // עם רומה אין מה לנחש ואין מה לשאול (בעל המוצר, 01/10/2026): היא חוזרת ביום 1 על סבב שיצא
+  // בחודש הקודם, ולכן ידוע אם נחתת בו ומתי. בלי סבב כזה ה-X הוא יום פנוי, גם כשבוצעה בו
+  // פעילות שלא תוכננה – עליה נשאלת השאלה על פעילות ביום לא מתוכנן.
   const first = ctx.timeline.find((d) => d.date === ctx.monthFirst);
   let pendingFirst = false;
-  if (free.includes(ctx.monthFirst) && (first?.plan?.codes ?? []).includes('X')) {
+  const firstIsX = free.includes(ctx.monthFirst) && (first?.plan?.codes ?? []).includes('X');
+  const carried = ctx.hasExec ? ctx.execPairings.find((p) => p.cutAtStart) : null;
+  const landed = carried ? execSpan(carried, ctx.domicile, true).end : null;
+  if (firstIsX && ctx.hasExec && (!carried || landed != null)) {
+    if (carried && landed > at(ctx.monthFirst, onUntil)) {
+      free.splice(free.indexOf(ctx.monthFirst), 1);
+      ctx.note(ctx.monthFirst, `${rule.title}: ב-${ddmm(ctx.monthFirst)} מסומן X, אבל לפי הרומה נחתת מסבב של החודש הקודם (${describePairing(carried)}) ב-${ddmm(dateOf(landed))} ${hhmm(landed)}, אחרי ${params.on_block_until}, ולכן היום אינו נספר.`, rule);
+    }
+  } else if (firstIsX) {
     const fid = `free_days_first:${ctx.monthFirst.slice(0, 7)}`;
     const fa = ctx.answer(fid);
     if (fa?.value !== 'free') free.splice(free.indexOf(ctx.monthFirst), 1);
