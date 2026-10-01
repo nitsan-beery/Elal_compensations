@@ -277,6 +277,13 @@ function makeContext({ out, timeline, domicile, codes, holidays, answers, plan, 
       noteKeys.add(k);
       out.notes.push({ date, message, ...ruleRef(rule), ...extra });
     },
+    /**
+     * חוק שרשם הערה על סבב בלי לדעת כמה מגיע (`extra.dueFor`, מזהה הסבב) משאיר אותה פתוחה,
+     * והחוק שקובע את הסכום משלים אותה, במקום הערה שנייה על אותו פיצוי (בעל המוצר, 01/10/2026).
+     */
+    amendNote(pairing, text) {
+      for (const n of out.notes) if (n.dueFor === pairing.id) n.message = n.message.replace(/[.]$/, '') + text;
+    },
     ask(question) {
       if (askedIds.has(question.id) || answers[question.id]) return;
       askedIds.add(question.id);
@@ -664,6 +671,7 @@ function noteCompensations(out, noted) {
     if (!isCompensation(e) || noted.has(e)) continue;
     const dates = e.dates ?? [e.date];
     if (before.some((n) => n.ruleId && n.ruleId === e.ruleId && (n.date == null || dates.includes(n.date)))) continue;
+    if (e.pairingId && before.some((n) => n.dueFor === e.pairingId)) continue; // הושלמה ב-`amendNote`
     // תיאור הסבב (או שני הסבבים) שבראש ההסבר מיותר בהערה: התאריך כבר לצידה.
     const why = String(e.note ?? '').replace(/^\u2066[^\u2069]*\u2069(?: (?:→ |ו-)\u2066[^\u2069]*\u2069)*: /, '').replace(/\.$/, '');
     const message = `${e.shortTitle ?? e.ruleTitle}${why ? `: ${why}` : ''}. מגיע פיצוי ${minToHhmm(e.min)}.`;

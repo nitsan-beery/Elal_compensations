@@ -561,6 +561,9 @@ function special_call(ctx, params, rule) {
       }
       const days = countSpecialCallDays(stay, params, match.exec, ctx.fdp);
       const explain = days.reason;
+      // הסכום בכל הערה על הקריאה המיוחדת (בעל המוצר, 01/10/2026), גם בזו של ההדרכה שבוטלה.
+      const amount = minToHhmm(days.counted.length * H(params.hours));
+      if (training) ctx.amendNote(match.exec, `, פיצוי של ${amount}.`);
       // כמה FDP נפרדים בסבב: כל יממה נרשמת על ה-FDP שהתחיל בה או לפניה (בעל המוצר, 29/09/2026).
       const parts = fdpParts(match.exec, ctx.fdp);
       const perPart = parts.map((part, i) => ({ part,
@@ -571,7 +574,7 @@ function special_call(ctx, params, rule) {
       // בכמה FDP השינויים מציגים שורה לכל FDP, והערה על כל אחת אומרת שמגיעה עליו קריאה מיוחדת
       // (`splitChangesByFdp` ב-evaluate.js, בעל המוצר 29/09/2026). הערה כאן רק על יממה שנבדקה מול הסף.
       if (perPart.length > 1) {
-        if (!days.ownFdp) ctx.note(match.exec.from, `${flightsOf(match.exec)} קריאה מיוחדת: ${explain}`, rule);
+        if (!days.ownFdp) ctx.note(match.exec.from, `${flightsOf(match.exec)} קריאה מיוחדת: ${explain} מגיע פיצוי ${amount}.`, rule);
         for (const x of perPart) {
           ctx.expectPairing(match.exec, 'sc', x.days.length * H(params.hours), rule,
             `${flightsOf(x.part)}: ${x.days.length === 1 ? 'יממה אחת' : `${x.days.length} יממות`} (${x.days.map(dayOf).join(', ')}).`,
@@ -579,7 +582,7 @@ function special_call(ctx, params, rule) {
         }
         continue;
       }
-      if (days.all.length > 1) ctx.note(match.exec.from, `${flightsOf(match.exec)} קריאה מיוחדת: ${explain}`, rule);
+      if (days.all.length > 1) ctx.note(match.exec.from, `${flightsOf(match.exec)} קריאה מיוחדת: ${explain} מגיע פיצוי ${amount}.`, rule);
       ctx.expectPairing(match.exec, 'sc', days.counted.length * H(params.hours), rule, explain);
       continue;
     }
@@ -1231,7 +1234,7 @@ function training_cancelled_flight(ctx, params, rule) {
     if (training.length && !marked.has(pairing)) {
       marked.add(pairing);
       ctx.markPairing(pairing, 'training_cancelled');
-      ctx.note(day.date, `${training.join(', ')} תוכנן ל-${dayOf(day.date)}, ובמקומו הוצבת לטיסה: מגיעה קריאה מיוחדת (ס' 17.ג).`, rule);
+      ctx.note(day.date, `${training.join(', ')} תוכנן ל-${dayOf(day.date)}, ובמקומו הוצבת לטיסה: מגיעה קריאה מיוחדת (ס' 17.ג).`, rule, { dueFor: pairing.id });
     }
 
     const own = ctx.matches.find((m) => m.exec === pairing);
