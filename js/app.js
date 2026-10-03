@@ -283,6 +283,36 @@ const calendarSetting = (c) => (c && !c.calendars ? { ...c, calendars: [{ id: c.
 const pad2 = (n) => String(n).padStart(2, '0');
 const stamp = (iso) => { const d = new Date(iso); return `${pad2(d.getDate())}/${pad2(d.getMonth() + 1)} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`; };
 
+/**
+ * חלקי שורת היומן המחובר: הטקסט ("יומן מעודכן ל…") והכפתורים, ופרטי היומן. במחשב עם עכבר הפרטים בחלון צף
+ * על הטקסט, ובמכשיר בלי עכבר (אייפד) בלחיצה עליו (בעל המוצר, 03/10/2026).
+ */
+function calendarParts(c) {
+  const n = state.result?.calendarCrew ?? 0;
+  const when = state.calBusy ? 'מעדכן…' : c.synced ? `מעודכן ל-${stamp(c.synced)}` : 'עוד לא עודכן';
+  const noData = c.synced && !c.facts?.flights?.length;
+  const info = [`${c.calendars.length === 1 ? 'יומן מחובר' : 'יומנים מחוברים'}: ${c.calendars.map((x) => x.name).join(', ')}`,
+    n ? `הרכב הצוות של ${n} ${n === 1 ? 'טיסה' : 'טיסות'} בחודש הזה מהיומן` : ''].filter(Boolean);
+  const hover = matchMedia('(hover: hover)').matches;
+  const label = hover
+    ? `<span title="${esc(info.join('\n'))}">יומן ${when}</span>`
+    : `<button type="button" class="cal-toggle" data-cal="info" aria-expanded="${state.calInfo}">יומן ${when}</button>`;
+  const buttons = `${noData ? '<button type="button" class="btn" data-cal="connect">יומן אחר</button>' : ''}
+    <button type="button" class="btn" data-cal="sync" ${state.calBusy ? 'disabled' : ''}>עדכון מהיומן</button>
+    <button type="button" class="btn danger" data-cal="disconnect">ניתוק יומן</button>`;
+  const infoHtml = !hover && state.calInfo ? `<div class="small muted cal-info">${info.map(esc).join('<br>')}</div>` : '';
+  return { label, buttons, infoHtml };
+}
+
+function bindCalendar(scope) {
+  if (!scope) return;
+  $('[data-cal="connect"]', scope)?.addEventListener('click', openCalendarDialog);
+  $('[data-cal="info"]', scope)?.addEventListener('click', () => { state.calInfo = !state.calInfo; renderCalendarBar(); });
+  $('[data-cal="sync"]', scope)?.addEventListener('click', () => syncCalendar());
+  $('[data-cal="disconnect"]', scope)?.addEventListener('click', disconnectCalendar);
+}
+
+/** שורת היומן: בראש התוצאות, ליד שם החודש, כשיש חודש פתוח; אחרת מתחת לאזור ההעלאה. */
 function renderCalendarBar() {
   const bar = $('#calendar-bar');
   if (!bar) return;
@@ -290,32 +320,23 @@ function renderCalendarBar() {
   const notices = [];
   if (state.calError) notices.push(`<div class="notice bad">${esc(state.calError)}</div>`);
   else if (c?.synced && !c.facts?.flights?.length) notices.push(`<div class="notice warn">${esc(CAL_NO_DATA)}</div>`);
+  const parts = c ? calendarParts(c) : null;
+  const inHead = !!(c && state.result);
   if (!c) {
     bar.innerHTML = `<div class="row"><span>יומן: לא מחובר</span><span class="spacer"></span>
       <button type="button" class="btn" data-cal="connect">חיבור יומן</button></div>${notices.join('')}`;
+  } else if (inHead) {
+    bar.innerHTML = notices.join('');
+    const host = $('#head-cal');
+    if (host) {
+      host.innerHTML = parts.label + parts.buttons;
+      $('#head-cal-info').innerHTML = parts.infoHtml;
+      bindCalendar(host);
+    }
   } else {
-    const n = state.result?.calendarCrew ?? 0;
-    const when = state.calBusy ? 'מעדכן…' : c.synced ? `מעודכן ל-${stamp(c.synced)}` : 'עוד לא עודכן';
-    const noData = c.synced && !c.facts?.flights?.length;
-    // היומן המחובר וכמה טיסות קיבלו ממנו את הרכב הצוות: בחלון צף במעבר עם העכבר, ובמכשיר בלי עכבר (אייפד)
-    // בלחיצה על "יומן מעודכן ל…" (בעל המוצר, 03/10/2026).
-    const info = [`${c.calendars.length === 1 ? 'יומן מחובר' : 'יומנים מחוברים'}: ${c.calendars.map((x) => x.name).join(', ')}`,
-      n ? `הרכב הצוות של ${n} ${n === 1 ? 'טיסה' : 'טיסות'} בחודש הזה מהיומן` : ''].filter(Boolean);
-    const hover = matchMedia('(hover: hover)').matches;
-    const label = hover
-      ? `<span title="${esc(info.join('\n'))}">יומן ${when}</span>`
-      : `<button type="button" class="cal-toggle" data-cal="info" aria-expanded="${state.calInfo}">יומן ${when}</button>`;
-    bar.innerHTML = `<div class="row">${label}
-      <span class="spacer"></span>
-      ${noData ? '<button type="button" class="btn" data-cal="connect">יומן אחר</button>' : ''}
-      <button type="button" class="btn" data-cal="sync" ${state.calBusy ? 'disabled' : ''}>עדכון מהיומן</button>
-      <button type="button" class="btn danger" data-cal="disconnect">ניתוק יומן</button></div>
-      ${!hover && state.calInfo ? `<div class="small muted cal-info">${info.map(esc).join('<br>')}</div>` : ''}${notices.join('')}`;
+    bar.innerHTML = `<div class="row">${parts.label}<span class="spacer"></span>${parts.buttons}</div>${parts.infoHtml}${notices.join('')}`;
   }
-  $('[data-cal="connect"]', bar)?.addEventListener('click', openCalendarDialog);
-  $('[data-cal="info"]', bar)?.addEventListener('click', () => { state.calInfo = !state.calInfo; renderCalendarBar(); });
-  $('[data-cal="sync"]', bar)?.addEventListener('click', () => syncCalendar());
-  $('[data-cal="disconnect"]', bar)?.addEventListener('click', disconnectCalendar);
+  bindCalendar(bar);
 }
 
 /**
@@ -573,9 +594,11 @@ function renderHead(res) {
     <div class="result-head">
       <h2${hover ? ` title="${esc(meta)}"` : ''}>${hover ? '' : '<button type="button" class="cal-toggle" data-action="head-info">'}${esc(monthName(res.period))}${hover ? '' : '</button>'}</h2>
       <span class="meta head-meta">${esc(meta)}</span>
+      ${state.calendar ? '<span class="cal-inline no-print" id="head-cal"></span>' : ''}
       <span class="spacer"></span>
       <button class="btn no-print" data-action="print">ייצוא PDF</button>
     </div>
+    ${state.calendar ? '<div class="no-print" id="head-cal-info"></div>' : ''}
     ${hover ? '' : `<p class="small muted no-print" data-head-info hidden>${esc(meta)}</p>`}
     <p class="print-only small">${esc(emp)} · הופק ${esc(new Date().toLocaleDateString('he-IL'))}</p>
     ${res.mode === 'plan' ? '<p class="small muted">בלי קובץ ביצוע אין השוואה מול מה שזוכה. מוצגים הקרדיט והפיצויים הצפויים לפי התכנון.</p>' : ''}
@@ -894,6 +917,13 @@ function describePairingId(id) {
 }
 
 function bindResults(root) {
+  const host = $('#head-cal', root);
+  if (host && state.calendar) {
+    const p = calendarParts(state.calendar);
+    host.innerHTML = p.label + p.buttons;
+    $('#head-cal-info', root).innerHTML = p.infoHtml;
+    bindCalendar(host);
+  }
   $('[data-action="head-info"]', root)?.addEventListener('click', () => { const p = $('[data-head-info]', root); p.hidden = !p.hidden; });
   $('[data-action="print"]', root)?.addEventListener('click', () => {
     // ה-PDF מציג הכול בפירוט וכל שאר החלקים פתוחים, בלי קשר למה שמוצג כרגע על המסך.

@@ -188,6 +188,7 @@ main { max-width: 1100px; margin: 0 auto; padding: 1rem 16px 3rem; }
 .result-head h2 { margin: 0; font-size: 1.35rem; }
 .result-head .cal-toggle { font-weight: inherit; }
 .head-meta { display: none; }
+.cal-inline { display: contents; }
 .meta { color: var(--muted); font-size: .9rem; }
 
 .totals { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: .6rem; }
