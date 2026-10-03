@@ -297,7 +297,8 @@ function renderCalendarBar() {
     const when = state.calBusy ? 'מעדכן…' : c.synced ? `מעודכן ל-${stamp(c.synced)}` : 'עוד לא עודכן';
     const noData = c.synced && !c.facts?.flights?.length;
     // כמה טיסות קיבלו מהיומן את הרכב הצוות – רק בחלון צף, במעבר עם העכבר (בעל המוצר, 03/10/2026).
-    const tip = n ? ` title="הרכב הצוות של ${n} ${n === 1 ? 'טיסה' : 'טיסות'} בחודש הזה מהיומן"` : '';
+    const names = c.calendars.map((x) => x.name).join(', ');
+    const tip = ` title="${esc([`${c.calendars.length === 1 ? 'יומן מחובר' : 'יומנים מחוברים'}: ${names}`, n ? `הרכב הצוות של ${n} ${n === 1 ? 'טיסה' : 'טיסות'} בחודש הזה מהיומן` : ''].filter(Boolean).join('\n'))}"`;
     bar.innerHTML = `<div class="row"><span${tip}>יומן ${when}</span>
       <span class="spacer"></span>
       ${noData ? '<button type="button" class="btn" data-cal="connect">יומן אחר</button>' : ''}
