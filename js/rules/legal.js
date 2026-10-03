@@ -398,6 +398,17 @@ function checkFdp(ch, id, o, flag, extend) {
   // בתוך המותר ואין מנוחה קצרה, הוא הארכה (בעל המוצר, 03/10/2026). 0 – עומד, 1 – הארכה, 2 – חריגה.
   const ext = H(limits.execution_fdp_extension_hours ?? 0);
   const grade = (l) => (fits(l) ? 0 : o.exec && l && !why && ft <= l.ft && seg <= l.seg && fdp <= l.fdp + ext ? 1 : 2);
+  // מה חורג גם בהרכבים האחרים, כדי שלא ייראה שכל מה שחורג בצוות בודד חורג גם בהם (בעל המוצר, 03/10/2026).
+  // רק מה שחורג גם בצוות בודד: "גם" מתייחס למה שכבר נכתב.
+  const exceeded = (l) => [ft > l.ft && ft > single.ft && 'מזמן הטיסה', fdp > l.fdp && fdp > single.fdp && 'מ-FDP',
+    seg > l.seg && seg > single.seg && 'ממספר הרגליים'].filter(Boolean).join(' ו');
+  const alsoOver = () => {
+    const others = ['augmented', 'double'].filter((c) => lim[c] && exceeded(lim[c]));
+    if (!others.length) return '';
+    const what = others.map((c) => exceeded(lim[c]));
+    if (what.every((w) => w === what[0])) return ` חורג ${what[0]} גם בצוות ${others.map((c) => CREW[c].label).join(' או ')}.`;
+    return ` ${others.map((c, i) => `${i ? 'ובצוות' : 'בצוות'} ${CREW[c].label} חורג ${what[i]}`).join(', ')}.`;
+  };
   const date = ch.flights[0].date;
   const report = (l, crew, tail = '') => {
     const g = grade(l);
@@ -410,7 +421,7 @@ function checkFdp(ch, id, o, flag, extend) {
   if (!grade(single)) return;
   // אף הרכב אינו טוב מהצוות הבודד: ההשוואה לצוות בודד, בלי לשאול.
   if (!['augmented', 'double'].some((c) => lim[c] && grade(lim[c]) < grade(single))) {
-    report(single, 'single', lim.augmented || lim.double ? ' חורג גם בצוות מוגבר או כפול.' : '');
+    report(single, 'single', alsoOver());
     return;
   }
   ask({
