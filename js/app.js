@@ -295,11 +295,11 @@ function calendarParts(c) {
     n ? `הרכב הצוות של ${n} ${n === 1 ? 'טיסה' : 'טיסות'} בחודש הזה מהיומן` : ''].filter(Boolean);
   const hover = matchMedia('(hover: hover)').matches;
   const label = hover
-    ? `<span title="${esc(info.join('\n'))}">יומן ${when}</span>`
-    : `<button type="button" class="cal-toggle" data-cal="info" aria-expanded="${state.calInfo}">יומן ${when}</button>`;
+    ? `<span class="cal-label" title="${esc(info.join('\n'))}">יומן ${when}</span>`
+    : `<button type="button" class="cal-toggle cal-label" data-cal="info" aria-expanded="${state.calInfo}">יומן ${when}</button>`;
   const buttons = `${noData ? '<button type="button" class="btn" data-cal="connect">יומן אחר</button>' : ''}
-    <button type="button" class="btn" data-cal="sync" ${state.calBusy ? 'disabled' : ''}>עדכון מהיומן</button>
-    <button type="button" class="btn danger" data-cal="disconnect">ניתוק יומן</button>`;
+    <button type="button" class="btn" data-cal="sync" ${state.calBusy ? 'disabled' : ''}>עדכון</button>
+    <button type="button" class="btn" data-cal="disconnect">ניתוק יומן</button>`;
   const infoHtml = !hover && state.calInfo ? `<div class="small muted cal-info">${info.map(esc).join('<br>')}</div>` : '';
   return { label, buttons, infoHtml };
 }

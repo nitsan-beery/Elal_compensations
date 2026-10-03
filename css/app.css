@@ -123,6 +123,7 @@ main { max-width: 1100px; margin: 0 auto; padding: 1rem 16px 3rem; }
 /* יומן (רשות): שורת מצב מתחת לאזור ההעלאה, וחלון החיבור. */
 .calendar-bar { margin: 0 0 1rem; font-size: .95rem; }
 .calendar-bar .row { gap: .4rem .6rem; }
+.cal-label { color: var(--muted); font-size: .875rem; }
 .cal-toggle { background: none; border: 0; padding: 0; font: inherit; color: inherit; cursor: pointer; }
 .cal-info { margin-top: .3rem; }
 .dialog {
