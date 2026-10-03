@@ -318,7 +318,6 @@ async function openCalendarDialog() {
   const saved = builtin || (await safe(() => store.getSetting(CAL_CLIENT), null)) || '';
   calendar.preload();
   dlg.innerHTML = `<h2>חיבור יומן</h2>
-    <p>היומן שהאורגנייזר מסנכרן מהרומה משלים את מה שאינו בקבצים – הרכב הצוות בכל טיסה ושעות הכוננות – כך שהאפליקציה לא תשאל עליהם. התכנון והביצוע נשארים לפי הקבצים.</p>
     <p class="small muted">היומן נקרא מגוגל ישירות למכשיר הזה, בהרשאת קריאה בלבד. נשמרים רק מספר הטייסים ושעות הכוננות, בלי שמות וטלפונים, והם אינם נכללים בגיבוי.</p>
     ${builtin ? '' : `<details ${saved ? '' : 'open'}><summary>הגדרה חד-פעמית: מזהה התחברות של גוגל (<bdi dir="ltr">Client ID</bdi>)</summary>
       <ol class="small">
