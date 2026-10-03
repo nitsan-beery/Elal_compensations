@@ -74,8 +74,9 @@ export function evaluate({ rulesData, plan = null, exec = null, answers = {}, hi
   const fdp = slip?.legal_rest_hours != null
     ? { legalRestMin: slip.legal_rest_hours * 60, reportMin: slip.report_minutes_before_std ?? 0, postMin: legalRest?.postMin ?? 0 } : null;
   const execPairings = exec ? buildPairings(timeline, domicile, (d) => d.exec?.legs, fdp) : [];
+  const dependentAnswers = {};
   const matches = mode === 'full'
-    ? splitSwappedElsewhere(matchPairings(planPairings, execPairings), answers)
+    ? splitSwappedElsewhere(matchPairings(planPairings, execPairings), answers, dependentAnswers)
     : mode === 'exec' ? execPairings.map((e) => ({ plan: null, exec: e, how: 'noplan' })) : [];
   explainByActivity(matches, timeline, codes, sickCodeTest(supported), movableCodeTest(supported));
 
@@ -97,6 +98,8 @@ export function evaluate({ rulesData, plan = null, exec = null, answers = {}, hi
     notes: [],
     reviews: [],
     questions: [],
+    // תשובות שנשאלו רק בגלל תשובה אחרת: שינוי שלה מוחק גם אותן (`splitSwappedElsewhere`).
+    dependentAnswers,
     unknownCodes: collectUnknownCodes(timeline, codes, supported),
     comparison: [],
     totals: [],
@@ -371,7 +374,9 @@ function makeContext({ out, timeline, domicile, codes, holidays, answers, plan, 
      */
     answerFor(match) {
       if (match.exec) {
-        const direct = answers[`unplanned:${match.exec.id}`];
+        // השאלה על פעילות לא מתוכננת נשאלת רק עליה. תשובה שנשארה ממנה אחרי שהתשובה על הסבב
+        // המתוכנן באותם ימים השתנתה (`splitSwappedElsewhere`) אינה חלה על ההתאמה המשותפת.
+        const direct = match.how === 'unplanned' ? answers[`unplanned:${match.exec.id}`] : null;
         if (direct) return direct;
         const linked = linkedSwap('cancelled:', match.exec.id);
         if (linked) return linked;
@@ -777,13 +782,15 @@ const LINKED_VALUES = ['voluntary_swap', 'replaced'];
  * סבב מתוכנן שבמקומו בוצע סבב אחר באותם ימים, והתשובה עליו היא החלפה עם טיסה אחרת – בחודש אחר
  * או פעילות לא מתוכננת בימים אחרים: מה שבוצע באותם ימים אינו חלק מההחלפה. הוא פעילות לא מתוכננת,
  * עם השאלה עליה (קריאה מיוחדת או לא), והסבב המתוכנן – סבב שלא בוצע (בעל המוצר, 03/10/2026;
- * 06/08/2025: ZRH הוחלפה מרצון בטיסה בחודש אחר, ו-NCE בוצעה באותו יום).
+ * 06/08/2025: ZRH הוחלפה מרצון בטיסה בחודש אחר, ו-NCE בוצעה באותו יום). השאלה על הטיסה שבוצעה
+ * תלויה בתשובה על הסבב המתוכנן, ולכן שינוי שלה מוחק גם את התשובה עליה (`dependents`).
  */
-function splitSwappedElsewhere(matches, answers) {
+function splitSwappedElsewhere(matches, answers, dependents) {
   return matches.flatMap((m) => {
     if (m.how !== 'dates') return [m];
     const a = answers[`cancelled:${m.plan.id}`];
     if (!LINKED_VALUES.includes(a?.value) || a.link === undefined || a.link === m.exec.id) return [m];
+    dependents[`cancelled:${m.plan.id}`] = [`unplanned:${m.exec.id}`];
     return [{ plan: m.plan, exec: null, how: 'cancelled' }, { plan: null, exec: m.exec, how: 'unplanned' }];
   });
 }

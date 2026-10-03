@@ -895,7 +895,9 @@ function bindResults(root) {
   }
   for (const btn of root.querySelectorAll('[data-unanswer]')) {
     btn.addEventListener('click', async () => {
-      delete state.record.answers[btn.dataset.unanswer];
+      const id = btn.dataset.unanswer;
+      // שאלה שנשאלה רק בגלל התשובה הזאת נפתחת מחדש יחד איתה.
+      for (const dep of [id, ...(state.result?.dependentAnswers?.[id] ?? [])]) delete state.record.answers[dep];
       state.notices = [];
       await runAndSave();
     });
