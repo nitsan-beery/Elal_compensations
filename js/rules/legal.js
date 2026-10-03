@@ -367,32 +367,31 @@ function checkFdp(ch, id, o, flag) {
   const why = longest && longest.rest >= 180
     ? `מנוחה של ${hm(longest.rest)} בלבד בין ${describeItem(longest.prev)} ל-${describeItem(longest.next)} (המינימום ${hm(H(limits.rest_hours))}), ולכן זה FDP אחד: `
     : '';
-  const head = `${describeChain(ch)}: ${why}התייצבות ${clockText(ch.fdpStart)}, זמן טיסה ${hm(ft)}, FDP ${hm(fdp)}`;
+  // רק מה שחורג מהמגבלה, עם המקסימום שלו (בעל המוצר, 03/10/2026).
   const over = (l, crew) => {
     const parts = [];
-    if (fdp > l.fdp) parts.push(`FDP מעל ${hm(l.fdp)}`);
-    if (ft > l.ft) parts.push(`זמן טיסה מעל ${hm(l.ft)}`);
-    if (seg > l.seg) parts.push(`${seg} רגליים, מעל ${l.seg}`);
-    return `${parts.join(', ')} בצוות ${CREW[crew].label}`;
+    if (ft > l.ft) parts.push([`זמן טיסה ${hm(ft)}`, hm(l.ft)]);
+    if (fdp > l.fdp) parts.push([`FDP ${hm(fdp)}`, hm(l.fdp)]);
+    if (seg > l.seg) parts.push([`${seg} רגליים`, `${l.seg} רגליים`]);
+    return `${parts.map((p) => p[0]).join(' ו-')}, והמקסימום בצוות ${CREW[crew].label} ${parts.map((p) => p[1]).join(' ו-')}`;
   };
   const date = ch.flights[0].date;
   if (crewAnswer) {
     const l = lim[crewAnswer] ?? single;
-    if (!fits(l)) flag(date, `${head}. ${over(l, lim[crewAnswer] ? crewAnswer : 'single')}.`);
+    if (!fits(l)) flag(date, `${describeChain(ch)}: ${why}${over(l, lim[crewAnswer] ? crewAnswer : 'single')}.`);
     return;
   }
   if (fits(single)) return;
   // אף הרכב אינו עומד במגבלות: ההשוואה לצוות בודד, בלי לשאול.
   if (!['augmented', 'double'].some((c) => fits(lim[c]))) {
-    flag(date, `${head}. ${over(single, 'single')}, וגם בצוות מוגבר או כפול.`);
+    flag(date, `${describeChain(ch)}: ${why}${over(single, 'single')}. חורג גם בצוות מוגבר או כפול.`);
     return;
   }
   ask({
     id,
     date,
     title: `מגבלות החוק: באיזה צוות מתוכנן ${describeChain(ch)}?`,
-    body: `זמן טיסה ${hm(ft)} ו-FDP ${hm(fdp)} (התייצבות ${clockText(ch.fdpStart)}, ${seg === 1 ? 'רגל אחת' : `${seg} רגליים`}). ` +
-      `בצוות בודד המקסימום ${hm(single.ft)} טיסה ו-${hm(single.fdp)} FDP.`,
+    body: `${why}${over(single, 'single')}.`,
     options: Object.entries(CREW).map(([value, c]) => ({ value, label: `${c.label} (${c.pilots} טייסים)` })),
     ruleId: null,
     ruleTitle: LEGAL_TITLE,
