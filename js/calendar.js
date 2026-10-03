@@ -123,38 +123,47 @@ async function pages(token, path, params) {
   return items;
 }
 
-/** היומנים של המשתמש: {id, name, organizer}. `organizer`: התיאור או השם מעידים על האורגנייזר. */
+/** היומנים של המשתמש: {id, name}. */
 export async function listCalendars(token) {
-  const items = await pages(token, 'users/me/calendarList', { fields: 'items(id,summary,description),nextPageToken', maxResults: 250 });
-  return items.map((c) => ({ id: c.id, name: c.summary ?? c.id, organizer: /rotem|organizer/i.test(`${c.summary} ${c.description}`) }));
+  const items = await pages(token, 'users/me/calendarList', { fields: 'items(id,summary),nextPageToken', maxResults: 250 });
+  return items.map((c) => ({ id: c.id, name: c.summary ?? c.id }));
 }
 
 /**
- * היומנים שיש בהם אירועי סבב של האורגנייזר בשנה האחרונה ובחודשיים הבאים, יומני האורגנייזר קודם.
- * למשתמש יכולים להיות כמה יומנים כאלה, ורק באחד מהם נתונים.
+ * היומנים שיש בהם אירועי סבב של האורגנייזר בטווח, מהיומן שהסבב האחרון בו מאוחר ביותר.
+ * לאותו משתמש יכולים להיות כמה יומנים כאלה, כל אחד לתקופה אחרת (03/10/2026: יומן ישן עם 2025
+ * ויומן חדש עם 2026), ולכן נקראים כולם.
  */
-export async function findOrganizerCalendars(token, calendars) {
-  const now = Date.now();
-  const ordered = [...calendars].sort((a, b) => Number(b.organizer) - Number(a.organizer));
+export async function findOrganizerCalendars(token, calendars, timeMin, timeMax) {
   const found = [];
-  for (const c of ordered) {
+  for (const c of calendars) {
     try {
-      const r = await api(token, `calendars/${encodeURIComponent(c.id)}/events`, {
-        q: SLIP_MARK, singleEvents: true, maxResults: 1, fields: 'items(id)',
-        timeMin: new Date(now - 400 * 864e5).toISOString(), timeMax: new Date(now + 62 * 864e5).toISOString(),
+      const items = await pages(token, `calendars/${encodeURIComponent(c.id)}/events`, {
+        q: SLIP_MARK, singleEvents: true, maxResults: 2500, fields: 'items(start),nextPageToken', timeMin, timeMax,
       });
-      if (r.items?.length) found.push(c);
+      const latest = items.map((e) => e.start?.dateTime ?? e.start?.date ?? '').sort().at(-1);
+      if (latest) found.push({ ...c, latest });
     } catch { /* יומן שאין גישה לאירועים שלו */ }
   }
-  return found;
+  return found.sort((a, b) => b.latest.localeCompare(a.latest));
 }
 
-/** ההשלמות מהיומן בטווח: {flights, standby} (`parseEvents`). */
-export async function fetchFacts(token, calendarId, timeMin, timeMax) {
-  const items = await pages(token, `calendars/${encodeURIComponent(calendarId)}/events`, {
-    timeMin, timeMax, singleEvents: true, maxResults: 2500, fields: 'items(summary,description,start,end,status),nextPageToken',
-  });
-  return parseEvents(items);
+/**
+ * ההשלמות מכל היומנים בטווח: {flights, standby} (`parseEvents`). טיסה שמופיעה בכמה יומנים נלקחת
+ * מהראשון ברשימה, שהוא החדש.
+ */
+export async function fetchFacts(token, calendarIds, timeMin, timeMax) {
+  const out = { flights: [], standby: [] };
+  const seen = new Set();
+  for (const id of calendarIds) {
+    const items = await pages(token, `calendars/${encodeURIComponent(id)}/events`, {
+      timeMin, timeMax, singleEvents: true, maxResults: 2500, fields: 'items(summary,description,start,end,status),nextPageToken',
+    });
+    const facts = parseEvents(items);
+    for (const f of facts.flights) if (!seen.has(`${f.flight}|${f.std}`)) { seen.add(`${f.flight}|${f.std}`); out.flights.push(f); }
+    for (const s of facts.standby) if (!seen.has(`${s.code}|${s.start}`)) { seen.add(`${s.code}|${s.start}`); out.standby.push(s); }
+  }
+  return out;
 }
 
 /**

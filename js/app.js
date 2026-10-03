@@ -60,7 +60,7 @@ const state = {
   notices: [],
   files: {}, // kind → {id: "2026-07:plan", url} של קובץ ה-PDF השמור, ללחיצה על הקובץ באזור ההעלאה
   sections: { key: null, open: new Map() }, // אילו חלקים בתוצאות של החודש הפתוח פתוחים ואילו מכווצים
-  calendar: null, // חיבור היומן: {clientId, calendarId, calendarName, facts, synced}, או null
+  calendar: null, // חיבור היומן: {clientId, calendars: [{id, name}], manual, facts, synced}, או null
   calBusy: false,
   calError: null,
 };
@@ -84,7 +84,7 @@ async function init() {
   if (state.rulesSource === 'cache') {
     showBanner('warn', `אין חיבור לרשת. החוקים נטענו מהעותק השמור על המכשיר (גרסה ${esc(state.rulesData.rules_version)}).`);
   }
-  state.calendar = await safe(() => store.getSetting(CAL_SETTING), null);
+  state.calendar = calendarSetting(await safe(() => store.getSetting(CAL_SETTING), null));
   // החודש האחרון שעבדו עליו נפתח אוטומטית.
   const months = await safe(() => store.listMonths(), []);
   if (months.length) await openMonth(months[0].key, { quiet: true });
@@ -279,6 +279,8 @@ const CAL_CLIENT = 'calendar-client';
 const CAL_NO_DATA = 'לא נמצאו ביומן נתוני סבבים. ייתכן שחובר יומן לא מתאים, או שהיומן מתאים אבל לא בוצע בו סנכרון דרך האורגנייזר.';
 
 const calendarFacts = () => state.calendar?.facts ?? null;
+// חיבור שנשמר לפני 03/10/2026, ליומן אחד.
+const calendarSetting = (c) => (c && !c.calendars ? { ...c, calendars: [{ id: c.calendarId, name: c.calendarName }] } : c);
 const pad2 = (n) => String(n).padStart(2, '0');
 const stamp = (iso) => { const d = new Date(iso); return `${pad2(d.getDate())}/${pad2(d.getMonth() + 1)} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`; };
 
@@ -296,7 +298,7 @@ function renderCalendarBar() {
     const n = state.result?.calendarCrew ?? 0;
     const when = state.calBusy ? 'מעדכן…' : c.synced ? `עודכן ${stamp(c.synced)}` : 'עוד לא עודכן';
     const noData = c.synced && !c.facts?.flights?.length;
-    bar.innerHTML = `<div class="row"><span>יומן מחובר: <b>${esc(c.calendarName)}</b>
+    bar.innerHTML = `<div class="row"><span>יומן מחובר: <b>${esc(c.calendars.map((x) => x.name).join(', '))}</b>
       <span class="small muted">· ${when}${n ? ` · הרכב הצוות של ${n} ${n === 1 ? 'טיסה' : 'טיסות'} בחודש הזה מהיומן` : ''}</span></span>
       <span class="spacer"></span>
       ${noData ? '<button type="button" class="btn" data-cal="connect">יומן אחר</button>' : ''}
@@ -352,10 +354,11 @@ async function openCalendarDialog() {
       if (!builtin) await safe(() => store.putSetting(CAL_CLIENT, clientId));
       step('info', 'מחפש את יומן האורגנייזר…');
       const all = await calendar.listCalendars(token);
-      const found = await calendar.findOrganizerCalendars(token, all);
+      const { timeMin, timeMax } = await calendarRange();
+      const found = await calendar.findOrganizerCalendars(token, all, timeMin, timeMax);
       if (found.length) {
         dlg.close();
-        await connectCalendar(clientId, found[0]);
+        await connectCalendar(clientId, found);
         return;
       }
       step('warn', `לא נמצאו נתוני סבבים באף יומן בחשבון הזה. ייתכן שנבחר חשבון גוגל לא מתאים, או שלא בוצע סנכרון דרך האורגנייזר.
@@ -364,7 +367,7 @@ async function openCalendarDialog() {
       $('[data-cal="pick"]', dlg).addEventListener('click', async () => {
         const id = $('select[name="calendarId"]', dlg).value;
         dlg.close();
-        await connectCalendar(clientId, all.find((c) => c.id === id));
+        await connectCalendar(clientId, [all.find((c) => c.id === id)], { manual: true });
       });
     } catch (err) {
       step('bad', esc(err.message));
@@ -373,8 +376,9 @@ async function openCalendarDialog() {
   dlg.showModal();
 }
 
-async function connectCalendar(clientId, cal) {
-  state.calendar = { clientId, calendarId: cal.id, calendarName: cal.name, facts: null, synced: null };
+/** `manual`: יומן שהמשתמש בחר, ולא מחפשים במקומו. אחרת כל עדכון מחפש מחדש (`syncCalendar`). */
+async function connectCalendar(clientId, cals, { manual = false } = {}) {
+  state.calendar = { clientId, calendars: cals.map(({ id, name }) => ({ id, name })), manual, facts: null, synced: null };
   state.calError = null;
   await safe(() => store.putSetting(CAL_SETTING, state.calendar));
   await syncCalendar();
@@ -382,7 +386,8 @@ async function connectCalendar(clientId, cal) {
 
 /**
  * ההשלמות מהיומן לכל החודשים השמורים, ועד חודשיים קדימה. בלי הרשאה בתוקף: רק בלחיצה
- * (`interactive`), כי ההתחברות פותחת חלון של גוגל.
+ * (`interactive`), כי ההתחברות פותחת חלון של גוגל. היומנים עם אירועי האורגנייזר נמצאים מחדש בכל
+ * עדכון, כי האורגנייזר יכול לפתוח יומן חדש (03/10/2026); בלי ממצא – היומנים שכבר מחוברים.
  */
 async function syncCalendar({ interactive = false } = {}) {
   const c = state.calendar;
@@ -396,8 +401,13 @@ async function syncCalendar({ interactive = false } = {}) {
   try {
     token ??= await pending;
     const { timeMin, timeMax } = await calendarRange();
-    const facts = await calendar.fetchFacts(token, c.calendarId, timeMin, timeMax);
-    state.calendar = { ...c, facts, synced: new Date().toISOString() };
+    let cals = c.calendars;
+    if (!c.manual) {
+      const found = await calendar.findOrganizerCalendars(token, await calendar.listCalendars(token), timeMin, timeMax);
+      if (found.length) cals = found.map(({ id, name }) => ({ id, name }));
+    }
+    const facts = await calendar.fetchFacts(token, cals.map((x) => x.id), timeMin, timeMax);
+    state.calendar = { ...c, calendars: cals, facts, synced: new Date().toISOString() };
     await safe(() => store.putSetting(CAL_SETTING, state.calendar));
   } catch (err) {
     state.calError = err.message;
