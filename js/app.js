@@ -8,6 +8,7 @@ import { evaluate } from './rules/evaluate.js';
 import { loadRules, partitionRules } from './rules/catalog.js';
 import { minToHhmm } from './time.js';
 import * as store from './store.js';
+import * as calendar from './calendar.js';
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -59,6 +60,9 @@ const state = {
   notices: [],
   files: {}, // kind → {id: "2026-07:plan", url} של קובץ ה-PDF השמור, ללחיצה על הקובץ באזור ההעלאה
   sections: { key: null, open: new Map() }, // אילו חלקים בתוצאות של החודש הפתוח פתוחים ואילו מכווצים
+  calendar: null, // חיבור היומן: {clientId, calendarId, calendarName, facts, synced}, או null
+  calBusy: false,
+  calError: null,
 };
 
 // ---------- אתחול ----------
@@ -80,10 +84,17 @@ async function init() {
   if (state.rulesSource === 'cache') {
     showBanner('warn', `אין חיבור לרשת. החוקים נטענו מהעותק השמור על המכשיר (גרסה ${esc(state.rulesData.rules_version)}).`);
   }
+  state.calendar = await safe(() => store.getSetting(CAL_SETTING), null);
   // החודש האחרון שעבדו עליו נפתח אוטומטית.
   const months = await safe(() => store.listMonths(), []);
   if (months.length) await openMonth(months[0].key, { quiet: true });
   else renderResults();
+  // יומן מחובר: עדכון בפתיחה, כשההרשאה מהפעם הקודמת עוד בתוקף. בלעדיה גוגל צריך חלון, שנפתח
+  // רק בלחיצה על "עדכון מהיומן".
+  if (state.calendar) {
+    calendar.preload();
+    if (calendar.cachedToken()) syncCalendar();
+  }
 }
 
 function registerServiceWorker() {
@@ -189,6 +200,7 @@ async function handleFile(file, expected) {
     dropFileLink(kind);
     state.record = record;
     await runAndSave();
+    if (state.calendar && calendar.cachedToken()) syncCalendar();
   } catch (err) {
     console.error(err);
     if (err.exact) state.result = null;
@@ -248,12 +260,166 @@ function dropFileLink(kind) {
 async function runAndSave() {
   const r = state.record;
   const months = await safe(() => store.listMonths(), []);
-  state.result = evaluate({ rulesData: state.rulesData, plan: r.plan, exec: r.exec, answers: r.answers ?? {}, history: historyFor(r.key, months) });
+  state.result = evaluate({ rulesData: state.rulesData, plan: r.plan, exec: r.exec, answers: r.answers ?? {}, history: historyFor(r.key, months), calendar: calendarFacts() });
   r.rulesVersion = state.result.rulesVersion;
   r.summary = summarize(state.result);
   await safe(() => store.putMonth(r));
   renderUploadState();
   renderResults();
+}
+
+// ---------- יומן (רשות) ----------
+//
+// הנחת היסוד היא שאין יומן, ומה שחסר בקבצים נשאל (בעל המוצר, 03/10/2026). משתמש שמחבר את יומן
+// האורגנייזר מקבל ממנו השלמות בלבד – הרכב הצוות ושעות הכוננות (js/calendar.js) – והן נשמרות על
+// המכשיר בלי שמות. התכנון והביצוע תמיד מהקבצים.
+
+const CAL_SETTING = 'calendar';
+const CAL_CLIENT = 'calendar-client';
+const CAL_NO_DATA = 'לא נמצאו ביומן נתוני סבבים. ייתכן שחובר יומן לא מתאים, או שהיומן מתאים אבל לא בוצע בו סנכרון דרך האורגנייזר.';
+
+const calendarFacts = () => state.calendar?.facts ?? null;
+const pad2 = (n) => String(n).padStart(2, '0');
+const stamp = (iso) => { const d = new Date(iso); return `${pad2(d.getDate())}/${pad2(d.getMonth() + 1)} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`; };
+
+function renderCalendarBar() {
+  const bar = $('#calendar-bar');
+  if (!bar) return;
+  const c = state.calendar;
+  const notices = [];
+  if (state.calError) notices.push(`<div class="notice bad">${esc(state.calError)}</div>`);
+  else if (c?.synced && !c.facts?.flights?.length) notices.push(`<div class="notice warn">${esc(CAL_NO_DATA)}</div>`);
+  if (!c) {
+    bar.innerHTML = `<div class="row"><span>יומן: לא מחובר</span><span class="spacer"></span>
+      <button type="button" class="btn" data-cal="connect">חיבור יומן</button></div>${notices.join('')}`;
+  } else {
+    const n = state.result?.calendarCrew ?? 0;
+    const when = state.calBusy ? 'מעדכן…' : c.synced ? `עודכן ${stamp(c.synced)}` : 'עוד לא עודכן';
+    const noData = c.synced && !c.facts?.flights?.length;
+    bar.innerHTML = `<div class="row"><span>יומן מחובר: <b>${esc(c.calendarName)}</b>
+      <span class="small muted">· ${when}${n ? ` · הרכב הצוות של ${n} ${n === 1 ? 'טיסה' : 'טיסות'} בחודש הזה מהיומן` : ''}</span></span>
+      <span class="spacer"></span>
+      ${noData ? '<button type="button" class="btn" data-cal="connect">יומן אחר</button>' : ''}
+      <button type="button" class="btn" data-cal="sync" ${state.calBusy ? 'disabled' : ''}>עדכון מהיומן</button>
+      <button type="button" class="btn danger" data-cal="disconnect">ניתוק יומן</button></div>${notices.join('')}`;
+  }
+  $('[data-cal="connect"]', bar)?.addEventListener('click', openCalendarDialog);
+  $('[data-cal="sync"]', bar)?.addEventListener('click', () => syncCalendar({ interactive: true }));
+  $('[data-cal="disconnect"]', bar)?.addEventListener('click', disconnectCalendar);
+}
+
+/**
+ * חלון החיבור: הסבר, הגדרה חד-פעמית של מזהה ההתחברות (כשאין מזהה מובנה), התחברות לגוגל, ואיתור
+ * יומן האורגנייזר. כשלא נמצא יומן עם נתונים – הודעה ובחירה ידנית מרשימת היומנים.
+ */
+async function openCalendarDialog() {
+  const dlg = $('#calendar-dialog');
+  const builtin = calendar.BUILTIN_CLIENT_ID;
+  const saved = builtin || (await safe(() => store.getSetting(CAL_CLIENT), null)) || '';
+  calendar.preload();
+  dlg.innerHTML = `<h2>חיבור יומן</h2>
+    <p>היומן שהאורגנייזר מסנכרן מהרומה משלים את מה שאינו בקבצים – הרכב הצוות בכל טיסה ושעות הכוננות – כך שהאפליקציה לא תשאל עליהם. התכנון והביצוע נשארים לפי הקבצים.</p>
+    <p class="small muted">היומן נקרא מגוגל ישירות למכשיר הזה, בהרשאת קריאה בלבד. נשמרים רק מספר הטייסים ושעות הכוננות, בלי שמות וטלפונים, והם אינם נכללים בגיבוי.</p>
+    ${builtin ? '' : `<details ${saved ? '' : 'open'}><summary>הגדרה חד-פעמית: מזהה התחברות של גוגל (<bdi dir="ltr">Client ID</bdi>)</summary>
+      <ol class="small">
+        <li>היכנס ל-<a href="https://console.cloud.google.com/" target="_blank" rel="noopener">Google Cloud Console</a> עם חשבון הגוגל של היומן, וצור פרויקט חדש.</li>
+        <li>ב-<bdi dir="ltr">APIs &amp; Services › Library</bdi> חפש <bdi dir="ltr">Google Calendar API</bdi> ולחץ <bdi dir="ltr">Enable</bdi>.</li>
+        <li>ב-<bdi dir="ltr">Google Auth Platform</bdi> לחץ <bdi dir="ltr">Get started</bdi>: שם כלשהו לאפליקציה, האימייל שלך, ו-<bdi dir="ltr">Audience: External</bdi>. אחר כך ב-<bdi dir="ltr">Audience › Test users</bdi> הוסף את כתובת הג׳ימייל שלך.</li>
+        <li>ב-<bdi dir="ltr">Clients › Create client</bdi> בחר <bdi dir="ltr">Web application</bdi>, וב-<bdi dir="ltr">Authorized JavaScript origins</bdi> הוסף <bdi dir="ltr">${esc(location.origin)}</bdi>. לחץ <bdi dir="ltr">Create</bdi>.</li>
+        <li>העתק את ה-<bdi dir="ltr">Client ID</bdi> (מסתיים ב-<bdi dir="ltr">.apps.googleusercontent.com</bdi>) והדבק כאן.</li>
+      </ol>
+      <p class="small muted">בהתחברות גוגל יציג <bdi dir="ltr">Google hasn't verified this app</bdi>, כי את האפליקציה הגדרת לעצמך: לחץ <bdi dir="ltr">Continue</bdi>.</p></details>
+    <label>Client ID <input name="clientId" dir="ltr" autocomplete="off" spellcheck="false" value="${esc(saved)}"></label>`}
+    <div class="cal-step"></div>
+    <div class="row"><button type="button" class="btn primary" data-cal="login">התחברות לגוגל</button>
+      <button type="button" class="btn" data-cal="close">ביטול</button></div>`;
+  const step = (kind, html) => { $('.cal-step', dlg).innerHTML = html ? `<div class="notice ${kind}">${html}</div>` : ''; };
+  $('[data-cal="close"]', dlg).addEventListener('click', () => dlg.close());
+  $('[data-cal="login"]', dlg).addEventListener('click', async () => {
+    const clientId = (builtin || $('input[name="clientId"]', dlg).value).trim();
+    if (!calendar.CLIENT_ID_PATTERN.test(clientId)) {
+      step('bad', 'ה-<bdi dir="ltr">Client ID</bdi> אינו תקין. הוא מסתיים ב-<bdi dir="ltr">.apps.googleusercontent.com</bdi>.');
+      return;
+    }
+    // החלון של גוגל נפתח מיד, בלי המתנה לפניו בתוך הלחיצה.
+    const pending = calendar.requestToken(clientId, { consent: true });
+    step('info', 'מתחבר לגוגל…');
+    try {
+      const token = await pending;
+      if (!builtin) await safe(() => store.putSetting(CAL_CLIENT, clientId));
+      step('info', 'מחפש את יומן האורגנייזר…');
+      const all = await calendar.listCalendars(token);
+      const found = await calendar.findOrganizerCalendars(token, all);
+      if (found.length) {
+        dlg.close();
+        await connectCalendar(clientId, found[0]);
+        return;
+      }
+      step('warn', `לא נמצאו נתוני סבבים באף יומן בחשבון הזה. ייתכן שנבחר חשבון גוגל לא מתאים, או שלא בוצע סנכרון דרך האורגנייזר.
+        <label>אפשר לבחור יומן בעצמך <select name="calendarId">${all.map((c) => `<option value="${esc(c.id)}">${esc(c.name)}</option>`).join('')}</select></label>
+        <button type="button" class="btn" data-cal="pick">חיבור היומן הזה</button>`);
+      $('[data-cal="pick"]', dlg).addEventListener('click', async () => {
+        const id = $('select[name="calendarId"]', dlg).value;
+        dlg.close();
+        await connectCalendar(clientId, all.find((c) => c.id === id));
+      });
+    } catch (err) {
+      step('bad', esc(err.message));
+    }
+  });
+  dlg.showModal();
+}
+
+async function connectCalendar(clientId, cal) {
+  state.calendar = { clientId, calendarId: cal.id, calendarName: cal.name, facts: null, synced: null };
+  state.calError = null;
+  await safe(() => store.putSetting(CAL_SETTING, state.calendar));
+  await syncCalendar();
+}
+
+/**
+ * ההשלמות מהיומן לכל החודשים השמורים, ועד חודשיים קדימה. בלי הרשאה בתוקף: רק בלחיצה
+ * (`interactive`), כי ההתחברות פותחת חלון של גוגל.
+ */
+async function syncCalendar({ interactive = false } = {}) {
+  const c = state.calendar;
+  if (!c || state.calBusy) return;
+  let token = calendar.cachedToken();
+  const pending = token ? null : interactive ? calendar.requestToken(c.clientId) : null;
+  if (!token && !pending) return;
+  state.calBusy = true;
+  state.calError = null;
+  renderCalendarBar();
+  try {
+    token ??= await pending;
+    const { timeMin, timeMax } = await calendarRange();
+    const facts = await calendar.fetchFacts(token, c.calendarId, timeMin, timeMax);
+    state.calendar = { ...c, facts, synced: new Date().toISOString() };
+    await safe(() => store.putSetting(CAL_SETTING, state.calendar));
+  } catch (err) {
+    state.calError = err.message;
+  }
+  state.calBusy = false;
+  if (state.record) await runAndSave();
+  else renderCalendarBar();
+}
+
+async function calendarRange() {
+  const keys = (await safe(() => store.listMonths(), [])).map((m) => m.key).sort();
+  const now = Date.now();
+  const day = 864e5;
+  const first = keys.length ? Date.parse(`${keys[0]}-01T00:00:00Z`) - 2 * day : now - 400 * day;
+  const last = keys.length ? Date.parse(`${keys.at(-1)}-01T00:00:00Z`) + 33 * day : now;
+  return { timeMin: new Date(Math.max(first, now - 760 * day)).toISOString(), timeMax: new Date(Math.max(last, now) + 62 * day).toISOString() };
+}
+
+async function disconnectCalendar() {
+  await calendar.revoke();
+  state.calendar = null;
+  state.calError = null;
+  await safe(() => store.deleteSetting(CAL_SETTING));
+  if (state.record) await runAndSave();
+  else renderCalendarBar();
 }
 
 /**
@@ -342,6 +508,7 @@ function renderResults(keepDom = true) {
   const key = state.record?.key ?? null;
   if (state.sections.key !== key) state.sections = { key, open: new Map() };
   else if (keepDom) for (const d of root.querySelectorAll('details[data-section]')) state.sections.open.set(d.dataset.section, d.open);
+  renderCalendarBar();
   const parts = [state.notices.map((n) => `<div class="notice ${n.kind}">${esc(n.text)}</div>`).join('')];
   if (!res) { root.innerHTML = parts.join(''); return; }
 
@@ -782,7 +949,7 @@ function bindResults(root) {
 function currentSummary(m, months) {
   if (!state.rulesData || !(m.plan || m.exec)) return m.summary ?? {};
   try {
-    return summarize(evaluate({ rulesData: state.rulesData, plan: m.plan, exec: m.exec, answers: m.answers ?? {}, history: historyFor(m.key, months) }));
+    return summarize(evaluate({ rulesData: state.rulesData, plan: m.plan, exec: m.exec, answers: m.answers ?? {}, history: historyFor(m.key, months), calendar: calendarFacts() }));
   } catch {
     return m.summary ?? {};
   }

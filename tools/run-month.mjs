@@ -2,6 +2,7 @@
 // שימוש:  node tools/run-month.mjs --plan samples/duty-plan-2026-07.pdf --exec samples/crewpay-2026-07.pdf [--answers samples/answers-2026-07.json]
 // החודשים הקודמים (למגבלות החוק) נטענים מאותה תיקייה, לפי שמות הקבצים, כמו ההיסטוריה באפליקציה.
 // --no-history: בלי חודשים קודמים.
+// --calendar <קובץ>: השלמות מהיומן, כפי שהאפליקציה שומרת אותן ({flights, standby}; `parseEvents` ב-js/calendar.js).
 import fs from 'node:fs';
 import path from 'node:path';
 import { parsePlan } from '../js/pdf/plan.js';
@@ -15,6 +16,7 @@ const plan = arg('plan') ? await parsePlan(fs.readFileSync(arg('plan'))) : null;
 const exec = arg('exec') ? await parseExec(fs.readFileSync(arg('exec'))) : null;
 const answers = arg('answers') ? JSON.parse(fs.readFileSync(arg('answers'), 'utf8')) : {};
 const history = process.argv.includes('--no-history') ? [] : await loadHistory();
+const calendar = arg('calendar') ? JSON.parse(fs.readFileSync(arg('calendar'), 'utf8')) : null;
 
 async function loadHistory() {
   const ref = arg('plan') ?? arg('exec');
@@ -37,11 +39,12 @@ async function loadHistory() {
   return out;
 }
 
-const r = evaluate({ rulesData, plan, exec, answers, history });
+const r = evaluate({ rulesData, plan, exec, answers, history, calendar });
 const hm = (v, unit) => (unit === 'count' ? String(v) : minToHhmm(v));
 
 console.log(`חודש ${r.period.month}/${r.period.year} · מצב ${r.mode} · בסיס ${r.domicile} · חוקים ${r.rulesVersion}`);
 console.log(`חוקים נתמכים: ${r.rules.supported.length} · לא נתמכים: ${r.rules.unsupported.length}`);
+if (calendar) console.log(`יומן: הרכב הצוות של ${r.calendarCrew} טיסות`);
 for (const w of r.warnings) console.log('אזהרה:', w);
 if (r.legal) {
   console.log('\n== מגבלות החוק ==');

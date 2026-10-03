@@ -429,7 +429,8 @@ function night_landings(ctx, params, rule) {
   const crews = params.counted_crews;
   const crewNames = crews ? crews.map((c) => CREW_LABEL[c] ?? c).join(' או ') : '';
   // הרכב הצוות נשאל גם בבדיקת מגבלות החוק, על ה-FDP כולו: תשובה אחת משמשת את שתיהן.
-  const crewOf = (n) => (ctx.answer(`night_crew:${n.leg.date}:${n.leg.flight}`) ?? ctx.legalCrewAnswer(n.leg))?.value;
+  const crewAnswer = (n) => ctx.answer(`night_crew:${n.leg.date}:${n.leg.flight}`) ?? ctx.legalCrewAnswer(n.leg);
+  const crewOf = (n) => crewAnswer(n)?.value;
 
   // נספרות רק טיסות בהרכב צוות מ-`counted_crews` (2024 ס' 39–40: בודד או מוגבר). ההרכב אינו
   // בקבצים, ולכן מניחים תחילה שכל טיסה שלא נענתה נספרת: ההרכב יכול רק להוריד את המספר, וזאת
@@ -441,7 +442,9 @@ function night_landings(ctx, params, rule) {
   const list = (items) => items.map((n) => `${ddmm(n.leg.date)} ${n.leg.flight}${n.status === 'company' ? ' – שינוי ביוזמת החברה' : ''}`).join(', ');
   const planned = `תוכננו ${night.length} טיסות עם נחיתה בין ${params.window_from} ל-${params.window_to}`;
   if (pool.length < params.min_planned_count) {
-    ctx.note(null, `${rule.title}: ${planned}, ואחרי התשובות על הרכב הצוות נספרות ${pool.length}` +
+    // הרכב הצוות שהוציא טיסה מהספירה: מהיומן, או מתשובות המשתמש.
+    const byCalendar = night.some((n) => !pool.includes(n) && crewAnswer(n)?.source === 'calendar');
+    ctx.note(null, `${rule.title}: ${planned}, ו${byCalendar ? 'לפי הרכב הצוות ביומן' : 'אחרי התשובות על הרכב הצוות'} נספרות ${pool.length}` +
       `${pool.length ? ` (${list(pool)})` : ''}. המינימום הוא ${params.min_planned_count}, ולכן אין פיצוי.`, rule);
     return;
   }
@@ -1043,7 +1046,7 @@ function white_flight(ctx, params, rule) {
         });
       } else if (a.value === 'yes') {
         ctx.expectPairing(p, key, H(params.hours), rule,
-          `${rule.title}: ${what} (${answered ? 'צוות מוגבר לפי תשובתך' : `הרומה מזכה את הפיצוי, ולכן צוות מוגבר`})`);
+          `${rule.title}: ${what} (${answered ? (answered.source === 'calendar' ? 'צוות מוגבר לפי היומן' : 'צוות מוגבר לפי תשובתך') : `הרומה מזכה את הפיצוי, ולכן צוות מוגבר`})`);
       }
     }
   }

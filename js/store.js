@@ -3,11 +3,13 @@
 // לכל חודש נשמרים הנתונים שחולצו מהקבצים, התשובות של המשתמש וגרסת החוקים של החישוב האחרון.
 // קובצי ה-PDF עצמם נשמרים בנפרד (`files`), כדי שאפשר יהיה לפתוח אותם שוב (בעל המוצר, 29/09/2026),
 // ורשימת החודשים לא טוענת אותם. שום דבר לא יוצא מהמכשיר, חוץ מקובץ גיבוי שהמשתמש מוריד.
+// הגדרות (`settings`) – חיבור היומן וההשלמות ממנו – אינן נכללות בגיבוי.
 
 const DB_NAME = 'elal-compensations';
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 const STORE = 'months';
 const FILES = 'files'; // {key: "2026-07:plan", name, bytes: ArrayBuffer}
+const SETTINGS = 'settings'; // {key, value}
 const KINDS = ['plan', 'exec'];
 const BACKUP_FORMAT = 'elal-compensations-backup';
 
@@ -21,6 +23,7 @@ function openDb() {
       const db = req.result;
       if (!db.objectStoreNames.contains(STORE)) db.createObjectStore(STORE, { keyPath: 'key' });
       if (!db.objectStoreNames.contains(FILES)) db.createObjectStore(FILES, { keyPath: 'key' });
+      if (!db.objectStoreNames.contains(SETTINGS)) db.createObjectStore(SETTINGS, { keyPath: 'key' });
     };
     req.onsuccess = () => {
       // גרסה חדשה של המסד בלשונית אחרת: לסגור, כדי לא לחסום את השדרוג שלה.
@@ -71,6 +74,11 @@ export const putFile = (key, kind, name, bytes) =>
   tx('readwrite', (s) => s.put({ key: `${key}:${kind}`, name, bytes: new Uint8Array(bytes).slice().buffer }), FILES);
 
 const listFiles = () => tx('readonly', (s) => s.getAll(), FILES);
+
+/** הגדרה שמורה, או null. */
+export const getSetting = async (key) => (await tx('readonly', (s) => s.get(key), SETTINGS))?.value ?? null;
+export const putSetting = (key, value) => tx('readwrite', (s) => s.put({ key, value }), SETTINGS);
+export const deleteSetting = (key) => tx('readwrite', (s) => s.delete(key), SETTINGS);
 
 /** ArrayBuffer ↔ base64, בחתיכות: `String.fromCharCode` על קובץ שלם חורג ממגבלת הארגומנטים. */
 function toBase64(buffer) {

@@ -58,6 +58,7 @@ export function restDefinition(limits) {
  * @param {object} o.classify    {notDuty(code), isActivity(code), execCodes(execDay)}
  * @param {Function} o.answer    (id) → תשובה או null
  * @param {Function} o.ask       (question) → void
+ * @param {Function} [o.calendarStandby]  (date, code) → {start, end} מהיומן, או null
  * @returns {{result: object, crewIdOf: Map<string, string>}}
  */
 export function checkLegalLimits(o) {
@@ -183,6 +184,7 @@ function planDuties(plan, o) {
  * חוץ מעיכוב לפני FDP (7.2.9): כוננות קצרה שאינה בתכנון ביום של טיסה מתוכננת שהמריאה באיחור. החברה
  * העבירה לכוננות בשעת ההתייצבות המקורית, ובמקום FDP מתחיל בה RAP; ה-FDP מתחיל בהתייצבות החדשה, שאינה
  * בקבצים, ולכן לפי ההמראה בפועל (בעל המוצר, 03/10/2026; 21/08/2026 LY223 ל-NCE).
+ * כוננות שאינה בתכנון ורשומה ביומן (`calendarStandby`) – בשעות שביומן, גם בעיכוב לפני FDP.
  */
 function execDuties(exec, o, planned = null) {
   const { limits, domicile, offsetAt, classify } = o;
@@ -217,9 +219,15 @@ function execDuties(exec, o, planned = null) {
     out.push(...legs);
     const rap = classify.execCodes(day).find((c) => reserveKind(c, limits) === 'rap' && !planned?.has(`${day.date}|${c.slice(0, 5)}`));
     const first = legs[0];
+    const fromCalendar = (code) => {
+      const s = o.calendarStandby?.(day.date, code);
+      return s ? { kind: reserveKind(code, limits), date: day.date, code, station: domicile, start: s.start, end: s.end } : null;
+    };
+    let delayed = null;
     if (rap && first?.kind === 'flight' && first.std > first.skd && planned?.has(`${day.date}|F|${first.flight}`)) {
       for (const l of legs) l.delayedReport = true;
-      out.push({ kind: 'rap', date: day.date, code: rap, station: first.org, reserveFor: first });
+      out.push(fromCalendar(rap) ?? { kind: 'rap', date: day.date, code: rap, station: first.org, reserveFor: first });
+      delayed = rap;
     }
     for (const sim of day.sims ?? []) {
       if (sim.std == null || sim.sta == null) continue;
@@ -231,9 +239,11 @@ function execDuties(exec, o, planned = null) {
       if (code === 'SIM' && day.sims?.length) continue;
       const kind = reserveKind(code, limits);
       if (kind === 'long') continue;
+      if (code === delayed) continue;
       const p = planned?.get(`${day.date}|${code.slice(0, 5)}`);
       if (p) { out.push({ ...p }); continue; }
-      if (kind) continue; // כוננות שאינה בתכנון: אין לה שעות
+      // כוננות שאינה בתכנון: השעות מהיומן, ובלעדיו אין לה שעות.
+      if (kind) { const c = fromCalendar(code); if (c) out.push(c); continue; }
       if (classify.isActivity(code)) out.push(defaultGround(day.date, code, limits, domicile));
     }
   }

@@ -13,6 +13,7 @@ import { hoursToMin, minToHhmm } from '../time.js';
 import { OPTIONAL_COLUMNS } from '../pdf/exec.js';
 import { checkLegalLimits, restDefinition } from './legal.js';
 import { stationOffsetAt } from './duty.js';
+import { baseTime } from '../airports.js';
 
 /** עמודות הדוח שכל סוג ציפייה נבדק מולן. */
 const KEY_COLUMNS = {
@@ -38,8 +39,10 @@ const CREDIT_LABEL_COLUMNS = ['Credit', 'FLT+DH', 'Rig'];
  *        תשובות המשתמש לשאלות, לפי מזהה השאלה.
  * @param {Array<{period, plan, exec}>} [input.history]  חודשים קודמים מהחדש לישן, לחלונות של
  *        מגבלות החוק שמתחילים לפני החודש (168 שעות, 672 שעות, 365 ימים).
+ * @param {{flights: Array, standby: Array}|null} [input.calendar]  השלמות מהיומן, כשהמשתמש חיבר
+ *        אותו (`parseEvents` ב-js/calendar.js): הרכב הצוות ושעות הכוננות. תשובה של המשתמש קודמת להן.
  */
-export function evaluate({ rulesData, plan = null, exec = null, answers = {}, history = [] }) {
+export function evaluate({ rulesData, plan = null, exec = null, answers = {}, history = [], calendar = null }) {
   if (!plan && !exec) throw new Error('לא הועלה אף קובץ.');
   const period = (exec ?? plan).period;
   const mode = plan && exec ? 'full' : plan ? 'plan' : 'exec';
@@ -60,6 +63,7 @@ export function evaluate({ rulesData, plan = null, exec = null, answers = {}, hi
   const domicile = exec?.domicile ?? guessDomicile(plan);
   if (!domicile) warnings.push('לא ניתן לקבוע את בסיס הבית מהקבצים. חוקים שתלויים בבסיס לא ייבדקו.');
   const fleet = fleetOf(plan) ?? rulesData.crew?.fleet ?? null;
+  const cal = calendarFacts(calendar, domicile);
 
   const planPairings = plan ? buildPairings(timeline, domicile, planLegsWithCredit).map(ftOnLastDay) : [];
   if (exec) markCarryIn(timeline, domicile);
@@ -115,7 +119,7 @@ export function evaluate({ rulesData, plan = null, exec = null, answers = {}, hi
 
   const assumed = new Map(); // planId → ערכי התשובה שהאפליקציה הניחה בלי לשאול
   const ctx = makeContext({ out, timeline, domicile, codes, holidays: rulesData.holidays ?? {}, answers, plan, exec, supported, matches, planPairings,
-    period, fleet, fdp, assumed,
+    period, fleet, fdp, assumed, calendarAnswer: cal.answer,
     // בלי דוח ביצוע, הסבבים המתוכננים משמשים לחישוב הקרדיט והרי"ג הצפויים.
     execPairings: exec ? execPairings : planPairings });
   ctx.legalRest = legalRest;
@@ -136,6 +140,7 @@ export function evaluate({ rulesData, plan = null, exec = null, answers = {}, hi
       },
       answer: ctx.answer,
       ask: ctx.ask,
+      calendarStandby: cal.standby,
     });
     out.legal = legal.result;
     crewIdOf = legal.crewIdOf;
@@ -173,12 +178,51 @@ export function evaluate({ rulesData, plan = null, exec = null, answers = {}, hi
   out.notes = out.notes.filter((n) => !n.placed);
   // כמו שאר הטבלאות: לפי תאריך. הערה בלי תאריך (על החודש כולו) בסוף.
   out.notes.sort((a, b) => (a.date ?? '￿').localeCompare(b.date ?? '￿'));
+  // כמה טיסות בחודש קיבלו את הרכב הצוות מהיומן, לשורת היומן בממשק.
+  out.calendarCrew = [...cal.used].filter((k) => k.slice(0, 7) === `${period.year}-${String(period.month).padStart(2, '0')}`).length;
   return out;
+}
+
+/**
+ * השלמות מהיומן (רשות; בעל המוצר, 03/10/2026), בשעון הבסיס. היומן משלים רק מה שאינו בקבצים:
+ * - `answer(id)`: שאלות הרכב הצוות (`crew:`, `night_crew:`, `white:`) לפי מספר הטייסים בטיסה:
+ *   2 – בודד, 3 – מוגבר, 4 ומעלה – כפול. התשובה מסומנת `source: 'calendar'`.
+ * - `standby(date, code)`: שעות כוננות שאינה בתכנון, לפי חמשת התווים הראשונים של הקוד.
+ */
+function calendarFacts(calendar, domicile) {
+  const crew = new Map(); // "date|flight" → מספר הטייסים
+  const standby = [];
+  const used = new Set();
+  for (const f of calendar?.flights ?? []) {
+    const t = f.pilots >= 2 && domicile ? baseTime(f.std, domicile) : null;
+    if (t) crew.set(`${t.date}|${f.flight}`, f.pilots);
+  }
+  for (const s of calendar?.standby ?? []) {
+    const a = domicile ? baseTime(s.start, domicile) : null;
+    const b = domicile ? baseTime(s.end, domicile) : null;
+    if (a && b) standby.push({ code: s.code, date: a.date, start: a.abs, end: b.abs });
+  }
+  const near = (date, k) => new Date(Date.parse(date) + k * 864e5).toISOString().slice(0, 10);
+  return {
+    used,
+    answer(id) {
+      const m = /^(crew|night_crew|white):(\d{4}-\d{2}-\d{2}):(.+)$/.exec(id);
+      if (!m || !crew.size) return null;
+      // הרגל בקובץ יכולה להיות רשומה ביום שליד היום שלה בשעון הבסיס.
+      const key = [0, -1, 1].map((k) => `${near(m[2], k)}|${m[3]}`).find((k) => crew.has(k));
+      if (!key) return null;
+      const pilots = crew.get(key);
+      used.add(`${m[2]}|${m[3]}`);
+      const value = m[1] === 'white' ? (pilots >= 3 ? 'yes' : 'no') : pilots >= 4 ? 'double' : pilots === 3 ? 'augmented' : 'single';
+      return { value, source: 'calendar' };
+    },
+    standby: (date, code) => standby.find((s) => s.date === date && s.code.slice(0, 5) === code.slice(0, 5)) ?? null,
+  };
 }
 
 // ---------- ctx: מה שהלוגיקות רואות ----------
 
-function makeContext({ out, timeline, domicile, codes, holidays, answers, plan, exec, supported, matches, planPairings, period, fleet, execPairings, fdp, assumed }) {
+function makeContext({ out, timeline, domicile, codes, holidays, answers, plan, exec, supported, matches, planPairings, period, fleet, execPairings, fdp, assumed, calendarAnswer }) {
   const absenceBy = new Map(); // date → Set(ruleId)
   const pairingTags = new Map(); // pairing.id → Set(tag)
   const askedIds = new Set();
@@ -212,7 +256,8 @@ function makeContext({ out, timeline, domicile, codes, holidays, answers, plan, 
     planSummary: plan?.summary ?? null,
     hasExec: !!exec,
     hasPlan: !!plan,
-    answer: (id) => answers[id] ?? null,
+    // תשובת המשתמש, ובלעדיה – השלמה מהיומן, אם חובר.
+    answer: (id) => answers[id] ?? calendarAnswer?.(id) ?? null,
     /** תשובה על סבב מתוכנן שהאפליקציה מניחה בלי לשאול, כי הדוח כבר זיכה: לשורת השינוי ולהערה עליו. */
     assumeAnswer(pairing, value) {
       assumed.set(pairing.id, [...new Set([...(assumed.get(pairing.id) ?? []), value])]);
