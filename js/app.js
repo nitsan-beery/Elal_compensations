@@ -297,7 +297,7 @@ function renderCalendarBar() {
       <button type="button" class="btn" data-cal="connect">חיבור יומן</button></div>${notices.join('')}`;
   } else {
     const n = state.result?.calendarCrew ?? 0;
-    const when = state.calBusy ? 'מעדכן…' : `${c.synced ? `עודכן ${stamp(c.synced)}` : 'עוד לא עודכן'}${state.calPending ? ' · יתעדכן בלחיצה הבאה' : ''}`;
+    const when = state.calBusy ? 'מעדכן…' : c.synced ? `עודכן ${stamp(c.synced)}` : 'עוד לא עודכן';
     const noData = c.synced && !c.facts?.flights?.length;
     // כמה טיסות קיבלו מהיומן את הרכב הצוות – רק בחלון צף, במעבר עם העכבר (בעל המוצר, 03/10/2026).
     const tip = n ? ` title="הרכב הצוות של ${n} ${n === 1 ? 'טיסה' : 'טיסות'} בחודש הזה מהיומן"` : '';
@@ -437,7 +437,6 @@ function autoSyncCalendar() {
     return;
   }
   state.calPending = true;
-  renderCalendarBar();
 }
 
 document.addEventListener('click', (e) => {
