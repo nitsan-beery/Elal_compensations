@@ -186,6 +186,8 @@ main { max-width: 1100px; margin: 0 auto; padding: 1rem 16px 3rem; }
 /* ---------- תוצאות ---------- */
 .result-head { display: flex; flex-wrap: wrap; gap: .5rem 1rem; align-items: baseline; }
 .result-head h2 { margin: 0; font-size: 1.35rem; }
+.result-head .cal-toggle { font-weight: inherit; }
+.head-meta { display: none; }
 .meta { color: var(--muted); font-size: .9rem; }
 
 .totals { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: .6rem; }
@@ -293,6 +295,7 @@ tr.detail td { background: var(--surface-2); font-size: .85rem; color: var(--mut
   .rule, .question, tr { break-inside: avoid; }
   .table-wrap { overflow: visible; }
   .print-only { display: block !important; }
+  .head-meta { display: inline; }
   tr.bad td, tr.gain td, .total.bad, .total.gain { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
 }
 .print-only { display: none; }

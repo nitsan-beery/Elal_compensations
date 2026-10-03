@@ -566,13 +566,17 @@ function renderResults(keepDom = true) {
 function renderHead(res) {
   const r = state.record;
   const emp = r.exec?.employee?.name ?? (r.plan?.employee ? `${r.plan.employee.last} ${r.plan.employee.first ?? ''}` : '');
+  // פרטי החישוב לא על המסך: בחלון צף במעבר עם העכבר, ובמכשיר בלי עכבר (אייפד) בלחיצה על שם החודש. בהדפסה הם מופיעים.
+  const meta = `${MODE_LABEL[res.mode]} · בסיס ${res.domicile ?? '?'}${res.fleet ? ` · צי ${res.fleet}` : ''} · חוקים ${res.rulesVersion}`;
+  const hover = matchMedia('(hover: hover)').matches;
   return `<div class="card">
     <div class="result-head">
-      <h2>${esc(monthName(res.period))}</h2>
-      <span class="meta">${esc(MODE_LABEL[res.mode])} · בסיס ${esc(res.domicile ?? '?')}${res.fleet ? ` · צי ${esc(res.fleet)}` : ''} · חוקים ${esc(res.rulesVersion)}</span>
+      <h2${hover ? ` title="${esc(meta)}"` : ''}>${hover ? '' : '<button type="button" class="cal-toggle" data-action="head-info">'}${esc(monthName(res.period))}${hover ? '' : '</button>'}</h2>
+      <span class="meta head-meta">${esc(meta)}</span>
       <span class="spacer"></span>
       <button class="btn no-print" data-action="print">ייצוא PDF</button>
     </div>
+    ${hover ? '' : `<p class="small muted no-print" data-head-info hidden>${esc(meta)}</p>`}
     <p class="print-only small">${esc(emp)} · הופק ${esc(new Date().toLocaleDateString('he-IL'))}</p>
     ${res.mode === 'plan' ? '<p class="small muted">בלי קובץ ביצוע אין השוואה מול מה שזוכה. מוצגים הקרדיט והפיצויים הצפויים לפי התכנון.</p>' : ''}
   </div>`;
@@ -890,6 +894,7 @@ function describePairingId(id) {
 }
 
 function bindResults(root) {
+  $('[data-action="head-info"]', root)?.addEventListener('click', () => { const p = $('[data-head-info]', root); p.hidden = !p.hidden; });
   $('[data-action="print"]', root)?.addEventListener('click', () => {
     // ה-PDF מציג הכול בפירוט וכל שאר החלקים פתוחים, בלי קשר למה שמוצג כרגע על המסך.
     const prevFilter = state.filter;
