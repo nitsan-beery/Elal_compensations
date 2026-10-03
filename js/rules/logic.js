@@ -962,11 +962,12 @@ function voluntary_swap(ctx, params, rule) {
     // ההערה ביום של כל צד: ביום המתוכנן שלא בוצע – אין קרדיט; ביום של הטיסה שבוצעה – הקרדיט שלה
     // (בעל המוצר, 29/09/2026).
     if (answer.link === 'none') {
-      ctx.note(date, 'החלפה מרצון: הטיסה נמסרה ללא חלופה, ולא מגיע עליה קרדיט.', rule);
+      ctx.note(date, 'החלפה מרצון: הטיסה נמסרה ללא חלופה, ולא מגיע עליה קרדיט.', rule, { pairingId: match.plan.id });
       continue;
     }
     if (!match.exec) {
-      ctx.note(date, `החלפה מרצון: לא מגיע קרדיט על ${match.plan.dates.length > 1 ? 'הימים האלה' : 'היום הזה'}.`, rule);
+      // `pairingId`: ההערה של הסבב המתוכנן, ולא של טיסה אחרת שבוצעה באותם ימים (`splitSwappedElsewhere`).
+      ctx.note(date, `החלפה מרצון: לא מגיע קרדיט על ${match.plan.dates.length > 1 ? 'הימים האלה' : 'היום הזה'}.`, rule, { pairingId: match.plan.id });
       continue;
     }
     const slip = minSlipTopUp(ctx, match.exec) ? ', כולל השלמה לסליפ קצר' : '';

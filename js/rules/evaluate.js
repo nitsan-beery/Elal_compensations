@@ -75,7 +75,7 @@ export function evaluate({ rulesData, plan = null, exec = null, answers = {}, hi
     ? { legalRestMin: slip.legal_rest_hours * 60, reportMin: slip.report_minutes_before_std ?? 0, postMin: legalRest?.postMin ?? 0 } : null;
   const execPairings = exec ? buildPairings(timeline, domicile, (d) => d.exec?.legs, fdp) : [];
   const matches = mode === 'full'
-    ? matchPairings(planPairings, execPairings)
+    ? splitSwappedElsewhere(matchPairings(planPairings, execPairings), answers)
     : mode === 'exec' ? execPairings.map((e) => ({ plan: null, exec: e, how: 'noplan' })) : [];
   explainByActivity(matches, timeline, codes, sickCodeTest(supported), movableCodeTest(supported));
 
@@ -705,7 +705,9 @@ function explainChanges(out, supported) {
     // שורה אחת מכמה על אותו סבב (`splitChangesByFdp`): רק מה שנרשם בימים שלה.
     const own = (d) => c.until === undefined || (c.date <= d && (!c.until || d < c.until));
     const within = (d) => !!d && own(d) && ranges.some(([from, to]) => from <= d && d <= to);
-    const ruled = out.notes.filter((n) => !n.aside && CHANGE_LOGIC.has(logicOf.get(n.ruleId)) && within(n.date));
+    // הערה על סבב מסוים (`pairingId`) – רק בשורה שלו, גם כשסבב אחר בוצע באותם ימים.
+    const ruled = out.notes.filter((n) => !n.aside && CHANGE_LOGIC.has(logicOf.get(n.ruleId)) && within(n.date) &&
+      (!n.pairingId || ids.includes(n.pairingId)));
     if (ruled.length) {
       // שם השינוי כבר בשורה שלו, ולכן הוא יורד מראש ההערה.
       const leads = [c.label, c.label.replace('מרצוני', 'מרצון')].map((l) => `${l}: `);
@@ -770,6 +772,21 @@ function explainUnexplained(out) {
 
 /** תשובות שמקשרות בין סבב מתוכנן שלא בוצע לבין הטיסה שבוצעה במקומו בתאריכים אחרים. */
 const LINKED_VALUES = ['voluntary_swap', 'replaced'];
+
+/**
+ * סבב מתוכנן שבמקומו בוצע סבב אחר באותם ימים, והתשובה עליו היא החלפה עם טיסה אחרת – בחודש אחר
+ * או פעילות לא מתוכננת בימים אחרים: מה שבוצע באותם ימים אינו חלק מההחלפה. הוא פעילות לא מתוכננת,
+ * עם השאלה עליה (קריאה מיוחדת או לא), והסבב המתוכנן – סבב שלא בוצע (בעל המוצר, 03/10/2026;
+ * 06/08/2025: ZRH הוחלפה מרצון בטיסה בחודש אחר, ו-NCE בוצעה באותו יום).
+ */
+function splitSwappedElsewhere(matches, answers) {
+  return matches.flatMap((m) => {
+    if (m.how !== 'dates') return [m];
+    const a = answers[`cancelled:${m.plan.id}`];
+    if (!LINKED_VALUES.includes(a?.value) || a.link === undefined || a.link === m.exec.id) return [m];
+    return [{ plan: m.plan, exec: null, how: 'cancelled' }, { plan: null, exec: m.exec, how: 'unplanned' }];
+  });
+}
 
 /** קישור של החלפה מרצון על סבב שלא בוצע: הטיסה נמסרה בלי לקבל טיסה אחרת במקומה. */
 const GAVE_AWAY = 'none';
