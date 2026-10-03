@@ -288,6 +288,9 @@ const stamp = (iso) => { const d = new Date(iso); return `${pad2(d.getDate())}/$
  * על הטקסט, ובמכשיר בלי עכבר (אייפד) בלחיצה עליו (בעל המוצר, 03/10/2026).
  */
 function calendarParts(c) {
+  if (!c) {
+    return { label: '<span class="cal-label">יומן: לא מחובר</span>', buttons: '<button type="button" class="btn" data-cal="connect">חיבור יומן</button>', infoHtml: '' };
+  }
   const n = state.result?.calendarCrew ?? 0;
   const when = state.calBusy ? 'מעדכן…' : c.synced ? `מעודכן ל-${stamp(c.synced)}` : 'עוד לא עודכן';
   const noData = c.synced && !c.facts?.flights?.length;
@@ -320,12 +323,8 @@ function renderCalendarBar() {
   const notices = [];
   if (state.calError) notices.push(`<div class="notice bad">${esc(state.calError)}</div>`);
   else if (c?.synced && !c.facts?.flights?.length) notices.push(`<div class="notice warn">${esc(CAL_NO_DATA)}</div>`);
-  const parts = c ? calendarParts(c) : null;
-  const inHead = !!(c && state.result);
-  if (!c) {
-    bar.innerHTML = `<div class="row"><span>יומן: לא מחובר</span><span class="spacer"></span>
-      <button type="button" class="btn" data-cal="connect">חיבור יומן</button></div>${notices.join('')}`;
-  } else if (inHead) {
+  const parts = calendarParts(c);
+  if (state.result) {
     bar.innerHTML = notices.join('');
     const host = $('#head-cal');
     if (host) {
@@ -594,11 +593,11 @@ function renderHead(res) {
     <div class="result-head">
       <h2${hover ? ` title="${esc(meta)}"` : ''}>${hover ? '' : '<button type="button" class="cal-toggle" data-action="head-info">'}${esc(monthName(res.period))}${hover ? '' : '</button>'}</h2>
       <span class="meta head-meta">${esc(meta)}</span>
-      ${state.calendar ? '<span class="cal-inline no-print" id="head-cal"></span>' : ''}
+      <span class="cal-inline no-print" id="head-cal"></span>
       <span class="spacer"></span>
       <button class="btn no-print" data-action="print">ייצוא PDF</button>
     </div>
-    ${state.calendar ? '<div class="no-print" id="head-cal-info"></div>' : ''}
+    <div class="no-print" id="head-cal-info"></div>
     ${hover ? '' : `<p class="small muted no-print" data-head-info hidden>${esc(meta)}</p>`}
     <p class="print-only small">${esc(emp)} · הופק ${esc(new Date().toLocaleDateString('he-IL'))}</p>
     ${res.mode === 'plan' ? '<p class="small muted">בלי קובץ ביצוע אין השוואה מול מה שזוכה. מוצגים הקרדיט והפיצויים הצפויים לפי התכנון.</p>' : ''}
@@ -918,7 +917,7 @@ function describePairingId(id) {
 
 function bindResults(root) {
   const host = $('#head-cal', root);
-  if (host && state.calendar) {
+  if (host) {
     const p = calendarParts(state.calendar);
     host.innerHTML = p.label + p.buttons;
     $('#head-cal-info', root).innerHTML = p.infoHtml;
