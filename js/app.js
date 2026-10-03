@@ -407,11 +407,6 @@ function legalNote(res) {
   return status;
 }
 
-/** ימים עם חריגה ממגבלות החוק, לסימון השורות שלהם בטבלאות. */
-const legalDays = (res) => new Set((res.legal?.violations ?? []).map((v) => v.date));
-/** ימים עם הארכה בביצוע. */
-const extensionDays = (res) => new Set((res.legal?.extensions ?? []).map((v) => v.date));
-const legalClass = (dates, illegal, extended) => (dates.some((d) => illegal.has(d)) ? 'legal' : dates.some((d) => extended.has(d)) ? 'legal-ext' : '');
 
 function renderAlerts(res) {
   const out = [];
@@ -565,8 +560,6 @@ function renderComparison(res) {
   };
   const rows = all.filter(FILTERS[state.filter] ?? FILTERS.all);
   const chip = (id, label) => `<button class="chip" data-filter="${id}" aria-pressed="${state.filter === id}">${label} (${counts[id]})</button>`;
-  const illegal = legalDays(res);
-  const extended = extensionDays(res);
   return `<details class="card" data-section="detail" open>
     <summary><h2 style="display:inline">פירוט</h2></summary>
     <div class="filters">${chip('comp', 'רק פיצויים')}${chip('all', 'הכול')}${chip('bad', 'פערים')}</div>
@@ -582,7 +575,7 @@ function renderComparison(res) {
             .map((e) => `${esc(e.ruleTitle ?? '')}${e.note ? `: ${esc(e.note)}` : ''}${e.min != null && c.unit !== 'count' ? ` <span class="num">${minToHhmm(e.min)}</span>` : ''}`),
           ...c.marks.map((m) => `${esc(m.column)}: צפוי <span class="num">${hm(m.expected, m.unit)}</span>, ברומה <span class="num">${hm(m.reported, m.unit)}</span>`),
         ].join('<br>');
-        return `<tr class="${cls} ${legalClass(c.dates, illegal, extended)}">
+        return `<tr class="${cls}">
           <td>${esc(c.label).replace(/\n/g, '<br>')}${explainOf(c)}</td><td class="col">${esc(c.column)}</td>
           <td class="num">${hm(c.expected, c.unit)}</td><td class="num">${hm(c.reported, c.unit)}</td>
           <td class="num">${c.ok ? '' : (c.diff > 0 ? '+' : '') + hm(c.diff, c.unit)}</td><td>${status}</td></tr>
@@ -608,15 +601,13 @@ function renderExpectations(res) {
   ];
   // הקרדיט של כל טיסה הוא רק רעש: הסך הכול בשורה העליונה, ובטבלה רק הפיצויים.
   const shown = rows.filter((e) => !CREDIT_KEYS.has(e.key));
-  const illegal = legalDays(res);
-  const extended = extensionDays(res);
   return `<details class="card" data-section="expected" open>
     <summary><h2 style="display:inline">קרדיט ופיצויים צפויים</h2></summary>
     <p class="small">סה"כ קרדיט: <span class="num">${minToHhmm(sumKeys(CREDIT_KEYS))}</span> · סה"כ COM: <span class="num">${minToHhmm(sumKeys(COM_KEYS))}</span></p>
     ${second.length ? `<p class="small">${second.join(' · ')}</p>` : ''}
     ${!shown.length ? '<p class="small muted">אין פיצויים צפויים לפי התכנון.</p>' : `<div class="table-wrap"><table>
       <thead><tr><th>תאריך</th><th>חוק</th><th>סוג</th><th>צפוי</th><th>הסבר</th></tr></thead>
-      <tbody>${shown.map((e) => `<tr class="${legalClass(e.dates, illegal, extended)}">
+      <tbody>${shown.map((e) => `<tr>
         <td class="num">${e.dates.length > 1 ? `${ddmm(e.dates[0])}–${ddmm(e.dates.at(-1))}` : ddmm(e.date)}</td>
         <td>${esc(e.ruleTitle)}${pairingOf(e) ? `<div class="small muted">${esc(pairingOf(e))}</div>` : ''}</td>
         <td>${esc(KEY_LABEL[e.key] ?? e.key)}</td>

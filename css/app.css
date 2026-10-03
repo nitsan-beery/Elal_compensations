@@ -188,10 +188,6 @@ td.col { direction: ltr; text-align: right; white-space: nowrap; }
 /* ההסבר מתחת לטיסה בטבלת הפירוט (ואחריו שם החוק בתגית, כמו בהערות), ומתחת לשינוי בטבלת השינויים. */
 .explain { margin-top: .2rem; font-size: .85rem; color: var(--muted); }
 tr.bad td { background: var(--bad-bg); }
-/* יום עם חריגה ממגבלות החוק בתכנון. */
-tr.legal td:first-child { border-inline-start: 4px solid var(--bad); }
-/* יום עם הארכה בביצוע שהחוק מתיר בנסיבות לא צפויות. */
-tr.legal-ext td:first-child { border-inline-start: 4px solid var(--warn); }
 tr.gain td { background: var(--ok-bg); }
 tr.pending td { background: var(--pending-bg); }
 tr.detail td { background: var(--surface-2); font-size: .85rem; color: var(--muted); }
