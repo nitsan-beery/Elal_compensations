@@ -63,19 +63,21 @@ export function preload() {
 /**
  * אסימון גישה מגוגל. פותח חלון של גוגל, ולכן רק בתגובה ללחיצה של המשתמש, ובלי המתנה לפניו:
  * דפדפנים (במיוחד Safari) חוסמים חלון שנפתח אחרי המתנה. `consent`: מסך ההרשאות גם אם כבר אושרו.
+ * `hint`: חשבון הגוגל שכבר חובר, כדי שהחלון ייסגר לבד בלי בחירת חשבון.
  */
-export function requestToken(clientId, { consent = false } = {}) {
-  if (!globalThis.google?.accounts?.oauth2) return loadGis().then(() => tokenNow(clientId, consent));
-  return tokenNow(clientId, consent);
+export function requestToken(clientId, { consent = false, hint = null } = {}) {
+  if (!globalThis.google?.accounts?.oauth2) return loadGis().then(() => tokenNow(clientId, consent, hint));
+  return tokenNow(clientId, consent, hint);
 }
 
-function tokenNow(clientId, consent) {
+function tokenNow(clientId, consent, hint) {
   const oauth2 = globalThis.google.accounts.oauth2;
   return new Promise((resolve, reject) => {
     const client = oauth2.initTokenClient({
       client_id: clientId,
       scope: SCOPES.join(' '),
       prompt: consent ? 'consent' : '',
+      ...(hint && { login_hint: hint }),
       callback: (r) => {
         if (r.error) { reject(new Error(r.error === 'access_denied' ? 'לא ניתנה הרשאה לקרוא את היומן.' : `ההתחברות לגוגל נכשלה (${r.error}).`)); return; }
         if (!oauth2.hasGrantedAllScopes(r, ...SCOPES)) { reject(new Error('לא ניתנה הרשאה לקרוא את היומן. סמן את שתי ההרשאות במסך של גוגל.')); return; }
@@ -106,7 +108,7 @@ async function api(token, path, params = {}) {
   const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
   if (res.status === 401) {
     forgetToken();
-    throw new Error('ההרשאה ליומן פגה. לחץ "עדכון מהיומן" כדי להתחבר שוב.');
+    throw Object.assign(new Error('ההרשאה ליומן פגה. לחץ "עדכון מהיומן" כדי להתחבר שוב.'), { expired: true });
   }
   if (!res.ok) throw new Error(`קריאת היומן נכשלה (${res.status}).`);
   return res.json();
@@ -123,10 +125,10 @@ async function pages(token, path, params) {
   return items;
 }
 
-/** היומנים של המשתמש: {id, name}. */
+/** היומנים של המשתמש: {id, name, primary}. המזהה של היומן הראשי הוא כתובת חשבון הגוגל. */
 export async function listCalendars(token) {
-  const items = await pages(token, 'users/me/calendarList', { fields: 'items(id,summary),nextPageToken', maxResults: 250 });
-  return items.map((c) => ({ id: c.id, name: c.summary ?? c.id }));
+  const items = await pages(token, 'users/me/calendarList', { fields: 'items(id,summary,primary),nextPageToken', maxResults: 250 });
+  return items.map((c) => ({ id: c.id, name: c.summary ?? c.id, primary: !!c.primary }));
 }
 
 /**

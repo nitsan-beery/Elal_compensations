@@ -60,7 +60,8 @@ const state = {
   notices: [],
   files: {}, // kind → {id: "2026-07:plan", url} של קובץ ה-PDF השמור, ללחיצה על הקובץ באזור ההעלאה
   sections: { key: null, open: new Map() }, // אילו חלקים בתוצאות של החודש הפתוח פתוחים ואילו מכווצים
-  calendar: null, // חיבור היומן: {clientId, calendars: [{id, name}], manual, facts, synced}, או null
+  calendar: null, // חיבור היומן: {clientId, calendars: [{id, name}], manual, hint, facts, synced}, או null
+  calPending: false, // עדכון מהיומן שממתין ללחיצה, כי ההרשאה מגוגל פגה (`autoSyncCalendar`)
   calBusy: false,
   calError: null,
 };
@@ -93,7 +94,7 @@ async function init() {
   // רק בלחיצה על "עדכון מהיומן".
   if (state.calendar) {
     calendar.preload();
-    if (calendar.cachedToken()) syncCalendar();
+    autoSyncCalendar();
   }
 }
 
@@ -200,7 +201,7 @@ async function handleFile(file, expected) {
     dropFileLink(kind);
     state.record = record;
     await runAndSave();
-    if (state.calendar && calendar.cachedToken()) syncCalendar();
+    autoSyncCalendar();
   } catch (err) {
     console.error(err);
     if (err.exact) state.result = null;
@@ -296,7 +297,7 @@ function renderCalendarBar() {
       <button type="button" class="btn" data-cal="connect">חיבור יומן</button></div>${notices.join('')}`;
   } else {
     const n = state.result?.calendarCrew ?? 0;
-    const when = state.calBusy ? 'מעדכן…' : c.synced ? `עודכן ${stamp(c.synced)}` : 'עוד לא עודכן';
+    const when = state.calBusy ? 'מעדכן…' : `${c.synced ? `עודכן ${stamp(c.synced)}` : 'עוד לא עודכן'}${state.calPending ? ' · יתעדכן בלחיצה הבאה' : ''}`;
     const noData = c.synced && !c.facts?.flights?.length;
     bar.innerHTML = `<div class="row"><span>יומן מחובר: <b>${esc(c.calendars.map((x) => x.name).join(', '))}</b>
       <span class="small muted">· ${when}${n ? ` · הרכב הצוות של ${n} ${n === 1 ? 'טיסה' : 'טיסות'} בחודש הזה מהיומן` : ''}</span></span>
@@ -393,8 +394,9 @@ async function syncCalendar({ interactive = false } = {}) {
   const c = state.calendar;
   if (!c || state.calBusy) return;
   let token = calendar.cachedToken();
-  const pending = token ? null : interactive ? calendar.requestToken(c.clientId) : null;
+  const pending = token ? null : interactive ? calendar.requestToken(c.clientId, { hint: c.hint }) : null;
   if (!token && !pending) return;
+  state.calPending = false;
   state.calBusy = true;
   state.calError = null;
   renderCalendarBar();
@@ -402,20 +404,45 @@ async function syncCalendar({ interactive = false } = {}) {
     token ??= await pending;
     const { timeMin, timeMax } = await calendarRange();
     let cals = c.calendars;
+    const all = await calendar.listCalendars(token);
     if (!c.manual) {
-      const found = await calendar.findOrganizerCalendars(token, await calendar.listCalendars(token), timeMin, timeMax);
+      const found = await calendar.findOrganizerCalendars(token, all, timeMin, timeMax);
       if (found.length) cals = found.map(({ id, name }) => ({ id, name }));
     }
     const facts = await calendar.fetchFacts(token, cals.map((x) => x.id), timeMin, timeMax);
-    state.calendar = { ...c, calendars: cals, facts, synced: new Date().toISOString() };
+    const hint = all.find((x) => x.primary)?.id ?? c.hint ?? null;
+    state.calendar = { ...c, calendars: cals, hint, facts, synced: new Date().toISOString() };
     await safe(() => store.putSetting(CAL_SETTING, state.calendar));
   } catch (err) {
-    state.calError = err.message;
+    // הרשאה שפגה בעדכון האוטומטי: ממתינים ללחיצה הבאה, כמו בלי הרשאה.
+    if (err.expired && !interactive) state.calPending = true;
+    else state.calError = err.message;
   }
   state.calBusy = false;
   if (state.record) await runAndSave();
   else renderCalendarBar();
 }
+
+/**
+ * עדכון אוטומטי מהיומן: בפתיחת האפליקציה ובבחירת קובץ, ולא יותר (בעל המוצר, 03/10/2026); אחרי שינוי
+ * ביומן כשהאפליקציה פתוחה – "עדכון מהיומן". בלי הרשאה בתוקף גוגל צריך חלון, שנפתח רק בלחיצה, ולכן
+ * העדכון ממתין ללחיצה הבאה באפליקציה. לא על אזור ההעלאה ולא בחלון: שם הלחיצה פותחת חלון משלה.
+ */
+function autoSyncCalendar() {
+  if (!state.calendar) return;
+  if (calendar.cachedToken()) {
+    syncCalendar();
+    return;
+  }
+  state.calPending = true;
+  renderCalendarBar();
+}
+
+document.addEventListener('click', (e) => {
+  if (!state.calPending || state.calBusy || !state.calendar) return;
+  if (e.target.closest('.drop, dialog, [data-cal], label')) return;
+  syncCalendar({ interactive: true });
+}, true);
 
 async function calendarRange() {
   const keys = (await safe(() => store.listMonths(), [])).map((m) => m.key).sort();
@@ -427,6 +454,7 @@ async function calendarRange() {
 }
 
 async function disconnectCalendar() {
+  state.calPending = false;
   await calendar.revoke();
   state.calendar = null;
   state.calError = null;
