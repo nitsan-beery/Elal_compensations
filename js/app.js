@@ -54,6 +54,7 @@ const answerLabel = (v) => ANSWER_LABEL[v] ?? (/^\d{4}-\d{2}-\d{2}$/.test(v) ? d
 const state = {
   rulesData: null,
   rulesSource: null,
+  rulesError: null,
   record: null, // רשומת החודש הפתוח
   result: null,
   filter: 'comp',
@@ -75,15 +76,16 @@ async function init() {
   setupUploads();
   registerServiceWorker();
   try {
-    const { data, source } = await loadRules();
+    const { data, source, error } = await loadRules();
     state.rulesData = data;
     state.rulesSource = source;
+    state.rulesError = error;
   } catch (err) {
     showBanner('bad', esc(err.message));
     return;
   }
   if (state.rulesSource === 'cache') {
-    showBanner('warn', `אין חיבור לרשת. החוקים נטענו מהעותק השמור על המכשיר (גרסה ${esc(state.rulesData.rules_version)}).`);
+    showBanner('warn', `לא ניתן היה לטעון את החוקים מהרשת${state.rulesError ? ` (<bdi dir="ltr">${esc(state.rulesError)}</bdi>)` : ''}. הם נטענו מהעותק השמור על המכשיר (גרסה ${esc(state.rulesData.rules_version)}).`);
   }
   state.calendar = calendarSetting(await safe(() => store.getSetting(CAL_SETTING), null));
   // החודש האחרון שעבדו עליו נפתח אוטומטית.
