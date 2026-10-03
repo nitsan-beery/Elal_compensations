@@ -499,7 +499,8 @@ function night_landings(ctx, params, rule) {
       const pendingLegal = ctx.legalCrewAsked(next.leg);
       ctx.note(null, `${rule.title}: ${planned}. תחת ההנחה שכל טיסה שעדיין לא נענתה היא בצוות ` +
         `${crewNames}, מגיע פיצוי של ${minToHhmm(hours)}.`, rule);
-      if (!pendingLegal) ctx.ask({
+      // בתכנון לבד הרכב הצוות אינו נשאל (בעל המוצר, 03/10/2026): ההערה כבר אומרת תחת איזו הנחה מגיע פיצוי.
+      if (!pendingLegal && ctx.hasExec) ctx.ask({
         id: `night_crew:${next.leg.date}:${next.leg.flight}`,
         date: next.leg.date,
         title: `נחיתת לילה: באיזה צוות מתוכננת ${next.leg.flight} ב-${ddmm(next.leg.date)} (נחיתה ${minToHhmm(next.clock)} שעון ישראל)?`,
@@ -1024,7 +1025,10 @@ function white_flight(ctx, params, rule) {
       const id = `white:${l.date}:${l.flight}`;
       const answered = ctx.answer(id);
       const a = answered ?? (ctx.paidOn(p, params.report_column, key, H(params.hours), own) ? { value: 'yes' } : null);
-      if (!a) {
+      if (!a && !ctx.hasExec) {
+        // בתכנון לבד הרכב הצוות אינו נשאל (בעל המוצר, 03/10/2026).
+        ctx.note(l.date, `${rule.title}: ${what}. אם תבוצע בצוות מוגבר (3 טייסים ומעלה), מגיע פיצוי של ${minToHhmm(H(params.hours))}.`, rule);
+      } else if (!a) {
         ctx.ask({
           id,
           date: l.date,

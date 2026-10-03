@@ -397,14 +397,20 @@ function renderLegal(res) {
 /** ההערה על מגבלות החוק כשאין חריגה: אחרונה בהערות. מה שלא נבדק כתוב בקצרה, כדי שלא ייראה שהכול נבדק. */
 function legalNote(res) {
   const l = res.legal;
-  if (!l || l.violations?.length) return null;
-  const by = l.basis === 'exec' ? ' לפי הרומה' : '';
+  if (!l) return null;
   if (l.skipped) return l.skipped;
+  // בתכנון לבד: באיזה הרכב צוות FDP עומד בחוק, במקום שאלה (בעל המוצר, 03/10/2026).
+  const byCrews = new Map();
+  for (const c of l.crewNeeded ?? []) byCrews.set(c.crews, [...(byCrews.get(c.crews) ?? []), c.what]);
+  const crew = [...byCrews].map(([crews, what]) => `כדי לעמוד בחוק, ${what.length > 1
+    ? `הטיסות ${what.slice(0, -1).join(', ')} ו-${what.at(-1)} נדרשות להיות מבוצעות` : `הטיסה ${what[0]} נדרשת להיות מבוצעת`} בצוות ${crews}.`).join(' ');
+  if (l.violations?.length) return crew || null;
+  const by = l.basis === 'exec' ? ' לפי הרומה' : '';
   const pending = res.questions.filter((q) => q.id.startsWith('crew:')).length;
   const status = pending
     ? `מגבלות החוק נבדקו${by}: אין חריגה, חוץ מ${pending === 1 ? '-FDP אחד שממתין' : `-${pending} FDP שממתינים`} לתשובה על הרכב הצוות.`
     : `מגבלות החוק נבדקו${by}: אין חריגה.`;
-  return status;
+  return crew ? `${status} ${crew}` : status;
 }
 
 

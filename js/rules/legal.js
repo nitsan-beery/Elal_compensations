@@ -62,7 +62,8 @@ export function restDefinition(limits) {
  */
 export function checkLegalLimits(o) {
   const { limits, period, domicile } = o;
-  const result = { basis: o.exec ? 'exec' : 'plan', violations: [], extensions: [], source: limits.source };
+  // `crewNeeded`: בתכנון לבד, FDP שעומד בחוק רק בצוות מוגבר או כפול – {date, what, crews}.
+  const result = { basis: o.exec ? 'exec' : 'plan', violations: [], extensions: [], crewNeeded: [], source: limits.source };
   const crewIdOf = new Map(); // "date:flight" → מזהה שאלת הרכב הצוות של ה-FDP
   const monthStart = at(isoMonth(period), 0);
   const monthEnd = at(isoMonth(nextMonth(period)), 0);
@@ -109,7 +110,7 @@ export function checkLegalLimits(o) {
     const id = `crew:${first.date}:${first.flight}`;
     for (const f of ch.flights) crewIdOf.set(`${f.date}:${f.flight}`, id);
     if (!inMonth(ch.fdpStart)) continue;
-    checkFdp(ch, id, o, flag, extend);
+    checkFdp(ch, id, o, flag, extend, (need) => result.crewNeeded.push(need));
   }
   checkReserve(chains, limits, inMonth, flag);
   checkDeadheadRest(chains, o, inMonth, flag);
@@ -392,7 +393,7 @@ function describeItem(it) {
   return it.kind === 'flight' || it.kind === 'dh' ? `${ddmm(it.date)} ⁦${it.flight}⁩` : `${ddmm(it.date)} ⁦${it.code}⁩`;
 }
 
-function checkFdp(ch, id, o, flag, extend) {
+function checkFdp(ch, id, o, flag, extend, needCrew) {
   const { limits, answer, ask } = o;
   const ft = ch.flights.reduce((s, f) => s + f.block, 0);
   const fdp = ch.fdpEnd - ch.fdpStart;
@@ -440,9 +441,15 @@ function checkFdp(ch, id, o, flag, extend) {
     return;
   }
   if (!grade(single)) return;
+  const better = ['augmented', 'double'].filter((c) => lim[c] && grade(lim[c]) < grade(single));
   // אף הרכב אינו טוב מהצוות הבודד: ההשוואה לצוות בודד, בלי לשאול.
-  if (!['augmented', 'double'].some((c) => lim[c] && grade(lim[c]) < grade(single))) {
+  if (!better.length) {
     report(single, 'single', alsoOver());
+    return;
+  }
+  // בתכנון לבד הרכב הצוות אינו נשאל: ההערה אומרת באיזה הרכב ה-FDP עומד בחוק (בעל המוצר, 03/10/2026).
+  if (!o.exec) {
+    needCrew({ date, what: describeChain(ch), crews: better.map((c) => CREW[c].label).join(' או ') });
     return;
   }
   ask({
