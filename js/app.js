@@ -318,7 +318,7 @@ async function openCalendarDialog() {
   const saved = builtin || (await safe(() => store.getSetting(CAL_CLIENT), null)) || '';
   calendar.preload();
   dlg.innerHTML = `<h2>חיבור יומן</h2>
-    <p class="small muted">היומן נקרא מגוגל ישירות למכשיר הזה, בהרשאת קריאה בלבד. נשמרים רק מספר הטייסים ושעות הכוננות, בלי שמות וטלפונים, והם אינם נכללים בגיבוי.</p>
+    <p class="small muted">היומן נקרא מגוגל ישירות למכשיר הזה, בהרשאת קריאה בלבד. נשמרים רק מספר הטייסים בכל טיסה ופרטי טיסה שלא ניתן למצוא בקבצי התכנון והביצוע, בלי שמות וטלפונים, והם אינם נכללים בגיבוי.</p>
     ${builtin ? '' : `<details ${saved ? '' : 'open'}><summary>הגדרה חד-פעמית: מזהה התחברות של גוגל (<bdi dir="ltr">Client ID</bdi>)</summary>
       <ol class="small">
         <li>היכנס ל-<a href="https://console.cloud.google.com/" target="_blank" rel="noopener">Google Cloud Console</a> עם חשבון הגוגל של היומן, וצור פרויקט חדש.</li>
