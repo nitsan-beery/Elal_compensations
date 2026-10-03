@@ -166,7 +166,7 @@ function min_slip_credit(ctx, params, rule) {
 /** הקבוצות שההשלמה נבדקת עליהן: FDP שלם, או כל סבב בנפרד כשחלק מה-FDP אינו נבדק. */
 function minSlipGroups(ctx, params) {
   const groups = params.per_fdp
-    ? execFdpGroups(ctx.execPairings, ctx.domicile, H(params.legal_rest_hours), params.report_minutes_before_std ?? 0)
+    ? execFdpGroups(ctx.execPairings, ctx.domicile, H(params.legal_rest_hours), params.report_minutes_before_std ?? 0, ctx.legalRest?.postMin)
     : ctx.execPairings.map((p) => [p]);
   const out = [];
   for (const group of groups) {

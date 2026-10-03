@@ -113,12 +113,19 @@ function execSpan(pairing, domicile, planned) {
   return { start, end, flight };
 }
 
-/** טיסת סבב (turnaround): אין בה מנוחה בחו"ל, כלומר זמן הקרקע בחו"ל קצר מהמנוחה החוקית. */
-const isTurnaround = (span, legalRest) =>
-  span.start != null && span.end != null && span.flight != null && span.end - span.start - span.flight < legalRest;
+/**
+ * טיסת סבב (turnaround): אין בה מנוחה בחו"ל. המנוחה בחו"ל מתחילה `postMin` אחרי הנחיתה ונגמרת
+ * בהתייצבות, `outstationReportMin` לפני ההמראה (OMA 7.2.1), ולכן היא זמן הקרקע פחות שניהם.
+ */
+const isTurnaround = (span, legalRest, ctx) =>
+  span.start != null && span.end != null && span.flight != null &&
+  span.end - span.start - span.flight - (ctx.legalRest?.postMin ?? 0) - (ctx.legalRest?.outstationReportMin ?? 0) < legalRest;
 
-/** המנוחה בין סיום FDP (On block בבסיס) לבין ההתייצבות לפעילות הבאה. */
+/** הזמן בין סיום FDP (On block בבסיס) לבין ההתייצבות לפעילות הבאה. */
 const restBetween = (a, b, reportMin) => b.start - reportMin - a.end;
+
+/** המנוחה החוקית ביניהם: מתחילה `postMin` אחרי ה-On block (תפקיד אחרי הטיסה, OMA 7.2.1). */
+const legalRestBetween = (a, b, reportMin, postMin = 0) => restBetween(a, b, reportMin) - postMin;
 
 function planPairingsSorted(ctx) {
   return [...ctx.planPairings].sort((a, b) => a.from.localeCompare(b.from));
@@ -146,12 +153,13 @@ function same_fdp_rounds(ctx, params, rule) {
     const [p1, p2] = [list[i - 1], list[i]];
     const [s1, s2] = [planSpan(p1, ctx.domicile, ctx.monthFirst), planSpan(p2, ctx.domicile, ctx.monthFirst)];
     if (s1.end == null || s2.start == null) continue;
-    const rest = restBetween(s1, s2, report);
+    const post = ctx.legalRest?.postMin ?? 0;
+    const rest = legalRestBetween(s1, s2, report, post);
     if (rest >= legal) continue;
-    if (!isTurnaround(s1, legal) || !isTurnaround(s2, legal)) continue;
+    if (!isTurnaround(s1, legal, ctx) || !isTurnaround(s2, legal, ctx)) continue;
 
-    const why = `${describePairing(p1)} ו-${describePairing(p2)}: ${minToHhmm(Math.max(rest, 0))} בין הנחיתה (${hhmm(s1.end)}) ` +
-      `להתייצבות (${hhmm(s2.start - report)}), פחות ממנוחה חוקית של ${params.legal_rest_hours} שעות. שתי טיסות סבב באותו FDP`;
+    const why = `${describePairing(p1)} ו-${describePairing(p2)}: ${minToHhmm(Math.max(rest, 0))} מנוחה מהשחרור (${hhmm(s1.end + post)}) ` +
+      `עד ההתייצבות (${hhmm(s2.start - report)}), פחות ממנוחה חוקית של ${params.legal_rest_hours} שעות. שתי טיסות סבב באותו FDP`;
     // מתחת לטיסה רק שם החוק, בלי השעות (בעל המוצר, 01/10/2026).
     const explain = '';
     if (!ctx.hasExec) {
@@ -211,7 +219,7 @@ function second_unplanned_activity(ctx, params, rule) {
       const so = execSpan(o, ctx.domicile, false);
       const [first, second] = (so.start ?? 0) < span.start ? [so, span] : [span, so];
       if (first.end == null || second.start == null) continue;
-      if (restBetween(first, second, report) >= legal) { separate = o; break; }
+      if (legalRestBetween(first, second, report, ctx.legalRest?.postMin) >= legal) { separate = o; break; }
     }
     if (separate) {
       ctx.expectPairing(u, key, H(params.hours), rule,
@@ -269,7 +277,7 @@ function base_rest_shortfall(ctx, params, rule) {
     const [p1, p2] = [list[i - 1], list[i]];
     const [s1, s2] = [planSpan(p1, ctx.domicile, ctx.monthFirst), planSpan(p2, ctx.domicile, ctx.monthFirst)];
     if (s1.start == null || s1.end == null || s2.start == null || s1.flight == null) continue;
-    if (isTurnaround(s1, legal) && isTurnaround(s2, legal)) continue; // רצף סבבים, 2018 ס' 55
+    if (isTurnaround(s1, legal, ctx) && isTurnaround(s2, legal, ctx)) continue; // רצף סבבים, 2018 ס' 55
 
     const rest = restBetween(s1, s2, report) - 2 * buffer;
     const stay = s1.end - s1.start;
@@ -353,9 +361,10 @@ const CREW_PILOTS = { single: 2, augmented: 3, double: 4 };
 
 /**
  * רגל i בסבב מסיימת FDP אם היא האחרונה בסבב, או שיש מנוחה חוקית (לפחות `legal`) בין
- * הנחיתה שלה לבין המראת הרגל הבאה. חסר מידע לא נדלג בשקט: נספרת כמסיימת FDP.
+ * השחרור אחרי הנחיתה שלה לבין ההתייצבות לרגל הבאה (`rest`: הזמנים האלה, OMA 7.2.1). חסר
+ * מידע לא נדלג בשקט: נספרת כמסיימת FDP.
  */
-function legEndsFdp(p, i, legal) {
+function legEndsFdp(p, i, legal, rest) {
   if (i === p.legs.length - 1) return true;
   const leg = p.legs[i];
   const next = p.legs[i + 1];
@@ -363,7 +372,7 @@ function legEndsFdp(p, i, legal) {
   if (dur == null || !next.dep) return true;
   const arr = at(leg.date, leg.dep.min) + dur;
   const dep = at(next.date, next.dep.min);
-  return dep - arr >= legal;
+  return dep - arr - (rest?.postMin ?? 0) - (rest?.outstationReportMin ?? 0) >= legal;
 }
 
 function night_landings(ctx, params, rule) {
@@ -381,7 +390,7 @@ function night_landings(ctx, params, rule) {
   for (const p of ctx.planPairings) {
     p.legs.forEach((leg, i) => {
       if (leg.dh || !leg.arr) return;
-      if (!legEndsFdp(p, i, legal)) return;
+      if (!legEndsFdp(p, i, legal, ctx.legalRest)) return;
       if (params.base_landings_only && leg.dst !== ctx.domicile) return;
       if (params.fleet && (leg.ac ?? ctx.fleet) !== params.fleet) return;
       const clock = arrivalAtBaseClock(ctx, leg);
@@ -419,7 +428,8 @@ function night_landings(ctx, params, rule) {
   const hours = H(params.hours);
   const crews = params.counted_crews;
   const crewNames = crews ? crews.map((c) => CREW_LABEL[c] ?? c).join(' או ') : '';
-  const crewOf = (n) => ctx.answer(`night_crew:${n.leg.date}:${n.leg.flight}`)?.value;
+  // הרכב הצוות נשאל גם בבדיקת מגבלות החוק, על ה-FDP כולו: תשובה אחת משמשת את שתיהן.
+  const crewOf = (n) => (ctx.answer(`night_crew:${n.leg.date}:${n.leg.flight}`) ?? ctx.legalCrewAnswer(n.leg))?.value;
 
   // נספרות רק טיסות בהרכב צוות מ-`counted_crews` (2024 ס' 39–40: בודד או מוגבר). ההרכב אינו
   // בקבצים, ולכן מניחים תחילה שכל טיסה שלא נענתה נספרת: ההרכב יכול רק להוריד את המספר, וזאת
@@ -485,9 +495,11 @@ function night_landings(ctx, params, rule) {
       // נספרת מורידה את המספר ומייתרת את השאר, והסיכוי לכך גדול יותר בטיסה ארוכה.
       const next = [...open].sort((a, b) => (plannedBlock(ctx, b.leg) ?? 0) - (plannedBlock(ctx, a.leg) ?? 0) ||
         a.leg.date.localeCompare(b.leg.date))[0];
+      // השאלה על הרכב הצוות כבר נשאלה בבדיקת מגבלות החוק, על ה-FDP של הטיסה הזאת.
+      const pendingLegal = ctx.legalCrewAsked(next.leg);
       ctx.note(null, `${rule.title}: ${planned}. תחת ההנחה שכל טיסה שעדיין לא נענתה היא בצוות ` +
         `${crewNames}, מגיע פיצוי של ${minToHhmm(hours)}.`, rule);
-      ctx.ask({
+      if (!pendingLegal) ctx.ask({
         id: `night_crew:${next.leg.date}:${next.leg.flight}`,
         date: next.leg.date,
         title: `נחיתת לילה: באיזה צוות מתוכננת ${next.leg.flight} ב-${ddmm(next.leg.date)} (נחיתה ${minToHhmm(next.clock)} שעון ישראל)?`,
@@ -526,7 +538,7 @@ function plannedBlock(ctx, leg) {
 }
 
 /** ההפרש בין שעון התחנה לשעון הבסיס: 0 בבסיס, מה שנלמד מהקבצים, ואחרת לפי אזור הזמן. */
-function stationOffsetAt(ctx, station, date) {
+export function stationOffsetAt(ctx, station, date) {
   if (!station || station === ctx.domicile) return 0;
   const learned = ctx.stationOffsets?.[station];
   if (learned?.length) {
@@ -893,7 +905,7 @@ function consecutive_night_rounds(ctx, params, rule) {
   const to = parseClock(params.window_to);
   const key = keyFor(params.report_column);
   const nightsOf = (s) => {
-    if (s.start == null || s.end == null || !isTurnaround(s, legal)) return [];
+    if (s.start == null || s.end == null || !isTurnaround(s, legal, ctx)) return [];
     const d0 = dateOf(s.start - report);
     return [d0, addDays(d0, 1)].filter((d) => s.start - report < at(d, to) && s.end > at(d, from));
   };
@@ -1506,13 +1518,13 @@ function covered_by() {}
  * קיבוץ סבבי הביצוע ל-FDP: סבבים עוקבים שאין ביניהם מנוחה חוקית, לפי STD/STA. סבב חתוך,
  * או סבב שחסרים לו זמנים, עומד לבד.
  */
-export function execFdpGroups(pairings, domicile, legalRest, reportMin) {
+export function execFdpGroups(pairings, domicile, legalRest, reportMin, postMin = 0) {
   const sorted = [...pairings].sort((a, b) => a.from.localeCompare(b.from));
   const groups = [];
   let prev = null;
   for (const p of sorted) {
     const span = execSpan(p, domicile, true);
-    const joins = prev && prev.span.end != null && span.start != null && restBetween(prev.span, span, reportMin) < legalRest;
+    const joins = prev && prev.span.end != null && span.start != null && legalRestBetween(prev.span, span, reportMin, postMin) < legalRest;
     if (joins) groups.at(-1).push(p);
     else groups.push([p]);
     prev = { span };

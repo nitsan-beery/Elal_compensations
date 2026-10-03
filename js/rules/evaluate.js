@@ -11,6 +11,8 @@ import { rulesInEffect, partitionRules, rulesByLogic, classifyCode } from './cat
 import { buildTimeline, buildPairings, markCarryIn, matchPairings, describePairing, describeRoute, pairingParts, fdpParts } from '../model.js';
 import { hoursToMin, minToHhmm } from '../time.js';
 import { OPTIONAL_COLUMNS } from '../pdf/exec.js';
+import { checkLegalLimits, restDefinition } from './legal.js';
+import { stationOffsetAt } from './duty.js';
 
 /** עמודות הדוח שכל סוג ציפייה נבדק מולן. */
 const KEY_COLUMNS = {
@@ -34,8 +36,10 @@ const CREDIT_LABEL_COLUMNS = ['Credit', 'FLT+DH', 'Rig'];
  * @param {object|null} input.exec  פלט parseExec
  * @param {Object<string, {value: string, text?: string, link?: string}>} [input.answers]
  *        תשובות המשתמש לשאלות, לפי מזהה השאלה.
+ * @param {Array<{period, plan, exec}>} [input.history]  חודשים קודמים מהחדש לישן, לחלונות של
+ *        מגבלות החוק שמתחילים לפני החודש (168 שעות, 672 שעות, 365 ימים).
  */
-export function evaluate({ rulesData, plan = null, exec = null, answers = {} }) {
+export function evaluate({ rulesData, plan = null, exec = null, answers = {}, history = [] }) {
   if (!plan && !exec) throw new Error('לא הועלה אף קובץ.');
   const period = (exec ?? plan).period;
   const mode = plan && exec ? 'full' : plan ? 'plan' : 'exec';
@@ -61,8 +65,10 @@ export function evaluate({ rulesData, plan = null, exec = null, answers = {} }) 
   if (exec) markCarryIn(timeline, domicile);
   // חזרה לבסיס אחרי המראה מצטרפת לטיסה שיוצאת אחריה באותו FDP, לפי הגדרת ה-FDP של הסליפ הקצר.
   const slip = supported.find((r) => r.logic.id === 'min_slip_credit')?.logic.params;
+  // המנוחה החוקית לפי ה-OMA: מתחילה 15 דק' אחרי ה-On block (`legal_limits`).
+  const legalRest = restDefinition(rulesData.legal_limits);
   const fdp = slip?.legal_rest_hours != null
-    ? { legalRestMin: slip.legal_rest_hours * 60, reportMin: slip.report_minutes_before_std ?? 0 } : null;
+    ? { legalRestMin: slip.legal_rest_hours * 60, reportMin: slip.report_minutes_before_std ?? 0, postMin: legalRest?.postMin ?? 0 } : null;
   const execPairings = exec ? buildPairings(timeline, domicile, (d) => d.exec?.legs, fdp) : [];
   const matches = mode === 'full'
     ? matchPairings(planPairings, execPairings)
@@ -91,6 +97,7 @@ export function evaluate({ rulesData, plan = null, exec = null, answers = {} }) 
     comparison: [],
     totals: [],
     freeDays: null,
+    legal: null,
   };
 
   // פעילות קרקע במקום סבב: הזיכוי עליה בא מחוק הקוד שלה. קוד שאף חוק נתמך לא מכסה – לבדיקה ידנית.
@@ -111,6 +118,31 @@ export function evaluate({ rulesData, plan = null, exec = null, answers = {} }) 
     period, fleet, fdp, assumed,
     // בלי דוח ביצוע, הסבבים המתוכננים משמשים לחישוב הקרדיט והרי"ג הצפויים.
     execPairings: exec ? execPairings : planPairings });
+  ctx.legalRest = legalRest;
+
+  // מגבלות החוק על התכנון (בעל המוצר, 03/10/2026). לפני החוקים, כדי ששאלת הרכב הצוות שלהן
+  // תשמש גם את נחיתות הלילה.
+  let crewIdOf = new Map();
+  if (plan && domicile && rulesData.legal_limits) {
+    const leave = new Set(codes.leave ?? []);
+    const activity = new Set([...(codes.relevant ?? []).filter((c) => !leave.has(c)), ...(codes.ground_activity ?? [])]);
+    const legal = checkLegalLimits({
+      limits: rulesData.legal_limits, period, plan, history, domicile, fleet,
+      offsetAt: (station, date) => stationOffsetAt(ctx, station, date),
+      classify: {
+        notDuty: (c) => isLeaveCode(c, leave, codes) || isIgnoredPlanCode(c, codes),
+        isActivity: (c) => !isLeaveCode(c, leave, codes) && (activity.has(c) || activity.has(expandCode(c, codes)) || c.startsWith('SIM')),
+        execCodes: (day) => execCodesOf({ exec: day }, codes),
+      },
+      answer: ctx.answer,
+      ask: ctx.ask,
+    });
+    out.legal = legal.result;
+    crewIdOf = legal.crewIdOf;
+  }
+  const crewKey = (leg) => crewIdOf.get(`${leg.date}:${leg.flight}`);
+  ctx.legalCrewAnswer = (leg) => (crewKey(leg) ? ctx.answer(crewKey(leg)) : null);
+  ctx.legalCrewAsked = (leg) => !!crewKey(leg) && out.questions.some((q) => q.id === crewKey(leg));
 
   for (const logicId of LOGIC_ORDER) {
     for (const rule of rulesByLogic(supported, logicId)) {

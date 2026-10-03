@@ -1,6 +1,9 @@
 // כלי פיתוח: מריץ את מנוע החוקים על חודש ומדפיס את הדוח. לא חלק מהאפליקציה.
 // שימוש:  node tools/run-month.mjs --plan samples/duty-plan-2026-07.pdf --exec samples/crewpay-2026-07.pdf [--answers samples/answers-2026-07.json]
+// החודשים הקודמים (למגבלות החוק) נטענים מאותה תיקייה, לפי שמות הקבצים, כמו ההיסטוריה באפליקציה.
+// --no-history: בלי חודשים קודמים.
 import fs from 'node:fs';
+import path from 'node:path';
 import { parsePlan } from '../js/pdf/plan.js';
 import { parseExec } from '../js/pdf/exec.js';
 import { evaluate } from '../js/rules/evaluate.js';
@@ -11,13 +14,42 @@ const rulesData = JSON.parse(fs.readFileSync(new URL('../rules.json', import.met
 const plan = arg('plan') ? await parsePlan(fs.readFileSync(arg('plan'))) : null;
 const exec = arg('exec') ? await parseExec(fs.readFileSync(arg('exec'))) : null;
 const answers = arg('answers') ? JSON.parse(fs.readFileSync(arg('answers'), 'utf8')) : {};
+const history = process.argv.includes('--no-history') ? [] : await loadHistory();
 
-const r = evaluate({ rulesData, plan, exec, answers });
+async function loadHistory() {
+  const ref = arg('plan') ?? arg('exec');
+  const period = (plan ?? exec)?.period;
+  if (!ref || !period) return [];
+  const dir = path.dirname(ref);
+  const files = fs.readdirSync(dir);
+  const out = [];
+  let { year, month } = period;
+  for (let i = 0; i < 13; i++) {
+    [year, month] = month === 1 ? [year - 1, 12] : [year, month - 1];
+    const key = `${year}-${String(month).padStart(2, '0')}`;
+    const p = files.find((f) => f === `duty-plan-${key}.pdf`);
+    const e = files.find((f) => f.startsWith(`crewpay-${key}`) && f.endsWith('.pdf'));
+    if (!p && !e) break;
+    out.push({ period: { year, month },
+      plan: p && !e ? await parsePlan(fs.readFileSync(path.join(dir, p))) : null,
+      exec: e ? await parseExec(fs.readFileSync(path.join(dir, e))) : null });
+  }
+  return out;
+}
+
+const r = evaluate({ rulesData, plan, exec, answers, history });
 const hm = (v, unit) => (unit === 'count' ? String(v) : minToHhmm(v));
 
 console.log(`חודש ${r.period.month}/${r.period.year} · מצב ${r.mode} · בסיס ${r.domicile} · חוקים ${r.rulesVersion}`);
 console.log(`חוקים נתמכים: ${r.rules.supported.length} · לא נתמכים: ${r.rules.unsupported.length}`);
 for (const w of r.warnings) console.log('אזהרה:', w);
+if (r.legal) {
+  console.log('\n== מגבלות החוק ==');
+  if (r.legal.skipped) console.log(r.legal.skipped);
+  else if (!r.legal.violations.length) console.log('אין חריגה');
+  for (const v of r.legal.violations) console.log(`✗ ${v.date.slice(8)} ${v.message}`);
+  for (const u of r.legal.unchecked) console.log(`  לא נבדק: ${u}`);
+}
 
 console.log('\n== שינויים ==');
 for (const c of r.changes) {

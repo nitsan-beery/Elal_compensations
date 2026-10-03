@@ -44,6 +44,7 @@ const ANSWER_LABEL = {
   yes: 'כן, הייתי מוצב', no: 'לא הייתי מוצב',
   company: 'לבקשת החברה', own: 'ויתור מרצון',
   standby_bid: 'סיום כוננות בגלל זכייה במכרז', standby_activated: 'הפעלת הכוננות', regular_standby: 'מצב הכן רגיל',
+  single: 'צוות בודד (2 טייסים)', augmented: 'צוות מוגבר (3 טייסים)', double: 'צוות כפול (4 טייסים)',
 };
 
 /** ערך תשובה לתצוגה. תאריך שנבחר ביומן מוצג כיום/חודש. */
@@ -246,12 +247,21 @@ function dropFileLink(kind) {
 
 async function runAndSave() {
   const r = state.record;
-  state.result = evaluate({ rulesData: state.rulesData, plan: r.plan, exec: r.exec, answers: r.answers ?? {} });
+  const months = await safe(() => store.listMonths(), []);
+  state.result = evaluate({ rulesData: state.rulesData, plan: r.plan, exec: r.exec, answers: r.answers ?? {}, history: historyFor(r.key, months) });
   r.rulesVersion = state.result.rulesVersion;
   r.summary = summarize(state.result);
   await safe(() => store.putMonth(r));
   renderUploadState();
   renderResults();
+}
+
+/**
+ * החודשים שלפני `key`, מהחדש לישן, לחלונות של מגבלות החוק שמתחילים לפני החודש (168 שעות,
+ * 672 שעות, 365 ימים). `months` כבר ממוינים מהחדש לישן.
+ */
+function historyFor(key, months) {
+  return months.filter((m) => m.key < key && (m.plan || m.exec)).map((m) => ({ period: m.period, plan: m.plan ?? null, exec: m.exec ?? null }));
 }
 
 /** שורות ההשוואה שמוצגות. FLT+DH חוזר על הקרדיט של אותן טיסות, ולכן לא מוצג ולא נספר. */
@@ -305,6 +315,7 @@ function summarize(res) {
       + (res.questions.length ? 0 : res.totals.filter((t) => t.ok === false && t.reported - t.expected !== rowsDiff(t.column)).length),
     reviews: res.reviews.length,
     unknownCodes: res.unknownCodes.length,
+    legal: res.legal?.violations.length ?? 0,
   };
 }
 
@@ -335,6 +346,7 @@ function renderResults(keepDom = true) {
   if (!res) { root.innerHTML = parts.join(''); return; }
 
   parts.push(renderHead(res));
+  parts.push(renderLegal(res));
   parts.push(renderAlerts(res));
   parts.push(renderQuestions(res));
   parts.push(renderTotals(res));
@@ -364,6 +376,30 @@ function renderHead(res) {
     ${res.mode === 'plan' ? '<p class="small muted">בלי קובץ ביצוע אין השוואה מול מה שזוכה. מוצגים הקרדיט והפיצויים הצפויים לפי התכנון.</p>' : ''}
   </div>`;
 }
+
+/**
+ * מגבלות החוק על התכנון (OMA 7.2): חריגה באדום בראש הדף, ובטבלה היום שלה מסומן (בעל המוצר,
+ * 03/10/2026). בלי חריגה – שורה אחת. מה שלא נבדק כתוב בקצרה, כדי שלא ייראה שהכול נבדק.
+ */
+function renderLegal(res) {
+  const l = res.legal;
+  if (!l) return '';
+  if (l.skipped) return `<div class="card"><p class="small muted">${esc(l.skipped)}</p></div>`;
+  const unchecked = l.unchecked.length ? `<p class="small">לא נבדק: ${l.unchecked.map(esc).join('; ')}.</p>` : '';
+  if (l.violations.length) {
+    return `<div class="card"><div class="notice bad"><strong>חריגה ממגבלות החוק בתכנון</strong>
+      <ul>${l.violations.map((v) => `<li>${esc(v.message)}</li>`).join('')}</ul>
+      ${unchecked}<p class="small">${esc(l.source)}</p></div></div>`;
+  }
+  const pending = res.questions.filter((q) => q.id.startsWith('crew:')).length;
+  const status = pending
+    ? `מגבלות החוק נבדקו: אין חריגה, חוץ מ${pending === 1 ? '-FDP אחד שממתין' : `-${pending} FDP שממתינים`} לתשובה על הרכב הצוות.`
+    : 'מגבלות החוק נבדקו: אין חריגה.';
+  return `<div class="card"><div class="notice ${pending ? 'info' : 'ok'}">${status}</div>${unchecked.replace('class="small"', 'class="small muted"')}</div>`;
+}
+
+/** ימים עם חריגה ממגבלות החוק, לסימון השורות שלהם בטבלאות. */
+const legalDays = (res) => new Set((res.legal?.violations ?? []).map((v) => v.date));
 
 function renderAlerts(res) {
   const out = [];
@@ -517,6 +553,7 @@ function renderComparison(res) {
   };
   const rows = all.filter(FILTERS[state.filter] ?? FILTERS.all);
   const chip = (id, label) => `<button class="chip" data-filter="${id}" aria-pressed="${state.filter === id}">${label} (${counts[id]})</button>`;
+  const illegal = legalDays(res);
   return `<details class="card" data-section="detail" open>
     <summary><h2 style="display:inline">פירוט</h2></summary>
     <div class="filters">${chip('comp', 'רק פיצויים')}${chip('all', 'הכול')}${chip('bad', 'פערים')}</div>
@@ -532,7 +569,7 @@ function renderComparison(res) {
             .map((e) => `${esc(e.ruleTitle ?? '')}${e.note ? `: ${esc(e.note)}` : ''}${e.min != null && c.unit !== 'count' ? ` <span class="num">${minToHhmm(e.min)}</span>` : ''}`),
           ...c.marks.map((m) => `${esc(m.column)}: צפוי <span class="num">${hm(m.expected, m.unit)}</span>, ברומה <span class="num">${hm(m.reported, m.unit)}</span>`),
         ].join('<br>');
-        return `<tr class="${cls}">
+        return `<tr class="${cls}${c.dates.some((d) => illegal.has(d)) ? ' legal' : ''}">
           <td>${esc(c.label).replace(/\n/g, '<br>')}${explainOf(c)}</td><td class="col">${esc(c.column)}</td>
           <td class="num">${hm(c.expected, c.unit)}</td><td class="num">${hm(c.reported, c.unit)}</td>
           <td class="num">${c.ok ? '' : (c.diff > 0 ? '+' : '') + hm(c.diff, c.unit)}</td><td>${status}</td></tr>
@@ -558,13 +595,14 @@ function renderExpectations(res) {
   ];
   // הקרדיט של כל טיסה הוא רק רעש: הסך הכול בשורה העליונה, ובטבלה רק הפיצויים.
   const shown = rows.filter((e) => !CREDIT_KEYS.has(e.key));
+  const illegal = legalDays(res);
   return `<details class="card" data-section="expected" open>
     <summary><h2 style="display:inline">קרדיט ופיצויים צפויים</h2></summary>
     <p class="small">סה"כ קרדיט: <span class="num">${minToHhmm(sumKeys(CREDIT_KEYS))}</span> · סה"כ COM: <span class="num">${minToHhmm(sumKeys(COM_KEYS))}</span></p>
     ${second.length ? `<p class="small">${second.join(' · ')}</p>` : ''}
     ${!shown.length ? '<p class="small muted">אין פיצויים צפויים לפי התכנון.</p>' : `<div class="table-wrap"><table>
       <thead><tr><th>תאריך</th><th>חוק</th><th>סוג</th><th>צפוי</th><th>הסבר</th></tr></thead>
-      <tbody>${shown.map((e) => `<tr>
+      <tbody>${shown.map((e) => `<tr${e.dates.some((d) => illegal.has(d)) ? ' class="legal"' : ''}>
         <td class="num">${e.dates.length > 1 ? `${ddmm(e.dates[0])}–${ddmm(e.dates.at(-1))}` : ddmm(e.date)}</td>
         <td>${esc(e.ruleTitle)}${pairingOf(e) ? `<div class="small muted">${esc(pairingOf(e))}</div>` : ''}</td>
         <td>${esc(KEY_LABEL[e.key] ?? e.key)}</td>
@@ -618,7 +656,8 @@ function renderNotes(res) {
 }
 
 const QUESTION_KIND = { cancelled: 'סבב שלא בוצע', unplanned: 'פעילות לא מתוכננת', replaced: 'סבב שהוחלף', assigned: 'מוצב לפעילות', standby_bid: 'טיסה בסוף כוננות', standby_code: 'קוד כוננות',
-  school_start: 'פתיחת שנת הלימודים', free_days: 'ימים ללא פעילות', free_days_first: 'ימים ללא פעילות, X ב-1 לחודש' };
+  school_start: 'פתיחת שנת הלימודים', free_days: 'ימים ללא פעילות', free_days_first: 'ימים ללא פעילות, X ב-1 לחודש',
+  crew: 'הרכב הצוות', night_crew: 'הרכב הצוות' };
 
 function describeQuestionId(id) {
   const [kind, ...rest] = id.split(':');
@@ -627,8 +666,10 @@ function describeQuestionId(id) {
   return `${QUESTION_KIND[kind] ?? kind} ${what}`;
 }
 
-/** "2026-07-21..2026-07-22:ATH" → "21/07–22/07 ATH". */
+/** "2026-07-21..2026-07-22:ATH" → "21/07–22/07 ATH". "2026-08-03:LY373" (טיסה) → "03/08 LY373". */
 function describePairingId(id) {
+  const leg = String(id).match(/^(\d{4}-\d{2}-\d{2}):(.+)$/);
+  if (leg) return `⁦${ddmm(leg[1])} ${leg[2]}⁩`;
   const m = String(id).match(/^(\d{4}-\d{2}-\d{2})\.\.(\d{4}-\d{2}-\d{2}):(.*)$/);
   if (!m) return id;
   return `⁦${m[1] === m[2] ? ddmm(m[1]) : `${ddmm(m[1])}–${ddmm(m[2])}`} ${m[3]}⁩`;
@@ -725,10 +766,10 @@ function bindResults(root) {
 // ---------- היסטוריה ----------
 
 /** הסיכום של חודש שמור לפי החוקים והקוד הנוכחיים, ולא זה שנשמר בהרצה האחרונה שלו. */
-function currentSummary(m) {
+function currentSummary(m, months) {
   if (!state.rulesData || !(m.plan || m.exec)) return m.summary ?? {};
   try {
-    return summarize(evaluate({ rulesData: state.rulesData, plan: m.plan, exec: m.exec, answers: m.answers ?? {} }));
+    return summarize(evaluate({ rulesData: state.rulesData, plan: m.plan, exec: m.exec, answers: m.answers ?? {}, history: historyFor(m.key, months) }));
   } catch {
     return m.summary ?? {};
   }
@@ -741,10 +782,11 @@ async function renderHistory() {
     <div class="card">
       <h2>חודשים שמורים על המכשיר</h2>
       ${months.length ? `<ul class="list">${months.map((m) => {
-        const s = currentSummary(m);
+        const s = currentSummary(m, months);
         const tags = [
           m.plan ? '<span class="tag">תכנון</span>' : '',
           m.exec ? '<span class="tag">ביצוע</span>' : '',
+          s.legal ? `<span class="tag bad">${s.legal === 1 ? 'חריגה ממגבלות החוק' : `${s.legal} חריגות ממגבלות החוק`}</span>` : '',
           s.questions ? `<span class="tag warn">${s.questions === 1 ? 'שאלה פתוחה אחת' : `${s.questions} שאלות פתוחות`}</span>` : '',
           s.gaps ? `<span class="tag bad">${s.gaps === 1 ? 'פער אחד' : `${s.gaps} פערים`}</span>` : '',
           m.exec && !s.gaps && !s.questions ? '<span class="tag ok">תואם לרומה</span>' : '',
