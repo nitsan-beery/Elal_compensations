@@ -123,7 +123,7 @@ export function evaluate({ rulesData, plan = null, exec = null, answers = {}, hi
   // מגבלות החוק על התכנון (בעל המוצר, 03/10/2026). לפני החוקים, כדי ששאלת הרכב הצוות שלהן
   // תשמש גם את נחיתות הלילה.
   let crewIdOf = new Map();
-  if (plan && domicile && rulesData.legal_limits) {
+  if ((plan || exec) && domicile && rulesData.legal_limits) {
     const leave = new Set(codes.leave ?? []);
     const activity = new Set([...(codes.relevant ?? []).filter((c) => !leave.has(c)), ...(codes.ground_activity ?? [])]);
     const legal = checkLegalLimits({
@@ -140,7 +140,9 @@ export function evaluate({ rulesData, plan = null, exec = null, answers = {}, hi
     out.legal = legal.result;
     crewIdOf = legal.crewIdOf;
   }
-  const crewKey = (leg) => crewIdOf.get(`${leg.date}:${leg.flight}`);
+  // מזהה השאלה לפי הרגל בקובץ שנבדק; הרגל מהקובץ השני יכולה להיות רשומה ביום שלידו.
+  const near = (date, k) => new Date(Date.parse(date) + k * 864e5).toISOString().slice(0, 10);
+  const crewKey = (leg) => [0, -1, 1].map((k) => crewIdOf.get(`${near(leg.date, k)}:${leg.flight}`)).find(Boolean);
   ctx.legalCrewAnswer = (leg) => (crewKey(leg) ? ctx.answer(crewKey(leg)) : null);
   ctx.legalCrewAsked = (leg) => !!crewKey(leg) && out.questions.some((q) => q.id === crewKey(leg));
 

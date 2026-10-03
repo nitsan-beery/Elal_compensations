@@ -46,8 +46,9 @@ for (const w of r.warnings) console.log('אזהרה:', w);
 if (r.legal) {
   console.log('\n== מגבלות החוק ==');
   if (r.legal.skipped) console.log(r.legal.skipped);
-  else if (!r.legal.violations.length) console.log('אין חריגה');
+  else if (!r.legal.violations.length) console.log(`אין חריגה (לפי ${r.legal.basis === 'exec' ? 'הביצוע' : 'התכנון'})`);
   for (const v of r.legal.violations) console.log(`✗ ${v.date.slice(8)} ${v.message}`);
+  for (const v of r.legal.extensions ?? []) console.log(`~ הארכה ${v.date.slice(8)} ${v.message}`);
   for (const u of r.legal.unchecked) console.log(`  לא נבדק: ${u}`);
 }
 

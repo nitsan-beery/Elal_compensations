@@ -1,7 +1,10 @@
-// מגבלות החוק על התכנון: זמן טיסה, FDP ומנוחה (OMA חלק A, פרק 7.2; `legal_limits` ב-rules.json).
+// מגבלות החוק: זמן טיסה, FDP ומנוחה (OMA חלק A, פרק 7.2; `legal_limits` ב-rules.json).
 //
-// הבדיקה רצה על קובץ התכנון בלבד (בעל המוצר, 03/10/2026): בביצוע החוק מתיר הארכה בנסיבות לא
-// צפויות (7.2.10), ואין לה סימון בקבצים. חריגה מוצגת באדום. אין כאן אף ערך: כולם מ-`legal_limits`.
+// כשיש רומה הבדיקה לפי הביצוע, ובלעדיה לפי התכנון (בעל המוצר, 03/10/2026). חריגה מוצגת באדום.
+// בביצוע החוק מתיר הארכה בנסיבות לא צפויות (7.2.10), ואין לה סימון בקבצים: FDP עד
+// `execution_fdp_extension_hours` מעל המותר, וזמן טיסה ומצטבר ככל שנדרש לנחיתה. חריגה שהארכה
+// כזאת מסבירה היא `extensions` (בכתום); מנוחה, ימים פנויים, לילות רצופים וכוננות אינם מוארכים.
+// אין כאן אף ערך: כולם מ-`legal_limits`.
 //
 // המודל: כל פעילות בתכנון – רגל, רגל DH, פעילות קרקע, כוננות קצרה או בשדה – היא תפקיד, עם התחלה
 // ושחרור. שני תפקידים שאין ביניהם מנוחה חוקית (`rest_hours`, מהשחרור ועד ההתחלה הבאה) הם באותה
@@ -46,8 +49,7 @@ export function restDefinition(limits) {
  * @param {object} o.limits      `legal_limits`
  * @param {object} o.period      החודש שנבדק
  * @param {object} o.plan        פלט parsePlan של החודש
- * @param {object|null} o.exec   הרומה של החודש, אם יש: FDP שאף טיסה בו לא בוצעה אינו נשאל ואינו
- *                               מוזכר כ"לא נבדק" (בעל המוצר, 03/10/2026)
+ * @param {object|null} o.exec   הרומה של החודש, אם יש: הבדיקה לפיה (שעות הכוננות מהתכנון)
  * @param {Array}  o.history     חודשים קודמים: [{period, plan, exec}], מהחדש לישן
  * @param {string} o.domicile
  * @param {string|null} o.fleet
@@ -59,7 +61,7 @@ export function restDefinition(limits) {
  */
 export function checkLegalLimits(o) {
   const { limits, period, domicile } = o;
-  const result = { violations: [], unchecked: [], source: limits.source };
+  const result = { basis: o.exec ? 'exec' : 'plan', violations: [], extensions: [], unchecked: [], source: limits.source };
   const crewIdOf = new Map(); // "date:flight" → מזהה שאלת הרכב הצוות של ה-FDP
   const monthStart = at(isoMonth(period), 0);
   const monthEnd = at(isoMonth(nextMonth(period)), 0);
@@ -69,7 +71,7 @@ export function checkLegalLimits(o) {
   }
 
   const unchecked = new Set();
-  const own = planDuties(o.plan, o, unchecked);
+  const own = o.exec ? execDuties(o.exec, o, unchecked, plannedCodes(o.plan, o)) : planDuties(o.plan, o, unchecked);
   // החודשים הקודמים: לפי הרומה, כי המגבלות חלות על מה שבוצע בפועל; בלי רומה – לפי התכנון.
   // רק חודשים רצופים לאחור נחשבים כיסוי.
   let coverStart = monthStart;
@@ -77,7 +79,7 @@ export function checkLegalLimits(o) {
   let expect = prevMonth(period);
   for (const m of o.history ?? []) {
     if (m.period.year !== expect.year || m.period.month !== expect.month) break;
-    const items = m.exec ? execDuties(m.exec, o) : m.plan ? planDuties(m.plan, o, null) : null;
+    const items = m.exec ? execDuties(m.exec, o, null, plannedCodes(m.plan, o)) : m.plan ? planDuties(m.plan, o, null) : null;
     if (!items) break;
     older.push(...items);
     coverStart = at(isoMonth(m.period), 0);
@@ -96,25 +98,26 @@ export function checkLegalLimits(o) {
   const chains = buildChains(items, H(limits.rest_hours));
   const inMonth = (t) => t >= monthStart && t < monthEnd;
   const flag = (date, message) => result.violations.push({ date, message });
+  // בביצוע: חריגה שהארכה מותרת יכולה להסביר (7.2.10).
+  const extend = o.exec ? (date, message) => result.extensions.push({ date, message }) : flag;
 
   // ---- כל FDP: זמן טיסה, משך ה-FDP ומספר הרגליים, לפי הרכב הצוות ----
   acclimatize(chains, o);
-  const flown = flownTest(o.exec);
   for (const ch of chains) {
     if (!ch.flights.length) continue;
     const first = ch.flights[0];
     const id = `crew:${first.date}:${first.flight}`;
     for (const f of ch.flights) crewIdOf.set(`${f.date}:${f.flight}`, id);
     if (!inMonth(ch.fdpStart)) continue;
-    checkFdp(ch, id, flown(ch) ? o : { ...o, ask: () => {} }, flag);
+    checkFdp(ch, id, o, flag, extend);
   }
   // ה-FDP הראשון התחיל בחודש הקודם, וה-FDP האחרון נמשך לחודש הבא: חלק מהם אינו בקבצים.
   const firstFdp = chains.find((c) => c.flights.length && c.release > monthStart);
-  if (firstFdp && flown(firstFdp) && coverStart === monthStart && firstFdp.flights[0].org !== domicile && firstFdp.fdpStart < monthStart + 1440) {
+  if (firstFdp && coverStart === monthStart && firstFdp.flights[0].org !== domicile && firstFdp.fdpStart < monthStart + 1440) {
     unchecked.add(`ה-FDP של ${ddmm(firstFdp.flights[0].date)} ${firstFdp.flights[0].flight} התחיל בחודש הקודם, שאינו בהיסטוריה`);
   }
   const lastFdp = [...chains].reverse().find((c) => c.flights.length);
-  if (lastFdp && flown(lastFdp) && lastFdp.flights.at(-1).dst !== domicile && lastFdp.end > monthEnd - 1440) {
+  if (lastFdp && lastFdp.flights.at(-1).dst !== domicile && lastFdp.end > monthEnd - 1440) {
     unchecked.add(`ה-FDP של ${ddmm(lastFdp.flights.at(-1).date)} ${lastFdp.flights.at(-1).flight} נמשך לחודש הבא`);
   }
 
@@ -125,10 +128,11 @@ export function checkLegalLimits(o) {
   checkFreeTime(chains, limits, inMonth, coverStart, needsHistory, flag);
   checkLongTripRest(chains, o, inMonth, flag);
   checkConsecutiveNights(chains, limits, inMonth, flag);
-  checkCumulative(chains, items, limits, inMonth, coverStart, needsHistory, flag);
+  checkCumulative(chains, items, limits, inMonth, coverStart, needsHistory, extend);
   if (needsHistory.length) unchecked.add(`${needsHistory.join(', ')}: תלוי בחודשים קודמים שאינם בהיסטוריה`);
 
   result.violations.sort((a, b) => a.date.localeCompare(b.date));
+  result.extensions.sort((a, b) => a.date.localeCompare(b.date));
   result.unchecked = [...unchecked];
   return { result, crewIdOf };
 }
@@ -136,17 +140,14 @@ export function checkLegalLimits(o) {
 // ---------- התפקידים מהקבצים ----------
 
 /**
- * האם FDP מהתכנון בוצע: בלי רומה – כן; עם רומה – אם אחת הטיסות שלו רשומה בה, באותו יום או ביום
- * שלידו (הרומה רושמת את הרגל ביום ה-STD בשעון הבסיס).
+ * פעילויות קרקע וכוננות מהתכנון, לפי יום וחמשת התווים הראשונים של הקוד (כמו ברומה): לרומה אין
+ * שעות לפעילויות, ולכן פעילות שרשומה בה באותו יום מקבלת את השעות מהתכנון.
  */
-function flownTest(exec) {
-  if (!exec) return () => true;
-  const flights = new Set();
-  for (const day of Object.values(exec.days)) {
-    for (const leg of day.legs ?? []) if (leg.flight) flights.add(`${day.date}:${leg.flight}`);
-  }
-  const near = (date, k) => new Date(Date.parse(date) + k * 864e5).toISOString().slice(0, 10);
-  return (ch) => ch.flights.some((f) => [-1, 0, 1].some((k) => flights.has(`${near(f.date, k)}:${f.flight}`)));
+function plannedCodes(plan, o) {
+  if (!plan) return null;
+  const map = new Map();
+  for (const it of planDuties(plan, o, null)) if (it.code) map.set(`${it.date}|${it.code.slice(0, 5)}`, it);
+  return map;
 }
 
 /** תפקידים מקובץ תכנון: רגליים, ופעילויות עם שעות. קוד פעילות בלי שעות מקבל את שעות ברירת המחדל. */
@@ -191,23 +192,42 @@ function planDuties(plan, o, unchecked) {
 }
 
 /**
- * תפקידים מרומת ביצוע של חודש קודם: הזמנים בפועל (ATD ו-ActDur), ובלעדיהם המתוכננים. השעות
- * מקומיות, והרגל רשומה ביום ההמראה בשעון הבסיס. לפעילות קרקע אין שעות ברומה.
+ * תפקידים מרומת ביצוע: הזמנים בפועל (ATD ו-ActDur), ובלעדיהם המתוכננים. השעות מקומיות, והרגל
+ * רשומה ביום ההמראה בשעון הבסיס. לפעילות קרקע ולכוננות אין שעות ברומה: הן מהתכנון (`planned`),
+ * כשאותו קוד מתוכנן באותו יום; בלעדיו – פעילות קרקע בשעות ברירת המחדל, וכוננות אינה נבדקת ואינה מוזכרת.
  */
-function execDuties(exec, o) {
+function execDuties(exec, o, unchecked = null, planned = null) {
   const { limits, domicile, offsetAt, classify } = o;
   const out = [];
-  for (const day of Object.values(exec.days)) {
+  const note = (s) => unchecked?.add(s);
+  const days = Object.values(exec.days).sort((a, b) => a.date.localeCompare(b.date));
+  for (const day of days) {
+    const legs = [];
     for (const leg of day.legs ?? []) {
       const actual = leg.atd != null && leg.actDur != null;
-      const dep = actual ? leg.atd : leg.std;
+      const sched = leg.std ?? leg.atd;
       const dur = actual ? leg.actDur : leg.skdDur;
-      if (dep == null || dur == null || !leg.org) continue;
+      if (sched == null || dur == null || !leg.org) continue;
       const off = offsetAt(leg.org, day.date);
-      if (off == null) continue;
-      const std = at(day.date, mod(dep - off, 1440));
-      out.push({ kind: leg.type === 'LEG' ? 'flight' : 'dh', date: day.date, flight: leg.flight ?? leg.type, org: leg.org, dst: leg.dst, ac: null, std, sta: std + dur, block: dur });
+      if (off == null) { note(`${ddmm(day.date)} ${leg.flight ?? leg.type}: ${leg.org} אינו בטבלת אזורי הזמן`); continue; }
+      // ה-STD בשעון הבסיס נופל ביום הרשום; ההמראה בפועל היא הקרובה אליו (עיכוב אל מעבר לחצות).
+      const skd = at(day.date, mod(sched - off, 1440));
+      const std = skd + (actual ? mod(leg.atd - sched + 720, 1440) - 720 : 0);
+      // ההתייצבות לפי ה-STD: עיכוב אינו מזיז אותה.
+      legs.push({ kind: leg.type === 'LEG' ? 'flight' : 'dh', date: day.date, flight: leg.flight ?? leg.type, org: leg.org, dst: leg.dst, ac: null, skd, std, sta: std + dur, block: dur });
     }
+    // ביום הראשון, כשהוא מחוץ לבסיס מתחילתו (TAB של 24:00), הרומה חוזרת על סבב שיצא בחודש הקודם
+    // (01/06/2026: LY387 ו-LY388 של 31/05; כמו `markCarryIn`): הרגליים עד החזרה לבסיס יצאו יום קודם.
+    if (day === days[0] && day.date.endsWith("-01") && legs[0]?.org === domicile && (day.values?.TAB?.min ?? 0) >= 1440) {
+      for (const l of legs) {
+        l.std -= 1440;
+        l.skd -= 1440;
+        l.sta -= 1440;
+        l.date = addDays(l.date, -1);
+        if (l.dst === domicile) break;
+      }
+    }
+    out.push(...legs);
     for (const sim of day.sims ?? []) {
       if (sim.std == null || sim.sta == null) continue;
       const off = offsetAt(sim.org ?? domicile, day.date) ?? 0;
@@ -217,7 +237,10 @@ function execDuties(exec, o) {
     for (const code of classify.execCodes(day)) {
       if (code === 'SIM' && day.sims?.length) continue;
       const kind = reserveKind(code, limits);
-      if (kind === 'long' || kind) continue; // לכוננות ברומה אין שעות
+      if (kind === 'long') continue;
+      const p = planned?.get(`${day.date}|${code.slice(0, 5)}`);
+      if (p) { out.push({ ...p }); continue; }
+      if (kind) continue; // כוננות שאינה בתכנון: אין לה שעות
       if (classify.isActivity(code)) out.push(defaultGround(day.date, code, limits, domicile));
     }
   }
@@ -246,11 +269,11 @@ function reserveKind(code, limits) {
 function setTimes(it, o) {
   const { limits, domicile, fleet } = o;
   if (it.kind === 'flight') {
-    it.start = it.std - reportMinutes(it, o);
+    it.start = Math.min(it.std, it.skd ?? it.std) - reportMinutes(it, o);
     it.release = it.sta + (limits.post_flight_minutes ?? 0);
     it.station = it.org;
   } else if (it.kind === 'dh') {
-    it.start = it.std - (limits.deadhead_report_minutes ?? 0);
+    it.start = Math.min(it.std, it.skd ?? it.std) - (limits.deadhead_report_minutes ?? 0);
     it.release = it.sta;
     it.station = it.org;
   } else {
@@ -270,7 +293,7 @@ function reportMinutes(it, o) {
   // צי אחר: 90 דק', וצוות בודד בין 05:00 ל-06:30 – 60 דק'. הרכב הצוות לפי התשובה, אם ניתנה.
   const w = limits.report_single_crew_window;
   const crew = answer(`crew:${it.date}:${it.flight}`)?.value ?? answer(`night_crew:${it.date}:${it.flight}`)?.value;
-  const report = clockOf(it.std - w.minutes);
+  const report = clockOf((it.skd ?? it.std) - w.minutes);
   if (w && crew === 'single' && report >= parseClock(w.from) && report <= parseClock(w.to)) return w.minutes;
   return limits.report_minutes_base.default;
 }
@@ -369,7 +392,7 @@ function describeItem(it) {
   return it.kind === 'flight' || it.kind === 'dh' ? `${ddmm(it.date)} ${it.flight}` : `${ddmm(it.date)} ${it.code}`;
 }
 
-function checkFdp(ch, id, o, flag) {
+function checkFdp(ch, id, o, flag, extend) {
   const { limits, answer, ask } = o;
   const ft = ch.flights.reduce((s, f) => s + f.block, 0);
   const fdp = ch.fdpEnd - ch.fdpStart;
@@ -392,22 +415,29 @@ function checkFdp(ch, id, o, flag) {
     if (seg > l.seg) parts.push([`${seg} רגליים`, `${l.seg} רגליים`]);
     return `${parts.map((p) => p[0]).join(' ו-')}, והמקסימום בצוות ${CREW[crew].label} ${parts.map((p) => p[1]).join(' ו-')}`;
   };
+  // בביצוע (7.2.10): הארכה מסבירה FDP עד `execution_fdp_extension_hours` מעל המותר וכל זמן טיסה,
+  // אבל לא מנוחה קצרה ולא רגליים מעבר למותר. 0 – עומד, 1 – הארכה, 2 – חריגה.
+  const ext = H(limits.execution_fdp_extension_hours ?? 0);
+  const grade = (l) => (fits(l) ? 0 : o.exec && l && !why && seg <= l.seg && fdp <= l.fdp + ext ? 1 : 2);
   const date = ch.flights[0].date;
+  const report = (l, crew, tail = '') => {
+    const g = grade(l);
+    if (g) (g === 1 ? extend : flag)(date, `${describeChain(ch)}: ${why}${over(l, crew)}.${tail}`);
+  };
   if (crewAnswer) {
-    const l = lim[crewAnswer] ?? single;
-    if (!fits(l)) flag(date, `${describeChain(ch)}: ${why}${over(l, lim[crewAnswer] ? crewAnswer : 'single')}.`);
+    report(lim[crewAnswer] ?? single, lim[crewAnswer] ? crewAnswer : 'single');
     return;
   }
-  if (fits(single)) return;
-  // אף הרכב אינו עומד במגבלות: ההשוואה לצוות בודד, בלי לשאול.
-  if (!['augmented', 'double'].some((c) => fits(lim[c]))) {
-    flag(date, `${describeChain(ch)}: ${why}${over(single, 'single')}. חורג גם בצוות מוגבר או כפול.`);
+  if (!grade(single)) return;
+  // אף הרכב אינו טוב מהצוות הבודד: ההשוואה לצוות בודד, בלי לשאול.
+  if (!['augmented', 'double'].some((c) => lim[c] && grade(lim[c]) < grade(single))) {
+    report(single, 'single', lim.augmented || lim.double ? ' חורג גם בצוות מוגבר או כפול.' : '');
     return;
   }
   ask({
     id,
     date,
-    title: `מגבלות החוק: באיזה צוות מתוכנן ${describeChain(ch)}?`,
+    title: `מגבלות החוק: באיזה צוות ${o.exec ? 'בוצע' : 'מתוכנן'} ${describeChain(ch)}?`,
     body: `${why}${over(single, 'single')}.`,
     options: Object.entries(CREW).map(([value, c]) => ({ value, label: `${c.label} (${c.pilots} טייסים)` })),
     ruleId: null,
