@@ -87,7 +87,7 @@ export function checkLegalLimits(o) {
   }
   const seen = new Set();
   const items = [...older, ...own].filter((it) => {
-    const k = `${it.kind}|${it.flight ?? it.code}|${it.std ?? it.start}`;
+    const k = `${it.kind}|${it.flight ?? it.code}|${it.std ?? it.start ?? it.reserveFor?.skd}`;
     if (seen.has(k)) return false;
     seen.add(k);
     return true;
@@ -127,12 +127,16 @@ export function checkLegalLimits(o) {
 
 /**
  * פעילויות קרקע וכוננות מהתכנון, לפי יום וחמשת התווים הראשונים של הקוד (כמו ברומה): לרומה אין
- * שעות לפעילויות, ולכן פעילות שרשומה בה באותו יום מקבלת את השעות מהתכנון.
+ * שעות לפעילויות, ולכן פעילות שרשומה בה באותו יום מקבלת את השעות מהתכנון. וגם הטיסות שבתכנון,
+ * לפי יום ומספר טיסה (`date|F|flight`), לעיכוב לפני FDP.
  */
 function plannedCodes(plan, o) {
   if (!plan) return null;
   const map = new Map();
-  for (const it of planDuties(plan, o, null)) if (it.code) map.set(`${it.date}|${it.code.slice(0, 5)}`, it);
+  for (const it of planDuties(plan, o, null)) {
+    if (it.code) map.set(`${it.date}|${it.code.slice(0, 5)}`, it);
+    else if (it.kind === 'flight') map.set(`${it.date}|F|${it.flight}`, it);
+  }
   return map;
 }
 
@@ -174,7 +178,10 @@ function planDuties(plan, o) {
 /**
  * תפקידים מרומת ביצוע: הזמנים בפועל (ATD ו-ActDur), ובלעדיהם המתוכננים. השעות מקומיות, והרגל
  * רשומה ביום ההמראה בשעון הבסיס. לפעילות קרקע ולכוננות אין שעות ברומה: הן מהתכנון (`planned`),
- * כשאותו קוד מתוכנן באותו יום; בלעדיו – פעילות קרקע בשעות ברירת המחדל, וכוננות אינה נבדקת ואינה מוזכרת.
+ * כשאותו קוד מתוכנן באותו יום; בלעדיו – פעילות קרקע בשעות ברירת המחדל, וכוננות אינה נבדקת ואינה מוזכרת,
+ * חוץ מעיכוב לפני FDP (7.2.9): כוננות קצרה שאינה בתכנון ביום של טיסה מתוכננת שהמריאה באיחור. החברה
+ * העבירה לכוננות בשעת ההתייצבות המקורית, ובמקום FDP מתחיל בה RAP; ה-FDP מתחיל בהתייצבות החדשה, שאינה
+ * בקבצים, ולכן לפי ההמראה בפועל (בעל המוצר, 03/10/2026; 21/08/2026 LY223 ל-NCE).
  */
 function execDuties(exec, o, planned = null) {
   const { limits, domicile, offsetAt, classify } = o;
@@ -207,6 +214,12 @@ function execDuties(exec, o, planned = null) {
       }
     }
     out.push(...legs);
+    const rap = classify.execCodes(day).find((c) => reserveKind(c, limits) === 'rap' && !planned?.has(`${day.date}|${c.slice(0, 5)}`));
+    const first = legs[0];
+    if (rap && first?.kind === 'flight' && first.std > first.skd && planned?.has(`${day.date}|F|${first.flight}`)) {
+      for (const l of legs) l.delayedReport = true;
+      out.push({ kind: 'rap', date: day.date, code: rap, station: first.org, reserveFor: first });
+    }
     for (const sim of day.sims ?? []) {
       if (sim.std == null || sim.sta == null) continue;
       const off = offsetAt(sim.org ?? domicile, day.date) ?? 0;
@@ -244,17 +257,24 @@ function reserveKind(code, limits) {
 /**
  * התחלת התפקיד והשחרור ממנו. טיסה: התייצבות לפני STD (בבסיס לפי הצי, בחו"ל `report_minutes_outstation`),
  * ושחרור `post_flight_minutes` אחרי ה-On block. DH: מ-`deadhead_report_minutes` לפני STD ועד ה-On block.
+ * אחרי עיכוב לפני FDP (`delayedReport`) ההתייצבות לפני ההמראה בפועל, והכוננות מההתייצבות המקורית ועד אליה.
  */
 function setTimes(it, o) {
   const { limits, domicile, fleet } = o;
+  const sched = (x) => (x.delayedReport ? x.std : Math.min(x.std, x.skd ?? x.std));
   if (it.kind === 'flight') {
-    it.start = Math.min(it.std, it.skd ?? it.std) - reportMinutes(it, o);
+    it.start = sched(it) - reportMinutes(it, o);
     it.release = it.sta + (limits.post_flight_minutes ?? 0);
     it.station = it.org;
   } else if (it.kind === 'dh') {
-    it.start = Math.min(it.std, it.skd ?? it.std) - (limits.deadhead_report_minutes ?? 0);
+    it.start = sched(it) - (limits.deadhead_report_minutes ?? 0);
     it.release = it.sta;
     it.station = it.org;
+  } else if (it.reserveFor) {
+    const report = reportMinutes(it.reserveFor, o);
+    it.start = it.reserveFor.skd - report;
+    it.end = it.reserveFor.std - report;
+    it.release = it.end;
   } else {
     it.release = it.end;
   }
