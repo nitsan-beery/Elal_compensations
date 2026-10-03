@@ -15,8 +15,12 @@ const SCOPES = [
   'https://www.googleapis.com/auth/calendar.calendarlist.readonly',
   'https://www.googleapis.com/auth/calendar.events.readonly',
 ];
-/** מזהה ההתחברות (OAuth Client ID) של האפליקציה. ריק: כל משתמש מגדיר מזהה משלו בחיבור הראשון. */
-export const BUILTIN_CLIENT_ID = '';
+/**
+ * מזהה ההתחברות (OAuth Client ID) של האפליקציה, של בעל המוצר (03/10/2026). אינו סוד. הוא מורשה רק
+ * לכתובת האתר ב-GitHub Pages, וכל עוד האפליקציה במצב בדיקה בגוגל – רק למי שנוסף בה כ-Test user.
+ * ריק: כל משתמש מגדיר מזהה משלו בחיבור הראשון.
+ */
+export const BUILTIN_CLIENT_ID = '438961798736-7ctcj9og1mpao6uumnplvaamusutiroi.apps.googleusercontent.com';
 export const CLIENT_ID_PATTERN = /^[\w-]+\.apps\.googleusercontent\.com$/;
 // כך מזוהה אירוע של סבב באורגנייזר, וכך מחפשים יומן שיש בו נתונים.
 const SLIP_MARK = 'Slip details';
