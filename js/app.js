@@ -332,6 +332,7 @@ async function openCalendarDialog() {
     <label>Client ID <input name="clientId" dir="ltr" autocomplete="off" spellcheck="false" value="${esc(saved)}"></label>`}
     <p class="small">בלחיצה על "התחברות לגוגל" ייפתח חלון של גוגל: בחר את חשבון הגוגל שאליו האורגנייזר מסנכרן את היומן, ואשר את שתי ההרשאות לקריאת היומן.</p>
     <p class="small muted" dir="auto">אם גוגל מציג <bdi dir="ltr">Google hasn't verified this app</bdi>, לחץ על <bdi dir="ltr">Advanced</bdi> ואז על <bdi dir="ltr">Go to … (unsafe)</bdi>. אם מוצג <bdi dir="ltr">Access blocked</bdi>, בקש מניצן להוסיף את כתובת הג'ימייל שלך.</p>
+    <p class="small muted"><a href="privacy.html" target="_blank" rel="noopener">מדיניות פרטיות</a></p>
     <div class="cal-step"></div>
     <div class="row"><button type="button" class="btn primary" data-cal="login">התחברות לגוגל</button>
       <button type="button" class="btn" data-cal="close">ביטול</button></div>`;
