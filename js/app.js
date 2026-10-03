@@ -556,7 +556,7 @@ function renderLegal(res) {
   return `<div class="card">
     ${l.violations.length ? `<div class="notice bad"><strong>חריגה ממגבלות החוק ${l.basis === 'exec' ? 'בביצוע' : 'בתכנון'}</strong>${list(l.violations)}</div>` : ''}
     ${ext.length ? `<div class="notice warn"><strong>הארכה בביצוע</strong>${list(ext)}
-      <p class="small">הארכת FDP של עד שעתיים מותרת רק בנסיבות לא צפויות, באישור הקברניט (OMA 7.2.10).</p></div>` : ''}
+      <p class="small list-note">הארכת FDP של עד שעתיים מותרת רק בנסיבות לא צפויות, באישור הקברניט (OMA 7.2.10).</p></div>` : ''}
   </div>`;
 }
 
