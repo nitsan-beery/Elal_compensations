@@ -127,7 +127,7 @@ export function evaluate({ rulesData, plan = null, exec = null, answers = {}, hi
     const leave = new Set(codes.leave ?? []);
     const activity = new Set([...(codes.relevant ?? []).filter((c) => !leave.has(c)), ...(codes.ground_activity ?? [])]);
     const legal = checkLegalLimits({
-      limits: rulesData.legal_limits, period, plan, history, domicile, fleet,
+      limits: rulesData.legal_limits, period, plan, exec, history, domicile, fleet,
       offsetAt: (station, date) => stationOffsetAt(ctx, station, date),
       classify: {
         notDuty: (c) => isLeaveCode(c, leave, codes) || isIgnoredPlanCode(c, codes),

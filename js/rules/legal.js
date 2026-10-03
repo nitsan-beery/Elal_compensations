@@ -46,6 +46,8 @@ export function restDefinition(limits) {
  * @param {object} o.limits      `legal_limits`
  * @param {object} o.period      החודש שנבדק
  * @param {object} o.plan        פלט parsePlan של החודש
+ * @param {object|null} o.exec   הרומה של החודש, אם יש: FDP שאף טיסה בו לא בוצעה אינו נשאל ואינו
+ *                               מוזכר כ"לא נבדק" (בעל המוצר, 03/10/2026)
  * @param {Array}  o.history     חודשים קודמים: [{period, plan, exec}], מהחדש לישן
  * @param {string} o.domicile
  * @param {string|null} o.fleet
@@ -97,21 +99,22 @@ export function checkLegalLimits(o) {
 
   // ---- כל FDP: זמן טיסה, משך ה-FDP ומספר הרגליים, לפי הרכב הצוות ----
   acclimatize(chains, o);
+  const flown = flownTest(o.exec);
   for (const ch of chains) {
     if (!ch.flights.length) continue;
     const first = ch.flights[0];
     const id = `crew:${first.date}:${first.flight}`;
     for (const f of ch.flights) crewIdOf.set(`${f.date}:${f.flight}`, id);
     if (!inMonth(ch.fdpStart)) continue;
-    checkFdp(ch, id, o, flag);
+    checkFdp(ch, id, flown(ch) ? o : { ...o, ask: () => {} }, flag);
   }
   // ה-FDP הראשון התחיל בחודש הקודם, וה-FDP האחרון נמשך לחודש הבא: חלק מהם אינו בקבצים.
   const firstFdp = chains.find((c) => c.flights.length && c.release > monthStart);
-  if (firstFdp && coverStart === monthStart && firstFdp.flights[0].org !== domicile && firstFdp.fdpStart < monthStart + 1440) {
+  if (firstFdp && flown(firstFdp) && coverStart === monthStart && firstFdp.flights[0].org !== domicile && firstFdp.fdpStart < monthStart + 1440) {
     unchecked.add(`ה-FDP של ${ddmm(firstFdp.flights[0].date)} ${firstFdp.flights[0].flight} התחיל בחודש הקודם, שאינו בהיסטוריה`);
   }
   const lastFdp = [...chains].reverse().find((c) => c.flights.length);
-  if (lastFdp && lastFdp.flights.at(-1).dst !== domicile && lastFdp.end > monthEnd - 1440) {
+  if (lastFdp && flown(lastFdp) && lastFdp.flights.at(-1).dst !== domicile && lastFdp.end > monthEnd - 1440) {
     unchecked.add(`ה-FDP של ${ddmm(lastFdp.flights.at(-1).date)} ${lastFdp.flights.at(-1).flight} נמשך לחודש הבא`);
   }
 
@@ -131,6 +134,20 @@ export function checkLegalLimits(o) {
 }
 
 // ---------- התפקידים מהקבצים ----------
+
+/**
+ * האם FDP מהתכנון בוצע: בלי רומה – כן; עם רומה – אם אחת הטיסות שלו רשומה בה, באותו יום או ביום
+ * שלידו (הרומה רושמת את הרגל ביום ה-STD בשעון הבסיס).
+ */
+function flownTest(exec) {
+  if (!exec) return () => true;
+  const flights = new Set();
+  for (const day of Object.values(exec.days)) {
+    for (const leg of day.legs ?? []) if (leg.flight) flights.add(`${day.date}:${leg.flight}`);
+  }
+  const near = (date, k) => new Date(Date.parse(date) + k * 864e5).toISOString().slice(0, 10);
+  return (ch) => ch.flights.some((f) => [-1, 0, 1].some((k) => flights.has(`${near(f.date, k)}:${f.flight}`)));
+}
 
 /** תפקידים מקובץ תכנון: רגליים, ופעילויות עם שעות. קוד פעילות בלי שעות מקבל את שעות ברירת המחדל. */
 function planDuties(plan, o, unchecked) {
