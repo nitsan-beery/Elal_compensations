@@ -292,7 +292,7 @@ function calendarParts(c) {
     return { label: '<span class="cal-label">יומן: לא מחובר</span>', buttons: '<button type="button" class="btn" data-cal="connect">חיבור יומן</button>', infoHtml: '' };
   }
   const n = state.result?.calendarCrew ?? 0;
-  const when = state.calBusy ? 'מעדכן…' : c.synced ? `מעודכן ל-${stamp(c.synced)}` : 'עוד לא עודכן';
+  const when = state.calBusy ? 'מתעדכן…' : c.synced ? `מעודכן ל-${stamp(c.synced)}` : 'עוד לא עודכן';
   const noData = c.synced && !c.facts?.flights?.length;
   const info = [`${c.calendars.length === 1 ? 'יומן מחובר' : 'יומנים מחוברים'}: ${c.calendars.map((x) => x.name).join(', ')}`,
     n ? `הרכב הצוות של ${n} ${n === 1 ? 'טיסה' : 'טיסות'} בחודש הזה מהיומן` : ''].filter(Boolean);
