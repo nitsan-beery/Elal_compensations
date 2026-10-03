@@ -330,6 +330,7 @@ async function openCalendarDialog() {
       </ol>
       <p class="small muted">When you sign in, Google will show "Google hasn't verified this app". Click Continue.</p></details>
     <label>Client ID <input name="clientId" dir="ltr" autocomplete="off" spellcheck="false" value="${esc(saved)}"></label>`}
+    <p class="small">בלחיצה על "התחברות לגוגל" ייפתח חלון של גוגל: בחר את חשבון הגוגל שאליו האורגנייזר מסנכרן את היומן, ואשר את שתי ההרשאות לקריאת היומן.</p>
     <div class="cal-step"></div>
     <div class="row"><button type="button" class="btn primary" data-cal="login">התחברות לגוגל</button>
       <button type="button" class="btn" data-cal="close">ביטול</button></div>`;
