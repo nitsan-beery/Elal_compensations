@@ -49,7 +49,6 @@ if (r.legal) {
   else if (!r.legal.violations.length) console.log(`אין חריגה (לפי ${r.legal.basis === 'exec' ? 'הביצוע' : 'התכנון'})`);
   for (const v of r.legal.violations) console.log(`✗ ${v.date.slice(8)} ${v.message}`);
   for (const v of r.legal.extensions ?? []) console.log(`~ הארכה ${v.date.slice(8)} ${v.message}`);
-  for (const u of r.legal.unchecked) console.log(`  לא נבדק: ${u}`);
 }
 
 console.log('\n== שינויים ==');

@@ -377,8 +377,6 @@ function renderHead(res) {
   </div>`;
 }
 
-const legalUnchecked = (l) => (l.unchecked.length ? `לא נבדק: ${l.unchecked.join('; ')}.` : '');
-
 /**
  * מגבלות החוק (OMA 7.2), לפי הרומה כשיש ובלעדיה לפי התכנון: חריגה בראש הדף, באדום, ובטבלה היום
  * שלה מסומן. בביצוע, חריגה שהארכה מותרת יכולה להסביר (7.2.10) – בכתום. בלי שתיהן – ההערה האחרונה
@@ -388,13 +386,11 @@ function renderLegal(res) {
   const l = res.legal;
   const ext = l?.extensions ?? [];
   if (!l?.violations?.length && !ext.length) return '';
-  const unchecked = legalUnchecked(l);
   const list = (items) => `<ul>${items.map((v) => `<li>${esc(v.message)}</li>`).join('')}</ul>`;
   return `<div class="card">
-    ${l.violations.length ? `<div class="notice bad"><strong>חריגה ממגבלות החוק ${l.basis === 'exec' ? 'בביצוע' : 'בתכנון'}</strong>${list(l.violations)}
-      ${unchecked ? `<p class="small">${esc(unchecked)}</p>` : ''}<p class="small">${esc(l.source)}</p></div>` : ''}
+    ${l.violations.length ? `<div class="notice bad"><strong>חריגה ממגבלות החוק ${l.basis === 'exec' ? 'בביצוע' : 'בתכנון'}</strong>${list(l.violations)}<p class="small">${esc(l.source)}</p></div>` : ''}
     ${ext.length ? `<div class="notice warn"><strong>הארכה בביצוע</strong>${list(ext)}
-      <p class="small">מותרת רק בנסיבות לא צפויות, באישור הקברניט (7.2.10).</p></div>` : ''}
+      <p class="small">הארכת FDP של עד שעתיים מותרת רק בנסיבות לא צפויות, באישור הקברניט (7.2.10).</p></div>` : ''}
   </div>`;
 }
 
@@ -408,7 +404,7 @@ function legalNote(res) {
   const status = pending
     ? `מגבלות החוק נבדקו${by}: אין חריגה, חוץ מ${pending === 1 ? '-FDP אחד שממתין' : `-${pending} FDP שממתינים`} לתשובה על הרכב הצוות.`
     : `מגבלות החוק נבדקו${by}: אין חריגה.`;
-  return [status, legalUnchecked(l)].filter(Boolean).join(' ');
+  return status;
 }
 
 /** ימים עם חריגה ממגבלות החוק, לסימון השורות שלהם בטבלאות. */

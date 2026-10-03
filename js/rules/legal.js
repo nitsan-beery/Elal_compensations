@@ -1,9 +1,10 @@
 // מגבלות החוק: זמן טיסה, FDP ומנוחה (OMA חלק A, פרק 7.2; `legal_limits` ב-rules.json).
 //
 // כשיש רומה הבדיקה לפי הביצוע, ובלעדיה לפי התכנון (בעל המוצר, 03/10/2026). חריגה מוצגת באדום.
-// בביצוע החוק מתיר הארכה בנסיבות לא צפויות (7.2.10), ואין לה סימון בקבצים: FDP עד
-// `execution_fdp_extension_hours` מעל המותר, וזמן טיסה ומצטבר ככל שנדרש לנחיתה. חריגה שהארכה
-// כזאת מסבירה היא `extensions` (בכתום); מנוחה, ימים פנויים, לילות רצופים וכוננות אינם מוארכים.
+// בביצוע החוק מתיר הארכת FDP בנסיבות לא צפויות (7.2.10), ואין לה סימון בקבצים: FDP עד
+// `execution_fdp_extension_hours` מעל המותר, כשזמן הטיסה ומספר הרגליים בתוך המותר, הוא
+// `extensions` (בכתום). כל חריגה אחרת – באדום. מגבלה שאין נתונים לבדוק אותה (חודש קודם שאינו
+// בהיסטוריה, FDP שנמשך לחודש הבא, שדה לא מוכר, כוננות בלי שעות) אינה מוזכרת (בעל המוצר, 03/10/2026).
 // אין כאן אף ערך: כולם מ-`legal_limits`.
 //
 // המודל: כל פעילות בתכנון – רגל, רגל DH, פעילות קרקע, כוננות קצרה או בשדה – היא תפקיד, עם התחלה
@@ -61,7 +62,7 @@ export function restDefinition(limits) {
  */
 export function checkLegalLimits(o) {
   const { limits, period, domicile } = o;
-  const result = { basis: o.exec ? 'exec' : 'plan', violations: [], extensions: [], unchecked: [], source: limits.source };
+  const result = { basis: o.exec ? 'exec' : 'plan', violations: [], extensions: [], source: limits.source };
   const crewIdOf = new Map(); // "date:flight" → מזהה שאלת הרכב הצוות של ה-FDP
   const monthStart = at(isoMonth(period), 0);
   const monthEnd = at(isoMonth(nextMonth(period)), 0);
@@ -70,8 +71,7 @@ export function checkLegalLimits(o) {
     return { result, crewIdOf };
   }
 
-  const unchecked = new Set();
-  const own = o.exec ? execDuties(o.exec, o, unchecked, plannedCodes(o.plan, o)) : planDuties(o.plan, o, unchecked);
+  const own = o.exec ? execDuties(o.exec, o, plannedCodes(o.plan, o)) : planDuties(o.plan, o);
   // החודשים הקודמים: לפי הרומה, כי המגבלות חלות על מה שבוצע בפועל; בלי רומה – לפי התכנון.
   // רק חודשים רצופים לאחור נחשבים כיסוי.
   let coverStart = monthStart;
@@ -79,7 +79,7 @@ export function checkLegalLimits(o) {
   let expect = prevMonth(period);
   for (const m of o.history ?? []) {
     if (m.period.year !== expect.year || m.period.month !== expect.month) break;
-    const items = m.exec ? execDuties(m.exec, o, null, plannedCodes(m.plan, o)) : m.plan ? planDuties(m.plan, o, null) : null;
+    const items = m.exec ? execDuties(m.exec, o, plannedCodes(m.plan, o)) : m.plan ? planDuties(m.plan, o) : null;
     if (!items) break;
     older.push(...items);
     coverStart = at(isoMonth(m.period), 0);
@@ -98,7 +98,7 @@ export function checkLegalLimits(o) {
   const chains = buildChains(items, H(limits.rest_hours));
   const inMonth = (t) => t >= monthStart && t < monthEnd;
   const flag = (date, message) => result.violations.push({ date, message });
-  // בביצוע: חריגה שהארכה מותרת יכולה להסביר (7.2.10).
+  // בביצוע: FDP שהארכה מותרת יכולה להסביר (7.2.10).
   const extend = o.exec ? (date, message) => result.extensions.push({ date, message }) : flag;
 
   // ---- כל FDP: זמן טיסה, משך ה-FDP ומספר הרגליים, לפי הרכב הצוות ----
@@ -111,29 +111,15 @@ export function checkLegalLimits(o) {
     if (!inMonth(ch.fdpStart)) continue;
     checkFdp(ch, id, o, flag, extend);
   }
-  // ה-FDP הראשון התחיל בחודש הקודם, וה-FDP האחרון נמשך לחודש הבא: חלק מהם אינו בקבצים.
-  const firstFdp = chains.find((c) => c.flights.length && c.release > monthStart);
-  if (firstFdp && coverStart === monthStart && firstFdp.flights[0].org !== domicile && firstFdp.fdpStart < monthStart + 1440) {
-    unchecked.add(`ה-FDP של ${ddmm(firstFdp.flights[0].date)} ${firstFdp.flights[0].flight} התחיל בחודש הקודם, שאינו בהיסטוריה`);
-  }
-  const lastFdp = [...chains].reverse().find((c) => c.flights.length);
-  if (lastFdp && lastFdp.flights.at(-1).dst !== domicile && lastFdp.end > monthEnd - 1440) {
-    unchecked.add(`ה-FDP של ${ddmm(lastFdp.flights.at(-1).date)} ${lastFdp.flights.at(-1).flight} נמשך לחודש הבא`);
-  }
-
-  // מגבלה שהחלון שלה מתחיל לפני החודש, ובלי החודשים האלה בהיסטוריה אין חריגה: שורה אחת לכולן.
-  const needsHistory = [];
   checkReserve(chains, limits, inMonth, flag);
   checkDeadheadRest(chains, o, inMonth, flag);
-  checkFreeTime(chains, limits, inMonth, coverStart, needsHistory, flag);
+  checkFreeTime(chains, limits, inMonth, coverStart, flag);
   checkLongTripRest(chains, o, inMonth, flag);
   checkConsecutiveNights(chains, limits, inMonth, flag);
-  checkCumulative(chains, items, limits, inMonth, coverStart, needsHistory, extend);
-  if (needsHistory.length) unchecked.add(`${needsHistory.join(', ')}: תלוי בחודשים קודמים שאינם בהיסטוריה`);
+  checkCumulative(chains, items, limits, inMonth, flag);
 
   result.violations.sort((a, b) => a.date.localeCompare(b.date));
   result.extensions.sort((a, b) => a.date.localeCompare(b.date));
-  result.unchecked = [...unchecked];
   return { result, crewIdOf };
 }
 
@@ -151,19 +137,15 @@ function plannedCodes(plan, o) {
 }
 
 /** תפקידים מקובץ תכנון: רגליים, ופעילויות עם שעות. קוד פעילות בלי שעות מקבל את שעות ברירת המחדל. */
-function planDuties(plan, o, unchecked) {
+function planDuties(plan, o) {
   const { limits, domicile, offsetAt, classify } = o;
   const out = [];
-  const note = (s) => unchecked?.add(s);
   for (const day of Object.values(plan.days).sort((a, b) => a.date.localeCompare(b.date))) {
     for (const leg of day.legs) {
-      if (!leg.dep || !leg.arr) { note(`${ddmm(day.date)} ${leg.flight}: חסרות שעות בתכנון`); continue; }
+      if (!leg.dep || !leg.arr) continue;
       const offDep = leg.dep.foreign ? offsetAt(leg.org, day.date) : 0;
       const offArr = leg.arr.foreign ? offsetAt(leg.dst, day.date) : 0;
-      if (offDep == null || offArr == null) {
-        note(`${ddmm(day.date)} ${leg.flight}: ${offDep == null ? leg.org : leg.dst} אינו בטבלת אזורי הזמן`);
-        continue;
-      }
+      if (offDep == null || offArr == null) continue;
       // הרגל רשומה ביום ההמראה בשעון הבסיס, ולכן ההמרה נשארת באותו יום.
       const depBase = mod(leg.dep.min - offDep, 1440);
       const std = at(day.date, depBase);
@@ -177,13 +159,11 @@ function planDuties(plan, o, unchecked) {
       if (t?.dep && t?.arr) {
         const station = t.org ?? domicile;
         const off = (x) => (x.foreign ? offsetAt(station, day.date) : 0);
-        if (off(t.dep) == null || off(t.arr) == null) { note(`${ddmm(day.date)} ${code}: ${station} אינו בטבלת אזורי הזמן`); continue; }
+        if (off(t.dep) == null || off(t.arr) == null) continue;
         const s = mod(t.dep.min - off(t.dep), 1440);
         const start = at(day.date, s);
         out.push({ kind: kind ?? 'ground', date: day.date, code, station, start, end: start + mod(t.arr.min - off(t.arr) - s, 1440) });
-      } else if (kind) {
-        note(`${ddmm(day.date)} ${code}: אין שעות לכוננות בתכנון`);
-      } else if (classify.isActivity(code)) {
+      } else if (!kind && classify.isActivity(code)) {
         out.push(defaultGround(day.date, code, limits, domicile));
       }
     }
@@ -196,10 +176,9 @@ function planDuties(plan, o, unchecked) {
  * רשומה ביום ההמראה בשעון הבסיס. לפעילות קרקע ולכוננות אין שעות ברומה: הן מהתכנון (`planned`),
  * כשאותו קוד מתוכנן באותו יום; בלעדיו – פעילות קרקע בשעות ברירת המחדל, וכוננות אינה נבדקת ואינה מוזכרת.
  */
-function execDuties(exec, o, unchecked = null, planned = null) {
+function execDuties(exec, o, planned = null) {
   const { limits, domicile, offsetAt, classify } = o;
   const out = [];
-  const note = (s) => unchecked?.add(s);
   const days = Object.values(exec.days).sort((a, b) => a.date.localeCompare(b.date));
   for (const day of days) {
     const legs = [];
@@ -209,7 +188,7 @@ function execDuties(exec, o, unchecked = null, planned = null) {
       const dur = actual ? leg.actDur : leg.skdDur;
       if (sched == null || dur == null || !leg.org) continue;
       const off = offsetAt(leg.org, day.date);
-      if (off == null) { note(`${ddmm(day.date)} ${leg.flight ?? leg.type}: ${leg.org} אינו בטבלת אזורי הזמן`); continue; }
+      if (off == null) continue;
       // ה-STD בשעון הבסיס נופל ביום הרשום; ההמראה בפועל היא הקרובה אליו (עיכוב אל מעבר לחצות).
       const skd = at(day.date, mod(sched - off, 1440));
       const std = skd + (actual ? mod(leg.atd - sched + 720, 1440) - 720 : 0);
@@ -415,10 +394,10 @@ function checkFdp(ch, id, o, flag, extend) {
     if (seg > l.seg) parts.push([`${seg} רגליים`, `${l.seg} רגליים`]);
     return `${parts.map((p) => p[0]).join(' ו-')}, והמקסימום בצוות ${CREW[crew].label} ${parts.map((p) => p[1]).join(' ו-')}`;
   };
-  // בביצוע (7.2.10): הארכה מסבירה FDP עד `execution_fdp_extension_hours` מעל המותר וכל זמן טיסה,
-  // אבל לא מנוחה קצרה ולא רגליים מעבר למותר. 0 – עומד, 1 – הארכה, 2 – חריגה.
+  // בביצוע (7.2.10): FDP עד `execution_fdp_extension_hours` מעל המותר, כשזמן הטיסה ומספר הרגליים
+  // בתוך המותר ואין מנוחה קצרה, הוא הארכה (בעל המוצר, 03/10/2026). 0 – עומד, 1 – הארכה, 2 – חריגה.
   const ext = H(limits.execution_fdp_extension_hours ?? 0);
-  const grade = (l) => (fits(l) ? 0 : o.exec && l && !why && seg <= l.seg && fdp <= l.fdp + ext ? 1 : 2);
+  const grade = (l) => (fits(l) ? 0 : o.exec && l && !why && ft <= l.ft && seg <= l.seg && fdp <= l.fdp + ext ? 1 : 2);
   const date = ch.flights[0].date;
   const report = (l, crew, tail = '') => {
     const g = grade(l);
@@ -487,7 +466,7 @@ function checkDeadheadRest(chains, o, inMonth, flag) {
 }
 
 /** 30 שעות רצופות פנויות ב-168 השעות שלפני כל FDP או כוננות (7.2.7). */
-function checkFreeTime(chains, limits, inMonth, coverStart, needsHistory, flag) {
+function checkFreeTime(chains, limits, inMonth, coverStart, flag) {
   const need = H(limits.free_time.hours);
   const window = H(limits.free_time.window_hours);
   chains.forEach((ch, i) => {
@@ -496,12 +475,8 @@ function checkFreeTime(chains, limits, inMonth, coverStart, needsHistory, flag) 
     const from = ch.start - window;
     let best = overlap(coverStart, chains[0].start, from, ch.start);
     for (let j = 0; j < i; j++) best = Math.max(best, overlap(chains[j].end, chains[j + 1].start, from, ch.start));
-    if (best >= need) return;
-    if (from < coverStart) {
-      const name = `${limits.free_time.hours} ש' פנויות ב-${limits.free_time.window_hours} ש'`;
-      if (!needsHistory.includes(name)) needsHistory.push(name);
-      return;
-    }
+    // חלון שמתחיל לפני החודשים שבידינו: אין נתונים, ואין חריגה.
+    if (best >= need || from < coverStart) return;
     const what = ch.flights.length ? describeChain(ch) : describeItem(ch.items[0]);
     flag(dateOf(ch.start), `${what}: ב-${limits.free_time.window_hours} השעות שלפני התפקיד המנוחה הרצופה הארוכה ביותר היא ${hm(best)}, פחות מ-${hm(need)}.`);
   });
@@ -592,13 +567,11 @@ function hasSleep(ch, c) {
 }
 
 /** מגבלות מצטברות (7.2.6): זמן טיסה ו-FDP בחלון שמסתיים בסוף כל FDP. */
-function checkCumulative(chains, items, limits, inMonth, coverStart, needsHistory, flag) {
+function checkCumulative(chains, items, limits, inMonth, flag) {
   const flights = items.filter((it) => it.kind === 'flight');
   const fdps = chains.filter((ch) => ch.fdpEnd != null);
   for (const c of limits.cumulative) {
     const list = c.what === 'flight' ? flights.map((f) => [f.std, f.sta]) : fdps.map((ch) => [ch.fdpStart, ch.fdpEnd]);
-    const name = `${c.what === 'flight' ? 'זמן טיסה' : 'FDP'} ${c.hours.toLocaleString('en-US')} ש' ב-${c.window_days ? `${c.window_days} ימים` : `${c.window_hours} ש'`}`;
-    let missing = false;
     for (const ch of fdps) {
       if (!inMonth(ch.fdpEnd)) continue;
       const end = ch.fdpEnd;
@@ -606,14 +579,9 @@ function checkCumulative(chains, items, limits, inMonth, coverStart, needsHistor
       const sum = list.reduce((s, [a, b]) => s + overlap(a, b, from, end), 0);
       if (sum > H(c.hours)) {
         flag(dateOf(end), `${describeChain(ch)}: ${c.what === 'flight' ? 'זמן הטיסה' : 'סך ה-FDP'} ב-${c.window_days ? `${c.window_days} הימים` : `${c.window_hours} השעות`} שמסתיימים בנחיתה הוא ${hm(sum)}, מעל ${hm(H(c.hours))}.`);
-        missing = false;
         break;
       }
-      if (from < coverStart) missing = true;
     }
-    // בלי החודשים הקודמים אין חריגה במה שידוע. מגבלה שמסומנת `silent_without_history` אינה
-    // מוזכרת אז ב"לא נבדק" (1,000 שעות ב-365 ימים; בעל המוצר, 03/10/2026).
-    if (missing && !c.silent_without_history) needsHistory.push(name);
   }
 }
 
