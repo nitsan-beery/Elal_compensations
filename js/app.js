@@ -297,15 +297,20 @@ function renderCalendarBar() {
     const n = state.result?.calendarCrew ?? 0;
     const when = state.calBusy ? 'מעדכן…' : c.synced ? `מעודכן ל-${stamp(c.synced)}` : 'עוד לא עודכן';
     const noData = c.synced && !c.facts?.flights?.length;
-    // היומן המחובר וכמה טיסות קיבלו ממנו את הרכב הצוות: בלחיצה על "יומן מעודכן ל…" (באייפד אין חלון צף; בעל המוצר, 03/10/2026).
+    // היומן המחובר וכמה טיסות קיבלו ממנו את הרכב הצוות: בחלון צף במעבר עם העכבר, ובמכשיר בלי עכבר (אייפד)
+    // בלחיצה על "יומן מעודכן ל…" (בעל המוצר, 03/10/2026).
     const info = [`${c.calendars.length === 1 ? 'יומן מחובר' : 'יומנים מחוברים'}: ${c.calendars.map((x) => x.name).join(', ')}`,
       n ? `הרכב הצוות של ${n} ${n === 1 ? 'טיסה' : 'טיסות'} בחודש הזה מהיומן` : ''].filter(Boolean);
-    bar.innerHTML = `<div class="row"><button type="button" class="cal-toggle" data-cal="info" aria-expanded="${state.calInfo}">יומן ${when}</button>
+    const hover = matchMedia('(hover: hover)').matches;
+    const label = hover
+      ? `<span title="${esc(info.join('\n'))}">יומן ${when}</span>`
+      : `<button type="button" class="cal-toggle" data-cal="info" aria-expanded="${state.calInfo}">יומן ${when}</button>`;
+    bar.innerHTML = `<div class="row">${label}
       <span class="spacer"></span>
       ${noData ? '<button type="button" class="btn" data-cal="connect">יומן אחר</button>' : ''}
       <button type="button" class="btn" data-cal="sync" ${state.calBusy ? 'disabled' : ''}>עדכון מהיומן</button>
       <button type="button" class="btn danger" data-cal="disconnect">ניתוק יומן</button></div>
-      ${state.calInfo ? `<div class="small muted cal-info">${info.map(esc).join('<br>')}</div>` : ''}${notices.join('')}`;
+      ${!hover && state.calInfo ? `<div class="small muted cal-info">${info.map(esc).join('<br>')}</div>` : ''}${notices.join('')}`;
   }
   $('[data-cal="connect"]', bar)?.addEventListener('click', openCalendarDialog);
   $('[data-cal="info"]', bar)?.addEventListener('click', () => { state.calInfo = !state.calInfo; renderCalendarBar(); });
