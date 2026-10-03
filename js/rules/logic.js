@@ -480,6 +480,10 @@ function unexplained_report_amount(ctx, params, rule) {
  * כל איחור מ-`note_from_minutes` ומעלה נרשם כהערה, גם כשמגיע עליו פיצוי: ההערה מפרטת
  * את משך האיחור, כמה מדרגות הן וכמה פיצוי יוצא מהן. משך האיחור בדקות עד שעה, ובשעות
  * (H:MM) מעבר לשעה (בעל המוצר, 24/09/2026).
+ *
+ * סטיה לשדה משנה (בעל המוצר, 03/10/2026): האיחור נמדד מול הנחיתה המקורית בבסיס, ולא מול
+ * ה-STA של הרגל האחרונה, שנקבעה אחרי הסטיה (`diversionOf`). אם הרומה כבר זיכתה לפיו –
+ * סטיה; אחרת שואלים (`diversion:`).
  */
 
 /** משך איחור בהערה: בדקות עד שעה, אחרת H:MM בלי "שעות" (בעל המוצר, 24/09/2026 ו-29/09/2026). */
@@ -494,26 +498,74 @@ function late_landing_home(ctx, params, rule) {
   const perStep = H(params.hours_per_step);
   // איחור קטן מזה אינו מעניין (בעל המוצר, 24/09/2026).
   const noteFrom = params.note_from_minutes ?? 0;
+  const stepsOf = (delay) => (delay > grace ? Math.ceil((delay - grace) / step) : 0);
+  const flat = ctx.timeline.flatMap((d) => (d.exec?.legs ?? []).map((leg) => ({ leg, date: d.date })));
 
-  for (const day of ctx.timeline) {
-    for (const leg of day.exec?.legs ?? []) {
-      if (leg.dst !== ctx.domicile || leg.sta == null || leg.ata == null) continue;
-      const delay = wrapDelta(leg.ata - leg.sta);
-      if (delay <= grace) {
-        if (delay >= noteFrom) ctx.note(day.date, `${leg.flight} נחתה באיחור של ${delayText(delay)}, לא מעבר לסף של ${grace} דק'. אין פיצוי.`, rule);
-        continue;
+  for (const [i, { leg, date }] of flat.entries()) {
+    if (leg.dst !== ctx.domicile || leg.sta == null || leg.ata == null) continue;
+    let delay = wrapDelta(leg.ata - leg.sta);
+    let diverted = '';
+    const div = diversionOf(flat, i, ctx.domicile);
+    if (div) {
+      const divDelay = wrapDelta(leg.ata - div.sta);
+      const divMin = stepsOf(divDelay) * perStep;
+      if (divMin > stepsOf(delay) * perStep) {
+        const id = `diversion:${date}:${leg.flight}`;
+        const via = div.via.join(' ו-');
+        const answer = ctx.answer(id)?.value;
+        if (answer === 'yes' || (!answer && ctx.paidOnDate(date, 'COM', 'com', divMin))) {
+          delay = divDelay;
+          diverted = `, מול הנחיתה המתוכננת לפני הסטיה ל-${via} (${minToHhmm(div.sta)})`;
+        } else if (!answer) {
+          ctx.ask({
+            id,
+            date,
+            title: `האם ${leg.flight} ב-${dayOf(date)} סטתה ל-${via} בדרך ל-${ctx.domicile}?`,
+            body: `אם כן, הנחיתה המתוכננת ב-${ctx.domicile} הייתה ${minToHhmm(div.sta)}, והאיחור ${delayText(divDelay)}.`,
+            options: [
+              { value: 'yes', label: `כן, סטתה ל-${via}` },
+              { value: 'no', label: `לא, הנחיתה ב-${via} תוכננה` },
+            ],
+            ruleId: rule.id,
+          });
+        }
       }
-      const steps = Math.ceil((delay - grace) / step);
-      const stepsWord = steps === 1 ? 'מדרגה אחת' : `${steps} מדרגות`;
-      // ההסבר מוצג מתחת לטיסה בטבלת הפירוט, ולא בהערות (בעל המוצר, 01/10/2026). מספר הטיסה
-      // נכתב רק כשהיא אינה לבדה בשורה: הפיצוי נרשם לכל FDP, ושורה של רגל אחת כבר נושאת אותו.
-      const part = ctx.execPairings.flatMap((p) => fdpParts(p, ctx.fdp)).find((x) => x.legs.some((l) => l.flight === leg.flight && l.date === day.date));
-      const who = part?.legs.length === 1 ? '' : `${leg.flight} `;
-      // `flight`: לאיזה סבב שייך הפיצוי, כשהיום משותף לשני סבבים (טבלת הפירוט).
-      ctx.expect(day.date, 'com', steps * perStep, rule, `${leg.flight}: איחור ${delay} דק' → ${steps} מדרגות`, { flight: leg.flight,
-        explain: `${who}נחתה באיחור של ${delayText(delay)}. ${stepsWord} (כל ${step} דק' או חלק מהן).` });
     }
+    if (delay <= grace) {
+      if (delay >= noteFrom) ctx.note(date, `${leg.flight} נחתה באיחור של ${delayText(delay)}, לא מעבר לסף של ${grace} דק'. אין פיצוי.`, rule);
+      continue;
+    }
+    const steps = Math.ceil((delay - grace) / step);
+    const stepsWord = steps === 1 ? 'מדרגה אחת' : `${steps} מדרגות`;
+    // ההסבר מוצג מתחת לטיסה בטבלת הפירוט, ולא בהערות (בעל המוצר, 01/10/2026). מספר הטיסה
+    // נכתב רק כשהיא אינה לבדה בשורה: הפיצוי נרשם לכל FDP, ושורה של רגל אחת כבר נושאת אותו.
+    const part = ctx.execPairings.flatMap((p) => fdpParts(p, ctx.fdp)).find((x) => x.legs.some((l) => l.flight === leg.flight && l.date === date));
+    const who = part?.legs.length === 1 ? '' : `${leg.flight} `;
+    // `flight`: לאיזה סבב שייך הפיצוי, כשהיום משותף לשני סבבים (טבלת הפירוט).
+    ctx.expect(date, 'com', steps * perStep, rule, `${leg.flight}: איחור ${delay} דק' → ${steps} מדרגות`, { flight: leg.flight,
+      explain: `${who}נחתה באיחור של ${delayText(delay)}${diverted}. ${stepsWord} (כל ${step} דק' או חלק מהן).` });
   }
+}
+
+/**
+ * סטיה לשדה משנה בדרך לבסיס: אותו מספר טיסה ממשיך משדה בחו"ל דרך שדה אחד או יותר
+ * לבסיס, והרגל שאחרי הנחיתה הראשונה נקבעה רק אחריה (ה-STD שלה אחרי ה-ATA). ברגל
+ * הראשונה נשארים ה-STD וזמן הטיסה המתוכנן המקוריים, ומהם הנחיתה המקורית בבסיס, בשעון
+ * הבסיס (30/06/2024: LY5102 WAW‑AYT‑RHO‑TLV, ‏09:50 + 3:40 = 14:30, ‏ATA 21:14 → COM 03:00).
+ * כשהרגל לבסיס נקבעה מראש זו אינה סטיה (20/06/2025: LY5420 PFO‑LCA‑TLV).
+ */
+function diversionOf(flat, i, domicile) {
+  const leg = flat[i].leg;
+  if (!leg.flight) return null;
+  let j = i;
+  while (j > 0 && flat[j - 1].leg.flight === leg.flight && flat[j - 1].leg.dst === flat[j].leg.org) j--;
+  if (j === i) return null;
+  const first = flat[j].leg, next = flat[j + 1].leg;
+  if (first.org === domicile || first.std == null || first.skdDur == null || first.ata == null || next.std == null) return null;
+  if (wrapDelta(next.std - first.ata) <= 0) return null;
+  const off = stationOffset(first.org, flat[j].date, domicile);
+  if (off == null) return null;
+  return { sta: mod(first.std - off + first.skdDur, 1440), via: flat.slice(j, i).map((x) => x.leg.dst) };
 }
 
 /**
