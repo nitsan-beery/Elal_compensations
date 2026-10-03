@@ -377,25 +377,31 @@ function renderHead(res) {
   </div>`;
 }
 
+const legalUnchecked = (l) => (l.unchecked.length ? `לא נבדק: ${l.unchecked.join('; ')}.` : '');
+
 /**
- * מגבלות החוק על התכנון (OMA 7.2): חריגה באדום בראש הדף, ובטבלה היום שלה מסומן (בעל המוצר,
- * 03/10/2026). בלי חריגה – שורה אחת. מה שלא נבדק כתוב בקצרה, כדי שלא ייראה שהכול נבדק.
+ * מגבלות החוק על התכנון (OMA 7.2): רק חריגה מוצגת בראש הדף, באדום, ובטבלה היום שלה מסומן. בלי
+ * חריגה – ההערה האחרונה בהערות (`legalNote`; בעל המוצר, 03/10/2026).
  */
 function renderLegal(res) {
   const l = res.legal;
-  if (!l) return '';
-  if (l.skipped) return `<div class="card"><p class="small muted">${esc(l.skipped)}</p></div>`;
-  const unchecked = l.unchecked.length ? `<p class="small">לא נבדק: ${l.unchecked.map(esc).join('; ')}.</p>` : '';
-  if (l.violations.length) {
-    return `<div class="card"><div class="notice bad"><strong>חריגה ממגבלות החוק בתכנון</strong>
-      <ul>${l.violations.map((v) => `<li>${esc(v.message)}</li>`).join('')}</ul>
-      ${unchecked}<p class="small">${esc(l.source)}</p></div></div>`;
-  }
+  if (!l?.violations?.length) return '';
+  const unchecked = legalUnchecked(l);
+  return `<div class="card"><div class="notice bad"><strong>חריגה ממגבלות החוק בתכנון</strong>
+    <ul>${l.violations.map((v) => `<li>${esc(v.message)}</li>`).join('')}</ul>
+    ${unchecked ? `<p class="small">${esc(unchecked)}</p>` : ''}<p class="small">${esc(l.source)}</p></div></div>`;
+}
+
+/** ההערה על מגבלות החוק כשאין חריגה: אחרונה בהערות. מה שלא נבדק כתוב בקצרה, כדי שלא ייראה שהכול נבדק. */
+function legalNote(res) {
+  const l = res.legal;
+  if (!l || l.violations?.length) return null;
+  if (l.skipped) return l.skipped;
   const pending = res.questions.filter((q) => q.id.startsWith('crew:')).length;
   const status = pending
     ? `מגבלות החוק נבדקו: אין חריגה, חוץ מ${pending === 1 ? '-FDP אחד שממתין' : `-${pending} FDP שממתינים`} לתשובה על הרכב הצוות.`
     : 'מגבלות החוק נבדקו: אין חריגה.';
-  return `<div class="card"><div class="notice ${pending ? 'info' : 'ok'}">${status}</div>${unchecked.replace('class="small"', 'class="small muted"')}</div>`;
+  return [status, legalUnchecked(l)].filter(Boolean).join(' ');
 }
 
 /** ימים עם חריגה ממגבלות החוק, לסימון השורות שלהם בטבלאות. */
@@ -648,10 +654,12 @@ function renderAnswered() {
 }
 
 function renderNotes(res) {
-  if (!res.notes.length) return '';
+  const legal = legalNote(res);
+  const count = res.notes.length + (legal ? 1 : 0);
+  if (!count) return '';
   return `<details class="card" data-section="notes">
-    <summary><h2 style="display:inline">הערות <span class="count">${res.notes.length}</span></h2></summary>
-    <ul class="list">${res.notes.map((n) => `<li>${n.date ? `<strong class="num">${ddmm(n.date)}</strong> ` : ''}${esc(n.message)}${n.byUser ? ' <span class="small muted">לפי תשובת המשתמש</span>' : ''}${n.ruleTitle ? ` <span class="tag">${esc(n.ruleTitle)}</span>` : ''}</li>`).join('')}</ul>
+    <summary><h2 style="display:inline">הערות <span class="count">${count}</span></h2></summary>
+    <ul class="list">${res.notes.map((n) => `<li>${n.date ? `<strong class="num">${ddmm(n.date)}</strong> ` : ''}${esc(n.message)}${n.byUser ? ' <span class="small muted">לפי תשובת המשתמש</span>' : ''}${n.ruleTitle ? ` <span class="tag">${esc(n.ruleTitle)}</span>` : ''}</li>`).join('')}${legal ? `<li>${esc(legal)}</li>` : ''}</ul>
   </details>`;
 }
 
