@@ -1014,7 +1014,7 @@ async function renderHistory() {
         ].join(' ');
         return `<li class="month-item">
           <span class="name">${esc(monthName(m.period))}</span> ${tags}
-          <span class="small muted">חוקים ${esc(m.rulesVersion ?? '?')} · עודכן ${esc(m.updated ? new Date(m.updated).toLocaleDateString('he-IL') : '')}</span>
+          <span class="small muted">עודכן ${esc(m.updated ? new Date(m.updated).toLocaleDateString('he-IL') : '')}</span>
           <span class="spacer"></span>
           <button class="btn" data-open="${esc(m.key)}">פתח</button>
           <button class="btn danger" data-delete="${esc(m.key)}">מחק</button>
