@@ -61,7 +61,6 @@ const state = {
   files: {}, // kind → {id: "2026-07:plan", url} של קובץ ה-PDF השמור, ללחיצה על הקובץ באזור ההעלאה
   sections: { key: null, open: new Map() }, // אילו חלקים בתוצאות של החודש הפתוח פתוחים ואילו מכווצים
   calendar: null, // חיבור היומן: {clientId, calendars: [{id, name}], manual, hint, facts, synced}, או null
-  calPending: false, // עדכון מהיומן שממתין ללחיצה, כי ההרשאה מגוגל פגה (`autoSyncCalendar`)
   calBusy: false,
   calError: null,
 };
@@ -90,12 +89,9 @@ async function init() {
   const months = await safe(() => store.listMonths(), []);
   if (months.length) await openMonth(months[0].key, { quiet: true });
   else renderResults();
-  // יומן מחובר: עדכון בפתיחה, כשההרשאה מהפעם הקודמת עוד בתוקף. בלעדיה גוגל צריך חלון, שנפתח
-  // רק בלחיצה על "עדכון מהיומן".
-  if (state.calendar) {
-    calendar.preload();
-    autoSyncCalendar();
-  }
+  // יומן מחובר: ספריית ההתחברות נטענת מראש, כדי שהחלון של גוגל ייפתח מיד בלחיצה. העדכון עצמו רק
+  // בפעולה של המשתמש (`calendarToken`).
+  if (state.calendar) calendar.preload();
 }
 
 function registerServiceWorker() {
@@ -146,7 +142,7 @@ function setupUploads() {
     });
     $('.drop-pick', zone).addEventListener('click', () => input.click());
     input.addEventListener('change', () => {
-      if (input.files[0]) handleFile(input.files[0], zone.dataset.kind);
+      if (input.files[0]) handleFile(input.files[0], zone.dataset.kind, calendarToken());
       input.value = '';
     });
     zone.addEventListener('dragover', (e) => { e.preventDefault(); zone.classList.add('over'); });
@@ -155,7 +151,7 @@ function setupUploads() {
       e.preventDefault();
       zone.classList.remove('over');
       const file = e.dataTransfer.files[0];
-      if (file) handleFile(file, zone.dataset.kind);
+      if (file) handleFile(file, zone.dataset.kind, calendarToken());
     });
   }
 }
@@ -165,7 +161,8 @@ const PARSERS = { plan: parsePlan, exec: parseExec };
 /**
  * קריאת קובץ. אם הקובץ הועלה לאזור הלא נכון, מזהים אותו לפי התוכן ומעבירים.
  */
-async function handleFile(file, expected) {
+/** `calToken`: ההרשאה ליומן שהתבקשה בבחירת הקובץ (`calendarToken`); היומן מתעדכן אחרי הקריאה. */
+async function handleFile(file, expected, calToken = null) {
   if (!state.rulesData) return;
   const zone = $(`.drop[data-kind="${expected}"]`);
   zone.classList.add('busy');
@@ -201,7 +198,6 @@ async function handleFile(file, expected) {
     dropFileLink(kind);
     state.record = record;
     await runAndSave();
-    autoSyncCalendar();
   } catch (err) {
     console.error(err);
     if (err.exact) state.result = null;
@@ -211,6 +207,7 @@ async function handleFile(file, expected) {
     zone.classList.remove('busy');
     renderUploadState();
   }
+  if (calToken) syncCalendar(calToken);
 }
 
 function renderUploadState() {
@@ -309,7 +306,7 @@ function renderCalendarBar() {
       <button type="button" class="btn danger" data-cal="disconnect">ניתוק יומן</button></div>${notices.join('')}`;
   }
   $('[data-cal="connect"]', bar)?.addEventListener('click', openCalendarDialog);
-  $('[data-cal="sync"]', bar)?.addEventListener('click', () => syncCalendar({ interactive: true }));
+  $('[data-cal="sync"]', bar)?.addEventListener('click', () => syncCalendar());
   $('[data-cal="disconnect"]', bar)?.addEventListener('click', disconnectCalendar);
 }
 
@@ -388,22 +385,17 @@ async function connectCalendar(clientId, cals, { manual = false } = {}) {
 }
 
 /**
- * ההשלמות מהיומן לכל החודשים השמורים, ועד חודשיים קדימה. בלי הרשאה בתוקף: רק בלחיצה
- * (`interactive`), כי ההתחברות פותחת חלון של גוגל. היומנים עם אירועי האורגנייזר נמצאים מחדש בכל
+ * ההשלמות מהיומן לכל החודשים השמורים, ועד חודשיים קדימה. `pending`: ההרשאה (`calendarToken`). היומנים עם אירועי האורגנייזר נמצאים מחדש בכל
  * עדכון, כי האורגנייזר יכול לפתוח יומן חדש (03/10/2026); בלי ממצא – היומנים שכבר מחוברים.
  */
-async function syncCalendar({ interactive = false } = {}) {
+async function syncCalendar(pending = calendarToken()) {
   const c = state.calendar;
-  if (!c || state.calBusy) return;
-  let token = calendar.cachedToken();
-  const pending = token ? null : interactive ? calendar.requestToken(c.clientId, { hint: c.hint }) : null;
-  if (!token && !pending) return;
-  state.calPending = false;
+  if (!c || state.calBusy || !pending) return;
   state.calBusy = true;
   state.calError = null;
   renderCalendarBar();
   try {
-    token ??= await pending;
+    const token = await pending;
     const { timeMin, timeMax } = await calendarRange();
     let cals = c.calendars;
     const all = await calendar.listCalendars(token);
@@ -416,9 +408,7 @@ async function syncCalendar({ interactive = false } = {}) {
     state.calendar = { ...c, calendars: cals, hint, facts, synced: new Date().toISOString() };
     await safe(() => store.putSetting(CAL_SETTING, state.calendar));
   } catch (err) {
-    // הרשאה שפגה בעדכון האוטומטי: ממתינים ללחיצה הבאה, כמו בלי הרשאה.
-    if (err.expired && !interactive) state.calPending = true;
-    else state.calError = err.message;
+    state.calError = err.message;
   }
   state.calBusy = false;
   if (state.record) await runAndSave();
@@ -426,24 +416,19 @@ async function syncCalendar({ interactive = false } = {}) {
 }
 
 /**
- * עדכון אוטומטי מהיומן: בפתיחת האפליקציה ובבחירת קובץ, ולא יותר (בעל המוצר, 03/10/2026); אחרי שינוי
- * ביומן כשהאפליקציה פתוחה – "עדכון מהיומן". בלי הרשאה בתוקף גוגל צריך חלון, שנפתח רק בלחיצה, ולכן
- * העדכון ממתין ללחיצה הבאה באפליקציה. לא על אזור ההעלאה ולא בחלון: שם הלחיצה פותחת חלון משלה.
+ * היומן מתעדכן רק בפעולה של המשתמש: "עדכון מהיומן", בחירת קובץ ופתיחת חודש שמור (בעל המוצר,
+ * 03/10/2026). ההרשאה מתבקשת מיד, בתוך הפעולה: כשהקודמת פגה גוגל פותח חלון, ודפדפן חוסם חלון שלא
+ * נפתח בתגובה ישירה ללחיצה. null – אין יומן, או שאין הרשאה בתוקף והפעולה כבר אינה נחשבת לחיצה
+ * (גרירת קובץ, או בחירת קובץ אחרי שהלחיצה פגה).
  */
-function autoSyncCalendar() {
-  if (!state.calendar) return;
-  if (calendar.cachedToken()) {
-    syncCalendar();
-    return;
-  }
-  state.calPending = true;
+function calendarToken() {
+  const c = state.calendar;
+  if (!c || state.calBusy) return null;
+  const token = calendar.cachedToken();
+  if (token) return Promise.resolve(token);
+  if (navigator.userActivation && !navigator.userActivation.isActive) return null;
+  return calendar.requestToken(c.clientId, { hint: c.hint });
 }
-
-document.addEventListener('click', (e) => {
-  if (!state.calPending || state.calBusy || !state.calendar) return;
-  if (e.target.closest('.drop, dialog, [data-cal], label')) return;
-  syncCalendar({ interactive: true });
-}, true);
 
 async function calendarRange() {
   const keys = (await safe(() => store.listMonths(), [])).map((m) => m.key).sort();
@@ -455,7 +440,6 @@ async function calendarRange() {
 }
 
 async function disconnectCalendar() {
-  state.calPending = false;
   await calendar.revoke();
   state.calendar = null;
   state.calError = null;
@@ -1033,7 +1017,13 @@ async function renderHistory() {
       </div>
     </div>`;
 
-  for (const b of root.querySelectorAll('[data-open]')) b.addEventListener('click', () => openMonth(b.dataset.open));
+  for (const b of root.querySelectorAll('[data-open]')) {
+    b.addEventListener('click', async () => {
+      const calToken = calendarToken();
+      await openMonth(b.dataset.open);
+      if (calToken) syncCalendar(calToken);
+    });
+  }
   for (const b of root.querySelectorAll('[data-delete]')) {
     b.addEventListener('click', async () => {
       if (!confirm('למחוק את החודש מהחודשים השמורים? התשובות שנתת עליו יימחקו.')) return;

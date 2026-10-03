@@ -108,7 +108,7 @@ async function api(token, path, params = {}) {
   const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
   if (res.status === 401) {
     forgetToken();
-    throw Object.assign(new Error('ההרשאה ליומן פגה. לחץ "עדכון מהיומן" כדי להתחבר שוב.'), { expired: true });
+    throw new Error('ההרשאה ליומן פגה. לחץ "עדכון מהיומן" כדי להתחבר שוב.');
   }
   if (!res.ok) throw new Error(`קריאת היומן נכשלה (${res.status}).`);
   return res.json();
