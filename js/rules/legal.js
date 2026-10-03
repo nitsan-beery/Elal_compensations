@@ -359,16 +359,17 @@ function limitsFor(crew, ch, limits) {
   return { ft: H(limits.flight_time_augmented[String(pilots)]), fdp: H(row[`class${cls}`][pilots - 3]) - red, seg: limits.augmented_max_segments ?? Infinity };
 }
 
+// קטעים לועזיים מבודדים (⁦…⁩), כמו `describePairing`, כדי שבמשפט עברי לא יתערבב סדרם עם מה שסביבם.
 function describeChain(ch) {
   const f = ch.flights;
   const days = f[0].date === f.at(-1).date ? ddmm(f[0].date) : `${ddmm(f[0].date)}–${ddmm(f.at(-1).date)}`;
-  if (f.length > 4) return `${days} ${f.length} רגליים (${f[0].flight} עד ${f.at(-1).flight})`;
+  if (f.length > 4) return `⁦${days}⁩ ${f.length} רגליים (⁦${f[0].flight}⁩ עד ⁦${f.at(-1).flight}⁩)`;
   const route = [f[0].org, ...f.map((l) => l.dst)].join('-');
-  return `${days} ${route} (${f.map((l) => l.flight).join('/')})`;
+  return `⁦${days}⁩ ⁦${route} (${f.map((l) => l.flight).join('/')})⁩`;
 }
 
 function describeItem(it) {
-  return it.kind === 'flight' || it.kind === 'dh' ? `${ddmm(it.date)} ${it.flight}` : `${ddmm(it.date)} ${it.code}`;
+  return it.kind === 'flight' || it.kind === 'dh' ? `${ddmm(it.date)} ⁦${it.flight}⁩` : `${ddmm(it.date)} ⁦${it.code}⁩`;
 }
 
 function checkFdp(ch, id, o, flag, extend) {

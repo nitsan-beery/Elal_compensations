@@ -630,7 +630,7 @@ function renderExpectations(res) {
  * תיאור סבב (`describePairing`) הוא קטע לועזי אחד מבודד. בתא עברי רוצים את התאריכים הכי ימניים
  * ומשמאלם את פרטי הטיסה, אז מפצלים כל תיאור כזה לשני קטעים מבודדים, לפי הסדר הזה.
  */
-const datesFirst = (text) => text.replace(/⁦(\S+) ([^⁩]*)⁩/g, '⁦$1⁩ ⁦$2⁩');
+const datesFirst = (text) => text.replace(/⁦(\d[^\s⁦⁩]*) ([^⁦⁩]*)⁩/g, '⁦$1⁩ ⁦$2⁩');
 
 function renderChanges(res) {
   const changes = res.changes.filter((c) => c.how !== 'exact' && c.how !== 'noplan');

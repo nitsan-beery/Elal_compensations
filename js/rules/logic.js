@@ -511,7 +511,8 @@ function late_landing_home(ctx, params, rule) {
       const divMin = stepsOf(divDelay) * perStep;
       if (divMin > stepsOf(delay) * perStep) {
         const id = `diversion:${date}:${leg.flight}`;
-        const via = div.via.join(' ו-');
+        // שמות השדות מבודדים: בלי זה "RHO (14:30). 6" מוצג כקטע לועזי אחד.
+        const via = div.via.map((s) => `⁦${s}⁩`).join(' ו-');
         const answer = ctx.answer(id)?.value;
         if (answer === 'yes' || (!answer && ctx.paidOnDate(date, 'COM', 'com', divMin))) {
           delay = divDelay;
