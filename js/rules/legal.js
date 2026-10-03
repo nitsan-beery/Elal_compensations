@@ -581,7 +581,9 @@ function checkCumulative(chains, items, limits, inMonth, coverStart, needsHistor
       }
       if (from < coverStart) missing = true;
     }
-    if (missing) needsHistory.push(name);
+    // בלי החודשים הקודמים אין חריגה במה שידוע. מגבלה שמסומנת `silent_without_history` אינה
+    // מוזכרת אז ב"לא נבדק" (1,000 שעות ב-365 ימים; בעל המוצר, 03/10/2026).
+    if (missing && !c.silent_without_history) needsHistory.push(name);
   }
 }
 
