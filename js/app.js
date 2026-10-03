@@ -319,15 +319,16 @@ async function openCalendarDialog() {
   calendar.preload();
   dlg.innerHTML = `<h2>חיבור יומן</h2>
     <p class="small muted">היומן נקרא מגוגל ישירות למכשיר הזה, בהרשאת קריאה בלבד. נשמרים רק מספר הטייסים בכל טיסה ופרטי טיסה שלא ניתן למצוא בקבצי התכנון והביצוע, בלי שמות וטלפונים.</p>
-    ${builtin ? '' : `<details ${saved ? '' : 'open'}><summary>הגדרה חד-פעמית: מזהה התחברות של גוגל (<bdi dir="ltr">Client ID</bdi>)</summary>
+    ${builtin ? '' : `<details dir="ltr" lang="en" ${saved ? '' : 'open'}><summary>One-time setup: Google Client ID</summary>
       <ol class="small">
-        <li>היכנס ל-<a href="https://console.cloud.google.com/" target="_blank" rel="noopener">Google Cloud Console</a> עם חשבון הגוגל של היומן, וצור פרויקט חדש.</li>
-        <li>ב-<bdi dir="ltr">APIs &amp; Services › Library</bdi> חפש <bdi dir="ltr">Google Calendar API</bdi> ולחץ <bdi dir="ltr">Enable</bdi>.</li>
-        <li>ב-<bdi dir="ltr">Google Auth Platform</bdi> לחץ <bdi dir="ltr">Get started</bdi>: שם כלשהו לאפליקציה, האימייל שלך, ו-<bdi dir="ltr">Audience: External</bdi>. אחר כך ב-<bdi dir="ltr">Audience › Test users</bdi> הוסף את כתובת הג׳ימייל שלך.</li>
-        <li>ב-<bdi dir="ltr">Clients › Create client</bdi> בחר <bdi dir="ltr">Web application</bdi>, וב-<bdi dir="ltr">Authorized JavaScript origins</bdi> הוסף <bdi dir="ltr">${esc(location.origin)}</bdi>. לחץ <bdi dir="ltr">Create</bdi>.</li>
-        <li>העתק את ה-<bdi dir="ltr">Client ID</bdi> (מסתיים ב-<bdi dir="ltr">.apps.googleusercontent.com</bdi>) והדבק כאן.</li>
+        <li>Open <a href="https://console.cloud.google.com/" target="_blank" rel="noopener">Google Cloud Console</a> and sign in with the Google account that holds your calendar. Click Select a project › New project, enter any name, and click Create. Make sure the new project is selected at the top of the page.</li>
+        <li>In the search bar, type Google Calendar API, open it, and click Enable.</li>
+        <li>Search for Google Auth Platform and click Get started. Enter any app name and your email, choose Audience: External, and click Create.</li>
+        <li>Go to Audience › Test users, click Add users, enter your Gmail address, and click Save.</li>
+        <li>Go to Clients › Create client and choose Web application. Under Authorized JavaScript origins, add ${esc(location.origin)}, then click Create.</li>
+        <li>Copy the Client ID (it ends with .apps.googleusercontent.com) and paste it below.</li>
       </ol>
-      <p class="small muted">בהתחברות גוגל יציג <bdi dir="ltr">Google hasn't verified this app</bdi>, כי את האפליקציה הגדרת לעצמך: לחץ <bdi dir="ltr">Continue</bdi>.</p></details>
+      <p class="small muted">When you sign in, Google will show "Google hasn't verified this app". Click Continue.</p></details>
     <label>Client ID <input name="clientId" dir="ltr" autocomplete="off" spellcheck="false" value="${esc(saved)}"></label>`}
     <div class="cal-step"></div>
     <div class="row"><button type="button" class="btn primary" data-cal="login">התחברות לגוגל</button>
