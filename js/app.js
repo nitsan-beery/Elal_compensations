@@ -299,8 +299,10 @@ function renderCalendarBar() {
     const n = state.result?.calendarCrew ?? 0;
     const when = state.calBusy ? 'מעדכן…' : `${c.synced ? `עודכן ${stamp(c.synced)}` : 'עוד לא עודכן'}${state.calPending ? ' · יתעדכן בלחיצה הבאה' : ''}`;
     const noData = c.synced && !c.facts?.flights?.length;
-    bar.innerHTML = `<div class="row"><span>יומן מחובר: <b>${esc(c.calendars.map((x) => x.name).join(', '))}</b>
-      <span class="small muted">· ${when}${n ? ` · הרכב הצוות של ${n} ${n === 1 ? 'טיסה' : 'טיסות'} בחודש הזה מהיומן` : ''}</span></span>
+    // כמה טיסות קיבלו מהיומן את הרכב הצוות – רק בחלון צף, במעבר עם העכבר (בעל המוצר, 03/10/2026).
+    const tip = n ? ` title="הרכב הצוות של ${n} ${n === 1 ? 'טיסה' : 'טיסות'} בחודש הזה מהיומן"` : '';
+    bar.innerHTML = `<div class="row"><span${tip}>יומן מחובר: <b>${esc(c.calendars.map((x) => x.name).join(', '))}</b>
+      <span class="small muted">· ${when}</span></span>
       <span class="spacer"></span>
       ${noData ? '<button type="button" class="btn" data-cal="connect">יומן אחר</button>' : ''}
       <button type="button" class="btn" data-cal="sync" ${state.calBusy ? 'disabled' : ''}>עדכון מהיומן</button>
