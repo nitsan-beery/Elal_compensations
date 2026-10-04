@@ -415,10 +415,10 @@ function night_landings(ctx, params, rule) {
   const nightWord = `טיסות לילה${crews ? ` בצוות ${crewNames}` : ''}`;
   const landing = `שנוחתות בין ${params.window_from} ל-${params.window_to}`;
   const names = (items) => items.map((n) => `${ddmm(n.leg.date)} ${n.leg.flight}`).join(', ');
-  // בכל מקרה אין פיצוי, בלי קשר להרכב הצוות (בעל המוצר, 04/10/2026).
+  // בכל מקרה אין פיצוי, בלי קשר להרכב הצוות (בעל המוצר, 04/10/2026). כשאין פיצוי ההערה בלי מספרי הטיסות.
   if (night.length < min) {
     if (night.length + unsure.length < min) {
-      ctx.note(null, `${rule.title}: לא תוכננו מעל ${min - 1} ${nightWord} ${landing}${night.length ? ` (${names(night)})` : ''}, ולכן אין פיצוי.`, rule);
+      ctx.note(null, `${rule.title}: לא תוכננו מעל ${min - 1} ${nightWord} ${landing}, ולכן אין פיצוי.`, rule);
     }
     return;
   }
@@ -461,8 +461,8 @@ function night_landings(ctx, params, rule) {
     const unknown = pool.filter((n) => crewOf(n) == null);
     const few = pool.length === 1 ? `תוכננה טיסת לילה אחת בצוות ${crewNames}` : pool.length ? `תוכננו ${pool.length} ${nightWord}` : `לא תוכננו ${nightWord}`;
     ctx.note(null, unknown.length
-      ? `${rule.title}: לא תוכננו מעל ${min - 1} ${nightWord} ${landing} (${listCrew(pool)}), ולכן אין פיצוי.`
-      : `${rule.title}: ${few} ${landing}${pool.length ? ` (${list(pool)})` : ''}. המינימום הוא ${min}, ולכן אין פיצוי.`, rule);
+      ? `${rule.title}: לא תוכננו מעל ${min - 1} ${nightWord} ${landing}, ולכן אין פיצוי.`
+      : `${rule.title}: ${few} ${landing}. המינימום הוא ${min}, ולכן אין פיצוי.`, rule);
     return;
   }
 
@@ -470,8 +470,8 @@ function night_landings(ctx, params, rule) {
   const unsettled = pool.filter((n) => n.status === 'unknown' || n.status === 'review');
   if (counted.length + unsettled.length < threshold) {
     const missed = pool.filter((n) => !counted.includes(n));
-    ctx.note(null, `${rule.title}: ${planned}, נספרות ${counted.length}:${counted.length ? ` (${list(counted)})` : ''}` +
-      `${missed.length ? `; לא בוצעו (בוטלו או הוחלפו שלא ביוזמת החברה): ${list(missed)}` : ''}. הפיצוי הוא מהטיסה ה-${threshold} שבוצעה, ולכן אין פיצוי.`, rule);
+    ctx.note(null, `${rule.title}: ${planned}, ונספרות רק ${counted.length}` +
+      `${missed.length ? `, כי ${missed.length === 1 ? 'אחת לא בוצעה (בוטלה או הוחלפה' : `${missed.length} לא בוצעו (בוטלו או הוחלפו`} שלא ביוזמת החברה)` : ''}. הפיצוי הוא מהטיסה ה-${threshold} שבוצעה, ולכן אין פיצוי.`, rule);
     return;
   }
   // הספירה אינה סגורה כל עוד לא ידוע למה סבב לא בוצע. השאלה על כך כבר נשאלה בחוק הסבב

@@ -4,7 +4,7 @@
 // ובלי חיבור האפליקציה נפתחת מהעותק האחרון. בכל שינוי בקובץ שברשימה, או ברשימה עצמה, מעלים את CACHE:
 // בלי זה האפליקציה המותקנת ב-iPad יכולה להמשיך להציג את הגרסה הקודמת.
 
-const CACHE = 'elal-compensations-v84';
+const CACHE = 'elal-compensations-v85';
 const SHELL = [
   './',
   'index.html',
