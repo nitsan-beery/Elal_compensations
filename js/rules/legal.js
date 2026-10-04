@@ -451,8 +451,17 @@ function checkFdp(ch, id, o, flag, extend, needCrew) {
     const g = grade(l);
     if (g) (g === 1 ? extend : flag)(date, `${describeChain(ch)}: ${why}${over(l, crew)}.${tail}`);
   };
+  // צוות גדול רשאי לבצע FDP שעומד במגבלות של צוות קטן ממנו: מגבלות המוגבר והכפול (כמו 3 רגליים
+  // לכל היותר) חלות רק על ההארכה שהן מתירות (30/12/2025: BUS ו-LCA, 4 רגליים, 3 טייסים).
+  // ההשוואה למגבלות ההרכב שבו ה-FDP עומד הכי טוב; בשוויון – להרכב שבוצע.
   if (crewAnswer) {
-    report(lim[crewAnswer] ?? single, lim[crewAnswer] ? crewAnswer : 'single');
+    const allowed = Object.keys(CREW).slice(0, Object.keys(CREW).indexOf(crewAnswer) + 1).filter((c) => lim[c]);
+    if (!allowed.length) {
+      report(single, 'single');
+      return;
+    }
+    const best = allowed.reduceRight((b, c) => (grade(lim[c]) < grade(lim[b]) ? c : b));
+    report(lim[best], best);
     return;
   }
   if (!grade(single)) return;
