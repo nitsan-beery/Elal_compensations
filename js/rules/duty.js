@@ -470,7 +470,8 @@ function night_landings(ctx, params, rule) {
   const unsettled = pool.filter((n) => n.status === 'unknown' || n.status === 'review');
   if (counted.length + unsettled.length < threshold) {
     const missed = pool.filter((n) => !counted.includes(n));
-    ctx.note(null, `${planned}, ונספרות רק ${counted.length}` +
+    // כאן תמיד בהרכב שנספר: טיסה שהרכב הצוות שלה אינו ידוע נספרת, וגם כך אין פיצוי (בעל המוצר, 04/10/2026).
+    ctx.note(null, `תוכננו ${pool.length} ${nightWord} ${landing}, ונספרות רק ${counted.length}` +
       `${missed.length ? `, כי ${missed.length === 1 ? 'אחת לא בוצעה (בוטלה או הוחלפה' : `${missed.length} לא בוצעו (בוטלו או הוחלפו`} שלא ביוזמת החברה)` : ''}. הפיצוי הוא מהטיסה ה-${threshold} שבוצעה, ולכן אין פיצוי.`, rule);
     return;
   }
