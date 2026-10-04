@@ -4,7 +4,7 @@
 import { parsePlan } from './pdf/plan.js';
 import { parseExec } from './pdf/exec.js';
 import { xlsxBlob } from './xlsx.js';
-import { evaluate, monthCalendar, calendarGaps } from './rules/evaluate.js';
+import { evaluate, monthCalendar, calendarGaps, relatedCrewIds } from './rules/evaluate.js';
 import { loadRules, partitionRules } from './rules/catalog.js';
 import { minToHhmm } from './time.js';
 import * as store from './store.js';
@@ -68,6 +68,7 @@ const state = {
   calBusy: false,
   calInfo: false,
   calGaps: null, // {key, items}: פערים שהעדכון האחרון מהיומן מצא בחודש הפתוח (`calendarGaps`)
+  reopen: { key: null, ids: [] }, // שאלות שהמשתמש לחץ "שנה" על התשובה להן: נשאלות שוב גם כשהיומן עונה עליהן
   calError: null,
 };
 
@@ -270,7 +271,8 @@ async function runAndSave() {
   // דבר מהחודש אינו מוחק את מה שנשמר.
   const fresh = monthCalendar(calendarFacts(), r.period);
   if (fresh?.flights.length || fresh?.standby.length) r.calendar = fresh;
-  state.result = evaluate({ rulesData: state.rulesData, plan: r.plan, exec: r.exec, answers: r.answers ?? {}, history: historyFor(r.key, months), calendar: r.calendar ?? null });
+  state.result = evaluate({ rulesData: state.rulesData, plan: r.plan, exec: r.exec, answers: r.answers ?? {}, history: historyFor(r.key, months), calendar: r.calendar ?? null,
+    reopen: state.reopen.key === r.key ? state.reopen.ids : [] });
   r.rulesVersion = state.result.rulesVersion;
   r.summary = summarize(state.result);
   await safe(() => store.putMonth(r));
@@ -1077,6 +1079,10 @@ function bindResults(root) {
       const id = btn.dataset.unanswer;
       // שאלה שנשאלה רק בגלל התשובה הזאת נפתחת מחדש יחד איתה.
       for (const dep of [id, ...(state.result?.dependentAnswers?.[id] ?? [])]) delete state.record.answers[dep];
+      // בלי זה היומן היה עונה במקום התשובה שנמחקה, והשאלה לא הייתה נשאלת (בעל המוצר, 04/10/2026).
+      const key = state.record.key;
+      state.reopen = { key, ids: [...(state.reopen.key === key ? state.reopen.ids : []), ...relatedCrewIds(id, state.result?.crewIdOf)] };
+      if (state.calGaps) state.calGaps.items = state.calGaps.items.filter((g) => g.id !== id);
       state.notices = [];
       await runAndSave();
     });

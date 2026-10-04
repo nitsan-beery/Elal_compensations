@@ -41,8 +41,10 @@ const CREDIT_LABEL_COLUMNS = ['Credit', 'FLT+DH', 'Rig'];
  *        מגבלות החוק שמתחילים לפני החודש (168 שעות, 672 שעות, 365 ימים).
  * @param {{flights: Array, standby: Array}|null} [input.calendar]  השלמות מהיומן, כשהמשתמש חיבר
  *        אותו (`parseEvents` ב-js/calendar.js): הרכב הצוות ושעות הכוננות. תשובה של המשתמש קודמת להן.
+ * @param {string[]} [input.reopen]  שאלות שהמשתמש ביקש לשנות את התשובה עליהן: הן נשאלות שוב גם
+ *        כשהיומן עונה עליהן (בעל המוצר, 04/10/2026).
  */
-export function evaluate({ rulesData, plan = null, exec = null, answers = {}, history = [], calendar = null }) {
+export function evaluate({ rulesData, plan = null, exec = null, answers = {}, history = [], calendar = null, reopen = [] }) {
   if (!plan && !exec) throw new Error('לא הועלה אף קובץ.');
   const period = (exec ?? plan).period;
   const mode = plan && exec ? 'full' : plan ? 'plan' : 'exec';
@@ -122,7 +124,7 @@ export function evaluate({ rulesData, plan = null, exec = null, answers = {}, hi
 
   const assumed = new Map(); // planId → ערכי התשובה שהאפליקציה הניחה בלי לשאול
   const ctx = makeContext({ out, timeline, domicile, codes, holidays: rulesData.holidays ?? {}, answers, plan, exec, supported, matches, planPairings,
-    period, fleet, fdp, assumed, calendarAnswer: cal.answer, calendarFirstDay: cal.firstDay,
+    period, fleet, fdp, assumed, calendarAnswer: (id) => (reopen.includes(id) ? null : cal.answer(id)), calendarFirstDay: cal.firstDay,
     // בלי דוח ביצוע, הסבבים המתוכננים משמשים לחישוב הקרדיט והרי"ג הצפויים.
     execPairings: exec ? execPairings : planPairings });
   ctx.legalRest = legalRest;
@@ -149,6 +151,7 @@ export function evaluate({ rulesData, plan = null, exec = null, answers = {}, hi
     });
     out.legal = legal.result;
     crewIdOf = legal.crewIdOf;
+    out.crewIdOf = Object.fromEntries(crewIdOf);
     // ה-FDP בזמנים המתוכננים, לצוות החוזי (`legal_crew_composition`).
     ctx.legalFdps = legal.fdps;
   }
@@ -298,6 +301,24 @@ export function calendarGaps({ prev, fresh, answers = {}, domicile, period }) {
     if (c && c.value !== a.value) gaps.push({ kind: 'answer', id, date: m[1], answer: a.value, calendar: c.value });
   }
   return gaps.sort((a, b) => a.date.localeCompare(b.date));
+}
+
+/**
+ * כל השאלות על הרכב הצוות שהיומן יכול לענות עליהן במקום `id`: שאלת מגבלות החוק של ה-FDP שלו
+ * (`crew:`), ושאלות נחיתות הלילה והטיסה הלבנה של כל טיסה בו, גם ביום שליד. התשובה לאחת משמשת את
+ * האחרות, ולכן "שנה" פותח את כולן מחדש (`reopen`; בעל המוצר, 04/10/2026). `crewIdOf`: מהתוצאה.
+ */
+export function relatedCrewIds(id, crewIdOf = {}) {
+  const m = /^(crew|night_crew|white):(\d{4}-\d{2}-\d{2}):(.+)$/.exec(id);
+  if (!m) return [id];
+  const near = (date, k) => new Date(Date.parse(date) + k * 864e5).toISOString().slice(0, 10);
+  const chain = m[1] === 'crew' ? id : [0, -1, 1].map((k) => crewIdOf[`${near(m[2], k)}:${m[3]}`]).find(Boolean);
+  const flights = chain ? Object.keys(crewIdOf).filter((k) => crewIdOf[k] === chain) : [];
+  const ids = new Set([id, ...(chain ? [chain] : [])]);
+  for (const [date, flight] of [[m[2], m[3]], ...flights.map((k) => [k.slice(0, 10), k.slice(11)])]) {
+    for (const k of [0, -1, 1]) for (const kind of ['night_crew', 'white']) ids.add(`${kind}:${near(date, k)}:${flight}`);
+  }
+  return [...ids];
 }
 
 /**
