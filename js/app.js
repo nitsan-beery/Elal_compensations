@@ -4,7 +4,7 @@
 import { parsePlan } from './pdf/plan.js';
 import { parseExec } from './pdf/exec.js';
 import { xlsxBlob } from './xlsx.js';
-import { evaluate } from './rules/evaluate.js';
+import { evaluate, monthCalendar, calendarGaps } from './rules/evaluate.js';
 import { loadRules, partitionRules } from './rules/catalog.js';
 import { minToHhmm } from './time.js';
 import * as store from './store.js';
@@ -67,6 +67,7 @@ const state = {
   calendar: null, // חיבור היומן: {clientId, calendars: [{id, name}], manual, hint, facts, synced}, או null
   calBusy: false,
   calInfo: false,
+  calGaps: null, // {key, items}: פערים שהעדכון האחרון מהיומן מצא בחודש הפתוח (`calendarGaps`)
   calError: null,
 };
 
@@ -264,7 +265,11 @@ function dropFileLink(kind) {
 async function runAndSave() {
   const r = state.record;
   const months = await safe(() => store.listMonths(), []);
-  state.result = evaluate({ rulesData: state.rulesData, plan: r.plan, exec: r.exec, answers: r.answers ?? {}, history: historyFor(r.key, months), calendar: calendarFacts() });
+  // ההשלמות מהיומן נשמרות בחודש, ונשארות בו גם אחרי ניתוק (בעל המוצר, 04/10/2026). יומן שאין בו
+  // דבר מהחודש אינו מוחק את מה שנשמר.
+  const fresh = monthCalendar(calendarFacts(), r.period);
+  if (fresh?.flights.length || fresh?.standby.length) r.calendar = fresh;
+  state.result = evaluate({ rulesData: state.rulesData, plan: r.plan, exec: r.exec, answers: r.answers ?? {}, history: historyFor(r.key, months), calendar: r.calendar ?? null });
   r.rulesVersion = state.result.rulesVersion;
   r.summary = summarize(state.result);
   await safe(() => store.putMonth(r));
@@ -320,6 +325,19 @@ function bindCalendar(scope) {
   $('[data-cal="disconnect"]', scope)?.addEventListener('click', disconnectCalendar);
 }
 
+/** פער בין היומן המעודכן לבין מה שנשמר בחודש, לתצוגה. */
+function describeGap(g) {
+  const crew = (v) => answerLabel(v, 'crew');
+  if (g.kind === 'answer') {
+    const kind = g.id.split(':')[0];
+    return `${describeQuestionId(g.id)}: תשובתך ${answerLabel(g.answer, kind)}, וביומן ${answerLabel(g.calendar, kind)}. התשובה שלך קובעת. אפשר לשנות אותה ב"תשובות שנשמרו".`;
+  }
+  const what = `⁦${ddmm(g.date)} ${g.flight}⁩`;
+  return g.kind === 'removed'
+    ? `${what}: הטיסה כבר אינה ביומן. קודם: ${crew(g.before)}.`
+    : `${what}: ביומן הקודם ${crew(g.before)}, עכשיו ${crew(g.after)}.`;
+}
+
 /** שורת היומן: בראש התוצאות, ליד שם החודש, כשיש חודש פתוח; אחרת מתחת לאזור ההעלאה. */
 function renderCalendarBar() {
   const bar = $('#calendar-bar');
@@ -328,6 +346,10 @@ function renderCalendarBar() {
   const notices = [];
   if (state.calError) notices.push(`<div class="notice bad">${esc(state.calError)}</div>`);
   else if (c?.synced && !c.facts?.flights?.length) notices.push(`<div class="notice warn">${esc(CAL_NO_DATA)}</div>`);
+  const gaps = state.calGaps?.key === state.record?.key ? state.calGaps.items : [];
+  if (gaps.length) {
+    notices.push(`<div class="notice warn">היומן המעודכן שונה ממה שנשמר בחודש הזה:<ul>${gaps.map((g) => `<li>${esc(describeGap(g))}</li>`).join('')}</ul></div>`);
+  }
   const parts = calendarParts(c);
   if (state.result) {
     bar.innerHTML = notices.join('');
@@ -437,6 +459,9 @@ async function syncCalendar(pending = calendarToken()) {
       if (found.length) cals = found.map(({ id, name }) => ({ id, name }));
     }
     const facts = await calendar.fetchFacts(token, cals.map((x) => x.id), timeMin, timeMax);
+    // הפערים נבדקים מול החודש הפתוח בלבד (בעל המוצר, 04/10/2026), לפני שהיומן המעודכן נשמר בו.
+    const r = state.record;
+    state.calGaps = r && state.result ? { key: r.key, items: calendarGaps({ prev: r.calendar, fresh: monthCalendar(facts, r.period), answers: r.answers ?? {}, domicile: state.result.domicile, period: r.period }) } : null;
     const hint = all.find((x) => x.primary)?.id ?? c.hint ?? null;
     state.calendar = { ...c, calendars: cals, hint, facts, synced: new Date().toISOString() };
     await safe(() => store.putSetting(CAL_SETTING, state.calendar));
@@ -1039,7 +1064,7 @@ function bindResults(root) {
 function currentSummary(m, months) {
   if (!state.rulesData || !(m.plan || m.exec)) return m.summary ?? {};
   try {
-    return summarize(evaluate({ rulesData: state.rulesData, plan: m.plan, exec: m.exec, answers: m.answers ?? {}, history: historyFor(m.key, months), calendar: calendarFacts() }));
+    return summarize(evaluate({ rulesData: state.rulesData, plan: m.plan, exec: m.exec, answers: m.answers ?? {}, history: historyFor(m.key, months), calendar: m.calendar ?? monthCalendar(calendarFacts(), m.period) }));
   } catch {
     return m.summary ?? {};
   }

@@ -193,6 +193,57 @@ export function evaluate({ rulesData, plan = null, exec = null, answers = {}, hi
 }
 
 /**
+ * ההשלמות מהיומן שנוגעות לחודש, לשמירה ברשומה שלו (בעל המוצר, 04/10/2026): כך הן נשארות גם אחרי
+ * ניתוק היומן. יומיים לפני החודש ואחריו, כי היום של רגל נקבע בשעון הבסיס. null – אין יומן.
+ */
+export function monthCalendar(facts, period) {
+  if (!facts) return null;
+  const from = Date.UTC(period.year, period.month - 1, 1) - 2 * 864e5;
+  const to = Date.UTC(period.year, period.month, 1) + 2 * 864e5;
+  const inMonth = (iso) => { const t = Date.parse(iso); return t >= from && t < to; };
+  return { flights: (facts.flights ?? []).filter((f) => inMonth(f.std)), standby: (facts.standby ?? []).filter((s) => inMonth(s.start)) };
+}
+
+const crewClass = (pilots) => (pilots >= 4 ? 'double' : pilots === 3 ? 'augmented' : 'single');
+
+/**
+ * פערים בהרכב הצוות בין היומן המעודכן לבין מה שכבר שמור בחודש הפתוח (בעל המוצר, 04/10/2026):
+ * - `changed` / `removed`: טיסה של החודש שהרכב הצוות שלה ביומן השמור (`prev`) שונה ביומן המעודכן, או שאינה בו.
+ *   כשביומן המעודכן אין אף טיסה של החודש (למשל, החודש מחוץ לטווח שנקרא) – לא משווים.
+ * - `answer`: תשובה של המשתמש לשאלת הרכב צוות (`crew:`, ‏`night_crew:`, ‏`white:`) שהיומן המעודכן עונה עליה אחרת.
+ *   התשובה של המשתמש ממשיכה לקבוע.
+ */
+export function calendarGaps({ prev, fresh, answers = {}, domicile, period }) {
+  if (!domicile || !fresh) return [];
+  const month = `${period.year}-${String(period.month).padStart(2, '0')}`;
+  const crewOf = (cal) => {
+    const m = new Map();
+    for (const f of cal?.flights ?? []) {
+      const t = f.pilots >= 2 ? baseTime(f.std, domicile) : null;
+      if (t && t.date.slice(0, 7) === month) m.set(`${t.date}|${f.flight}`, crewClass(f.pilots));
+    }
+    return m;
+  };
+  const gaps = [];
+  const before = crewOf(prev);
+  const after = crewOf(fresh);
+  if (after.size) {
+    for (const [k, was] of before) {
+      const [date, flight] = k.split('|');
+      if (!after.has(k)) gaps.push({ kind: 'removed', date, flight, before: was });
+      else if (after.get(k) !== was) gaps.push({ kind: 'changed', date, flight, before: was, after: after.get(k) });
+    }
+  }
+  const cal = calendarFacts(fresh, domicile);
+  for (const [id, a] of Object.entries(answers)) {
+    const m = /^(?:crew|night_crew|white):(\d{4}-\d{2}-\d{2}):/.exec(id);
+    const c = m && m[1].slice(0, 7) === month ? cal.answer(id) : null;
+    if (c && c.value !== a.value) gaps.push({ kind: 'answer', id, date: m[1], answer: a.value, calendar: c.value });
+  }
+  return gaps.sort((a, b) => a.date.localeCompare(b.date));
+}
+
+/**
  * השלמות מהיומן (רשות; בעל המוצר, 03/10/2026), בשעון הבסיס. היומן משלים רק מה שאינו בקבצים:
  * - `answer(id)`: שאלות הרכב הצוות (`crew:`, `night_crew:`, `white:`) לפי מספר הטייסים בטיסה:
  *   2 – בודד, 3 – מוגבר, 4 ומעלה – כפול. התשובה מסומנת `source: 'calendar'`.
