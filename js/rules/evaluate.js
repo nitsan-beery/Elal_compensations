@@ -223,9 +223,11 @@ function evaluateOnce({ rulesData, plan = null, exec = null, answers = {}, histo
   // בתכנון לבד: מה שהיומן מראה אחרת מהתכנון, למידע בלבד (בעל המוצר, 04/10/2026).
   out.calendarChanges = mode === 'plan' ? calendarChanges(planPairings, calendar, domicile, period) : null;
   out.calendarCrew = [...monthKeys].filter((k) => cal.has(k.slice(0, 10), k.slice(11))).length;
-  // טיסות שבוצעו ואין ביומן הרכב הצוות שלהן, כשביומן יש טיסות מהחודש: כנראה שהיומן לא מעודכן
-  // (בעל המוצר, 04/10/2026).
+  // טיסות שבוצעו ואין ביומן הרכב הצוות שלהן, כשביומן יש טיסות מהחודש: כנראה שהיומן לא מעודכן.
+  // כשאין בו אף טיסה מהחודש (למשל חודש ישן שלא נשמר ביומן) – הודעה אחת על החודש, ולא על כל
+  // טיסה (בעל המוצר, 04/10/2026).
   const month = `${period.year}-${String(period.month).padStart(2, '0')}`;
+  out.calendarNoMonth = !!exec && monthKeys.size > 0 && !cal.hasMonth(month);
   out.calendarMissing = exec && cal.hasMonth(month)
     ? [...monthKeys].filter((k) => k.startsWith(month) && !cal.has(k.slice(0, 10), k.slice(11))).sort()
       .map((k) => ({ date: k.slice(0, 10), flight: k.slice(11) }))

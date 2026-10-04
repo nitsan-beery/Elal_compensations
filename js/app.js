@@ -344,6 +344,8 @@ function renderCalendarBar() {
   const notices = [];
   if (state.calError) notices.push(`<div class="notice bad">${esc(state.calError)}</div>`);
   else if (c?.synced && !c.facts?.flights?.length) notices.push(`<div class="notice warn">${esc(CAL_NO_DATA)}</div>`);
+  // ביומן אין אף טיסה מהחודש הפתוח (בעל המוצר, 04/10/2026).
+  else if (c && !state.calBusy && state.result?.calendarNoMonth) notices.push('<div class="notice warn">לא נמצאו ביומן טיסות של החודש הזה.</div>');
   const gaps = state.calGaps?.key === state.record?.key ? state.calGaps.items : [];
   if (gaps.length) {
     notices.push(`<div class="notice warn">היומן המעודכן שונה ממה שנשמר בחודש הזה:<ul>${gaps.map((g) => `<li>${esc(describeGap(g))}</li>`).join('')}</ul></div>`);
