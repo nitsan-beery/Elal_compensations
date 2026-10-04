@@ -773,7 +773,8 @@ function free_days_waived(ctx, params, rule) {
   if (firstIsX && ctx.hasExec && (!carried || landed != null)) {
     if (carried && landed > at(ctx.monthFirst, onUntil)) {
       free.splice(free.indexOf(ctx.monthFirst), 1);
-      ctx.note(ctx.monthFirst, `${rule.title}: ב-${ddmm(ctx.monthFirst)} מסומן X, אבל לפי הרומה נחתת מסבב של החודש הקודם (${describePairing(carried)}) ב-${ddmm(dateOf(landed))} ${hhmm(landed)}, אחרי ${params.on_block_until}, ולכן היום אינו נספר.`, rule);
+      // הערה רק כשהיום מוריד את המספר מתחת למינימום (בעל המוצר, 04/10/2026).
+      if (free.length < due) ctx.note(ctx.monthFirst, `${rule.title}: ב-${ddmm(ctx.monthFirst)} מסומן X, אבל לפי הרומה נחתת מסבב של החודש הקודם (${describePairing(carried)}) ב-${ddmm(dateOf(landed))} ${hhmm(landed)}, אחרי ${params.on_block_until}, ולכן היום אינו נספר.`, rule);
     }
   } else if (firstIsX && ctx.calendarFirstDay(ctx.monthFirst)?.carried === false) {
     // היומן מראה טיסה ב-1 לחודש שיוצאת מהבסיס, ולא סבב מהחודש הקודם: לא נחתת בו מסבב כזה, וה-X
@@ -782,11 +783,8 @@ function free_days_waived(ctx, params, rule) {
     const fid = `free_days_first:${ctx.monthFirst.slice(0, 7)}`;
     const fa = ctx.answer(fid);
     if (fa?.value !== 'free') free.splice(free.indexOf(ctx.monthFirst), 1);
-    if (!fa && free.length >= due) {
-      // גם בלי היום יש מספיק ימים: התשובה לא תשנה דבר, ואין על מה לשאול.
-      ctx.note(ctx.monthFirst, `${rule.title}: ב-${ddmm(ctx.monthFirst)} מסומן X, וייתכן שנחתת בו מסבב של החודש הקודם, שאינו בתכנון, ` +
-        `ולכן הוא אינו נספר. גם בלעדיו יש ${free.length} ימים ללא פעילות מול מינימום ${due}, ולכן אין צורך לשאול.`, rule);
-    } else if (!fa) {
+    // גם בלי היום יש מספיק ימים: התשובה לא תשנה דבר. היום אינו נספר, בלי הערה ובלי שאלה (בעל המוצר, 04/10/2026).
+    if (!fa && free.length < due) {
       pendingFirst = true;
       ctx.ask({
         id: fid,
