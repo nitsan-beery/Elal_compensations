@@ -188,8 +188,63 @@ export function evaluate({ rulesData, plan = null, exec = null, answers = {}, hi
   const opLegs = (legs) => (legs ?? []).filter((l) => l.flight && !l.dh && !l.dhd && l.type !== 'DHO' && l.type !== 'DHX');
   const monthKeys = new Set(timeline.flatMap((d) => opLegs(exec ? d.exec?.legs : d.plan?.legs).map((l) => `${d.date}|${l.flight}`)));
   out.monthFlights = monthKeys.size;
+  // בתכנון לבד: מה שהיומן מראה אחרת מהתכנון, למידע בלבד (בעל המוצר, 04/10/2026).
+  out.calendarChanges = mode === 'plan' ? calendarChanges(planPairings, calendar, domicile, period) : null;
   out.calendarCrew = [...monthKeys].filter((k) => cal.has(k.slice(0, 10), k.slice(11))).length;
   return out;
+}
+
+/**
+ * שינויים בין התכנון ליומן, כשאין רומה (בעל המוצר, 04/10/2026). למידע בלבד: הפיצויים והשאלות
+ * נשארים לפי התכנון, עד שהרומה מועלית. סבבי היומן נבנים מהטיסות שבו כמו סבבי התכנון, וסבב
+ * מתוכנן זהה לסבב ביומן כשמספרי הטיסות (בלי DH) זהים, ביום לכל כיוון, או כשהיעדים זהים והתאריכים
+ * חופפים, כמו בהתאמה לרומה (`matchPairings`). קודם מתאימים את כל הזהים, ורק אז סבב מתוכנן שאין לו
+ * זהה מושווה לסבבי היומן שנשארו וחופפים לו בתאריכים.
+ * רק בטווח שהיומן מכסה בחודש (מהטיסה או הכוננות הראשונה בו ועד האחרונה), כדי שסבב שהיומן עוד לא
+ * מגיע אליו לא ייראה כמבוטל. null – אין ביומן נתונים מהחודש.
+ */
+function calendarChanges(planPairings, calendar, domicile, period) {
+  if (!calendar || !domicile) return null;
+  const month = `${period.year}-${String(period.month).padStart(2, '0')}`;
+  const byDate = new Map();
+  for (const f of [...(calendar.flights ?? [])].sort((a, b) => a.std.localeCompare(b.std))) {
+    const t = baseTime(f.std, domicile);
+    if (!t || t.date.slice(0, 7) !== month) continue;
+    if (!byDate.has(t.date)) byDate.set(t.date, []);
+    byDate.get(t.date).push({ flight: f.flight, org: f.org, dst: f.dst });
+  }
+  const standby = (calendar.standby ?? []).map((x) => ({ code: x.code, date: baseTime(x.start, domicile)?.date }))
+    .filter((x) => x.date?.slice(0, 7) === month);
+  const covered = [...byDate.keys(), ...standby.map((x) => x.date)].sort();
+  if (!covered.length) return null;
+  const [first, last] = [covered[0], covered.at(-1)];
+  const calPairings = buildPairings([...byDate.keys()].sort().map((date) => ({ date, legs: byDate.get(date) })), domicile, (d) => d.legs);
+  const shift = (date, k) => new Date(Date.parse(date) + k * 864e5).toISOString().slice(0, 10);
+  const overlap = (a, b, k = 0) => shift(a.from, -k) <= b.to && b.from <= shift(a.to, k);
+  const flights = (p) => p.legs.filter((l) => !l.dh && l.flight).map((l) => l.flight).sort().join('/');
+  const same = (p, c) => flights(c) === flights(p) || (overlap(p, c) && c.destinations.join('-') === p.destinations.join('-'));
+  const out = [];
+  const used = new Set();
+  const inRange = planPairings.filter((p) => flights(p) && p.to >= first && p.from <= last);
+  const open = inRange.filter((p) => {
+    const twin = calPairings.find((c) => !used.has(c) && overlap(p, c, 1) && same(p, c));
+    if (twin) used.add(twin);
+    return !twin;
+  });
+  for (const p of open) {
+    const hits = calPairings.filter((c) => !used.has(c) && overlap(p, c));
+    hits.forEach((c) => used.add(c));
+    const sby = standby.filter((x) => x.date >= p.from && x.date <= p.to);
+    const base = { date: p.from, plan: describePairing(p) };
+    if (hits.length) out.push({ ...base, how: 'cal_changed', label: 'ביומן רשום סבב אחר', calendar: hits.map(describePairing).join(', ') });
+    else if (sby.length) out.push({ ...base, how: 'cal_standby', label: 'ביומן רשומה כוננות במקום הסבב', calendar: sby.map((x) => `${x.code} ${x.date.slice(8, 10)}/${x.date.slice(5, 7)}`).join(', ') });
+    else out.push({ ...base, how: 'cal_missing', label: 'הסבב אינו ביומן', calendar: null });
+  }
+  for (const c of calPairings) {
+    if (used.has(c)) continue;
+    out.push({ how: 'cal_unplanned', label: 'ביומן סבב שאינו בתכנון', date: c.from, plan: null, calendar: describePairing(c) });
+  }
+  return out.sort((a, b) => a.date.localeCompare(b.date));
 }
 
 /**

@@ -887,6 +887,7 @@ function renderExpectations(res) {
 const datesFirst = (text) => text.replace(/⁦(\d[^\s⁦⁩]*) ([^⁦⁩]*)⁩/g, '⁦$1⁩ ⁦$2⁩');
 
 function renderChanges(res) {
+  if (res.mode === 'plan') return renderCalendarChanges(res);
   const changes = res.changes.filter((c) => c.how !== 'exact' && c.how !== 'noplan');
   if (res.mode !== 'full') return '';
   return `<details class="card" data-section="changes" ${changes.length ? 'open' : ''}>
@@ -896,6 +897,23 @@ function renderChanges(res) {
       <div class="small"><span class="side-plan">תכנון: ${esc(datesFirst(c.plan ?? '—'))}</span> · <span class="side-exec">ביצוע: ${esc(datesFirst(c.exec ?? (c.replacedBy?.join(', ') || '—')))}</span></div>
       ${(c.notes ?? []).map((n) => `<div class="explain">${esc(n.message)}${n.byUser ? ' <span class="muted">לפי תשובת המשתמש</span>' : ''}</div>`).join('')}
     </li>`).join('')}</ul>` : '<p class="muted">כל הסבבים בוצעו כמתוכנן.</p>'}
+  </details>`;
+}
+
+/**
+ * בתכנון לבד, כשיש ביומן נתונים מהחודש: השינויים בין התכנון ליומן, למידע בלבד (בעל המוצר, 04/10/2026).
+ * הפיצויים עליהם ייבדקו כשתועלה הרומה.
+ */
+function renderCalendarChanges(res) {
+  const changes = res.calendarChanges;
+  if (!changes) return '';
+  return `<details class="card" data-section="changes" ${changes.length ? 'open' : ''}>
+    <summary><h2 style="display:inline">שינויים בין התכנון ליומן <span class="count">${changes.length}</span></h2></summary>
+    <p class="small muted">לפי היומן, למידע בלבד. הקרדיט והפיצויים על השינויים ייבדקו כשתועלה הרומה.</p>
+    ${changes.length ? `<ul class="list">${changes.map((c) => `<li>
+      <strong class="num">${ddmm(c.date)}</strong> ${esc(c.label)}
+      <div class="small"><span class="side-plan">תכנון: ${esc(datesFirst(c.plan ?? '—'))}</span> · <span class="side-exec">יומן: ${esc(datesFirst(c.calendar ?? '—'))}</span></div>
+    </li>`).join('')}</ul>` : '<p class="muted">היומן תואם את התכנון.</p>'}
   </details>`;
 }
 
