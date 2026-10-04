@@ -181,11 +181,12 @@ export function evaluate({ rulesData, plan = null, exec = null, answers = {}, hi
   out.notes = out.notes.filter((n) => !n.placed);
   // כמו שאר הטבלאות: לפי תאריך. הערה בלי תאריך (על החודש כולו) בסוף.
   out.notes.sort((a, b) => (a.date ?? '￿').localeCompare(b.date ?? '￿'));
-  // כמה טיסות בחודש קיבלו את הרכב הצוות מהיומן, לשורת היומן בממשק.
+  // כמה טיסות בחודש היומן מכיר (בלי קשר לשאלה על הרכב הצוות), לשורת היומן בממשק.
   // כמה טיסות יש בחודש בסך הכול (בלי DH), ליד מספר הטיסות שהרכב הצוות שלהן מהיומן.
   const opLegs = (legs) => (legs ?? []).filter((l) => l.flight && !l.dh && !l.dhd && l.type !== 'DHO' && l.type !== 'DHX');
-  out.monthFlights = new Set(timeline.flatMap((d) => opLegs(exec ? d.exec?.legs : d.plan?.legs).map((l) => `${d.date}|${l.flight}`))).size;
-  out.calendarCrew = [...cal.used].filter((k) => k.slice(0, 7) === `${period.year}-${String(period.month).padStart(2, '0')}`).length;
+  const monthKeys = new Set(timeline.flatMap((d) => opLegs(exec ? d.exec?.legs : d.plan?.legs).map((l) => `${d.date}|${l.flight}`)));
+  out.monthFlights = monthKeys.size;
+  out.calendarCrew = [...monthKeys].filter((k) => cal.has(k.slice(0, 10), k.slice(11))).length;
   return out;
 }
 
@@ -222,6 +223,8 @@ function calendarFacts(calendar, domicile) {
       const value = m[1] === 'white' ? (pilots >= 3 ? 'yes' : 'no') : pilots >= 4 ? 'double' : pilots === 3 ? 'augmented' : 'single';
       return { value, source: 'calendar' };
     },
+    // האם היומן מכיר את הטיסה, בלי קשר לשאלה על הרכב הצוות.
+    has: (date, flight) => [0, -1, 1].some((k) => crew.has(`${near(date, k)}|${flight}`)),
     standby: (date, code) => standby.find((s) => s.date === date && s.code.slice(0, 5) === code.slice(0, 5)) ?? null,
   };
 }
