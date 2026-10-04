@@ -430,6 +430,9 @@ function night_landings(ctx, params, rule) {
   } else {
     for (const n of night) { n.target = n.pairing; n.status = 'done'; }
   }
+  // הרכב הצוות משנה רק כשבלעדיו נספרות לפחות `min` טיסות.
+  const live = night.filter((n) => n.status === 'done' || n.status === 'company');
+  if (live.length >= min) for (const n of live) ctx.crewMatters?.(n.leg.date, n.leg.flight);
   const threshold = params.paid_from_count;
   const key = keyFor(params.report_column);
   const hours = H(params.hours);
@@ -1046,6 +1049,7 @@ function white_flight(ctx, params, rule) {
         continue;
       }
       if (block <= H(params.min_block_hours)) continue;
+      ctx.crewMatters?.(l.date, l.flight);
 
       const what = `${l.flight} ${l.org}→${l.dst} ב-${ddmm(l.date)}, התייצבות ${hhmm(reportAt)}, בלוק ${minToHhmm(block)}`;
       const id = `white:${l.date}:${l.flight}`;
@@ -1194,6 +1198,7 @@ function legal_crew_composition(ctx, params, rule) {
     const first = fdp.flights[0];
     const pairing = pairings.find((p) => p.legs.some((l) => l.flight === first.flight && near(l.date, first.date)));
     if (!pairing) { checked--; continue; }
+    for (const f of fdp.flights) ctx.crewMatters?.(f.date, f.flight);
     const day = pairing.dates.includes(first.date) ? first.date : pairing.from;
     const answered = ctx.answer(fdp.id) ??
       fdp.flights.map((f) => ctx.answer(`night_crew:${f.date}:${f.flight}`)).find(Boolean) ?? null;

@@ -155,6 +155,10 @@ function evaluateOnce({ rulesData, plan = null, exec = null, answers = {}, histo
     // בלי דוח ביצוע, הסבבים המתוכננים משמשים לחישוב הקרדיט והרי"ג הצפויים.
     execPairings: exec ? execPairings : planPairings });
   ctx.legalRest = legalRest;
+  // טיסות שהרכב הצוות שלהן משנה את בדיקת מגבלות החוק או את הזכאות לפיצוי, "date|flight": רק עליהן
+  // ההודעה על הרכב צוות שחסר ביומן (`calendarMissing`; בעל המוצר, 04/10/2026).
+  const crewMatters = new Set();
+  ctx.crewMatters = (date, flight) => crewMatters.add(`${date}|${flight}`);
   // האם היומן מכיר את הטיסה: null כשאין ביומן טיסות.
   ctx.inCalendar = (date, flight) => (calendar?.flights?.length ? cal.has(date, flight) : null);
 
@@ -174,6 +178,7 @@ function evaluateOnce({ rulesData, plan = null, exec = null, answers = {}, histo
       },
       answer: ctx.answer,
       ask: ctx.ask,
+      crewMatters: ctx.crewMatters,
       calendarStandby: cal.standby,
     });
     out.legal = legal.result;
@@ -224,12 +229,15 @@ function evaluateOnce({ rulesData, plan = null, exec = null, answers = {}, histo
   out.calendarChanges = mode === 'plan' ? calendarChanges(planPairings, calendar, domicile, period) : null;
   out.calendarCrew = [...monthKeys].filter((k) => cal.has(k.slice(0, 10), k.slice(11))).length;
   // טיסות שבוצעו ואין ביומן הרכב הצוות שלהן, כשביומן יש טיסות מהחודש: כנראה שהיומן לא מעודכן.
-  // כשאין בו אף טיסה מהחודש (למשל חודש ישן שלא נשמר ביומן) – הודעה אחת על החודש, ולא על כל
-  // טיסה (בעל המוצר, 04/10/2026).
+  // רק טיסות שהרכב הצוות שלהן נדרש לבדיקת מגבלות החוק או הזכאות לפיצוי (`crewMatters`), ולא
+  // טיסות שלפני הטווח שנקרא מהיומן (`calendar.from`). כשאין בו אף טיסה מהחודש (למשל חודש ישן שלא
+  // נשמר ביומן) – הודעה אחת על החודש, ולא על כל טיסה (בעל המוצר, 04/10/2026).
   const month = `${period.year}-${String(period.month).padStart(2, '0')}`;
+  const read = (k) => !calendar?.from || k.slice(0, 10) > baseTime(calendar.from, domicile)?.date;
+  const matters = (k) => [0, -1, 1].some((d) => crewMatters.has(`${near(k.slice(0, 10), d)}|${k.slice(11)}`));
   out.calendarNoMonth = !!exec && monthKeys.size > 0 && !cal.hasMonth(month);
   out.calendarMissing = exec && cal.hasMonth(month)
-    ? [...monthKeys].filter((k) => k.startsWith(month) && !cal.has(k.slice(0, 10), k.slice(11))).sort()
+    ? [...monthKeys].filter((k) => k.startsWith(month) && read(k) && matters(k) && !cal.has(k.slice(0, 10), k.slice(11))).sort()
       .map((k) => ({ date: k.slice(0, 10), flight: k.slice(11) }))
     : [];
   // שאלה על הרכב הצוות של טיסה שירדה מהיומן: מה היה רשום בו.
@@ -300,10 +308,12 @@ function calendarChanges(planPairings, calendar, domicile, period) {
  */
 export function monthCalendar(facts, period) {
   if (!facts) return null;
+  // `from`: תחילת הטווח שנקרא מהיומן. טיסה שלפניה אינה חסרה ביומן, אלא לא נקראה.
+  const range = facts.from ? { from: facts.from } : {};
   const from = Date.UTC(period.year, period.month - 1, 1) - 2 * 864e5;
   const to = Date.UTC(period.year, period.month, 1) + 2 * 864e5;
   const inMonth = (iso) => { const t = Date.parse(iso); return t >= from && t < to; };
-  return { flights: (facts.flights ?? []).filter((f) => inMonth(f.std)), standby: (facts.standby ?? []).filter((s) => inMonth(s.start)) };
+  return { flights: (facts.flights ?? []).filter((f) => inMonth(f.std)), standby: (facts.standby ?? []).filter((s) => inMonth(s.start)), ...range };
 }
 
 const crewClass = (pilots) => (pilots >= 4 ? 'double' : pilots === 3 ? 'augmented' : 'single');
@@ -443,8 +453,8 @@ function calendarFacts(calendar, domicile, allowKept = () => true) {
     },
     // האם היומן מכיר את הטיסה, בלי קשר לשאלה על הרכב הצוות.
     has: (date, flight) => !!find(crew, date, flight),
-    // האם ביומן יש טיסות מהחודש ("YYYY-MM").
-    hasMonth: (month) => [...crew.keys()].some((k) => k.startsWith(month)),
+    // האם ביומן יש טיסות מהחודש ("YYYY-MM"), גם בלי הרכב צוות.
+    hasMonth: (month) => legs.some((f) => f.t.date.startsWith(month)),
     standby: (date, code) => standby.find((s) => s.date === date && s.code.slice(0, 5) === code.slice(0, 5)) ?? null,
   };
 }

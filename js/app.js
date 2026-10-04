@@ -521,7 +521,7 @@ async function syncCalendar(pending = calendarToken()) {
     const r = state.record;
     state.calGaps = r && state.result ? { key: r.key, items: calendarGaps({ prev: r.calendar, fresh: monthCalendar(facts, r.period), domicile: state.result.domicile, period: r.period }) } : null;
     const hint = all.find((x) => x.primary)?.id ?? c.hint ?? null;
-    state.calendar = { ...c, calendars: cals, hint, facts, synced: new Date().toISOString() };
+    state.calendar = { ...c, calendars: cals, hint, facts: { ...facts, from: timeMin }, synced: new Date().toISOString() };
     await safe(() => store.putSetting(CAL_SETTING, state.calendar));
   } catch (err) {
     state.calError = err.message;

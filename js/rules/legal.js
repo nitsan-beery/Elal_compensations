@@ -446,6 +446,10 @@ function checkFdp(ch, id, o, flag, extend, needCrew) {
     if (what.every((w) => w === what[0])) return ` חורג ${what[0]} גם בצוות ${others.map((c) => CREW[c].label).join(' או ')}.`;
     return ` ${others.map((c, i) => `${i ? 'ובצוות' : 'בצוות'} ${CREW[c].label} חורג ${what[i]}`).join(', ')}.`;
   };
+  // הרכב הצוות משנה את הבדיקה רק כשה-FDP אינו עומד במגבלות הצוות הבודד, והרכב אחר טוב ממנו.
+  if (grade(single) && ['augmented', 'double'].some((c) => lim[c] && grade(lim[c]) < grade(single))) {
+    for (const f of ch.flights) o.crewMatters?.(f.date, f.flight);
+  }
   const date = ch.flights[0].date;
   const report = (l, crew, tail = '') => {
     const g = grade(l);
