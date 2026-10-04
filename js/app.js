@@ -355,7 +355,7 @@ function renderCalendarBar() {
   // טיסות שבוצעו ואין ביומן הרכב הצוות שלהן: כנראה שהיומן לא מעודכן (בעל המוצר, 04/10/2026).
   const missing = c && !state.calBusy ? state.result?.calendarMissing ?? [] : [];
   if (missing.length) {
-    notices.push(`<div class="notice warn">ביומן לא מופיע הרכב הצוות של ${missing.length === 1 ? 'טיסה אחת' : `${missing.length} טיסות`} שבוצעו: ${
+    notices.push(`<div class="notice warn">ביומן לא מופיע הרכב הצוות של ${missing.length === 1 ? 'טיסה אחת שבוצעה' : `${missing.length} טיסות שבוצעו`}:${
       missing.map((m) => esc(`⁦${ddmm(m.date)} ${m.flight}⁩`)).join(', ')}. ודא שבוצע סנכרון של היומן מהאורגנייזר.</div>`);
   }
   const parts = calendarParts(c);
