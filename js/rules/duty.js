@@ -409,7 +409,19 @@ function night_landings(ctx, params, rule) {
         `לא ניתן לדעת אם היא נחיתת לילה, וזה משנה את ${rule.title}. דורש בדיקה ידנית.`, rule);
     }
   }
-  if (night.length < params.min_planned_count) return;
+  const min = params.min_planned_count;
+  const crews = params.counted_crews;
+  const crewNames = crews ? crews.map((c) => CREW_LABEL[c] ?? c).join(' או ') : '';
+  const nightWord = `טיסות לילה${crews ? ` בצוות ${crewNames}` : ''}`;
+  const landing = `שנוחתות בין ${params.window_from} ל-${params.window_to}`;
+  const names = (items) => items.map((n) => `${ddmm(n.leg.date)} ${n.leg.flight}`).join(', ');
+  // בכל מקרה אין פיצוי, בלי קשר להרכב הצוות (בעל המוצר, 04/10/2026).
+  if (night.length < min) {
+    if (night.length + unsure.length < min) {
+      ctx.note(null, `${rule.title}: לא תוכננו מעל ${min - 1} ${nightWord} ${landing}${night.length ? ` (${names(night)})` : ''}, ולכן אין פיצוי.`, rule);
+    }
+    return;
+  }
 
   // מה נחשב ביצוע: הטיסה בדוח, או ביטול ושינוי הצבה ביוזמת החברה (ס' 40). הסיבה נשאלת
   // במקום אחד בלבד, בשאלה על הסבב שלא בוצע, וכאן רק קוראים מה יצא ממנה.
@@ -426,8 +438,6 @@ function night_landings(ctx, params, rule) {
   const threshold = params.paid_from_count;
   const key = keyFor(params.report_column);
   const hours = H(params.hours);
-  const crews = params.counted_crews;
-  const crewNames = crews ? crews.map((c) => CREW_LABEL[c] ?? c).join(' או ') : '';
   // הרכב הצוות נשאל גם בבדיקת מגבלות החוק, על ה-FDP כולו: תשובה אחת משמשת את שתיהן.
   const crewAnswer = (n) => ctx.answer(`night_crew:${n.leg.date}:${n.leg.flight}`) ?? ctx.legalCrewAnswer(n.leg);
   const crewOf = (n) => crewAnswer(n)?.value;
@@ -438,22 +448,21 @@ function night_landings(ctx, params, rule) {
   // (החלטת בעל המוצר, 23/09/2026). מרגע שתוכננו `min_planned_count` טיסות כאלה, כל מסלול
   // מסתיים בהערה שמסבירה את המצב ואת הסיבה – גם כשאין פיצוי (בקשת בעל המוצר, 23/09/2026).
   const pool = crews ? night.filter((n) => crewOf(n) == null || crews.includes(crewOf(n))) : night;
-  const names = (items) => items.map((n) => `${ddmm(n.leg.date)} ${n.leg.flight}`).join(', ');
-  const list = (items) => items.map((n) => `${ddmm(n.leg.date)} ${n.leg.flight}${n.status === 'company' ? ' – שינוי ביוזמת החברה' : ''}`).join(', ');
+  const list =(items) => items.map((n) => `${ddmm(n.leg.date)} ${n.leg.flight}${n.status === 'company' ? ' – שינוי ביוזמת החברה' : ''}`).join(', ');
   // כשהרכב הצוות ידוע בכל הטיסות, סופרים רק את אלה שבהרכב שנספר (בעל המוצר, 04/10/2026).
   const known = crews && night.every((n) => crewOf(n) != null);
   const base = known ? pool : night;
-  const flightsWord = (n) => (n === 0 ? 'לא תוכננו טיסות' : n === 1 ? 'תוכננה טיסה אחת' : `תוכננו ${n} טיסות`);
-  const planned = `${flightsWord(base.length)}${known ? ` בצוות ${crewNames}` : ''} עם נחיתה בין ${params.window_from} ל-${params.window_to}`;
-  // פחות מהמינימום: סופרים רק את הטיסות בהרכב שנספר, גם כשהרכב הצוות של חלקן אינו ידוע
-  // (הן נספרות, ואחרת לא היו מגיעים לכאן).
-  if (crews && pool.length < params.min_planned_count) {
+  const planned = `תוכננו ${base.length} ${known ? nightWord : 'טיסות לילה'} ${landing}`;
+  // ליד כל טיסה שהרכב הצוות שלה אינו ידוע – למה: בדרך כלל היא אינה ביומן, כי הוחלפה או בוטלה.
+  const listCrew = (items) => items.map((n) => `${list([n])}${crewOf(n) != null ? '' : ctx.inCalendar(n.leg.date, n.leg.flight) === false ? ' – אינה ביומן והרכב הצוות שלה אינו ידוע' : ' – הרכב הצוות אינו ידוע'}`).join(', ');
+  // פחות מהמינימום גם כשכל טיסה שהרכב הצוות שלה אינו ידוע נספרת: בטוח שאין פיצוי (בעל המוצר, 04/10/2026).
+  // כשההרכבים ידועים – כמה תוכננו; כשלא – לכל היותר כמה.
+  if (crews && pool.length < min) {
     const unknown = pool.filter((n) => crewOf(n) == null);
-    // ליד כל טיסה שהרכב הצוות שלה אינו ידוע – למה: בדרך כלל היא אינה ביומן, כי הוחלפה או בוטלה.
-    const listCrew = (items) => items.map((n) => `${list([n])}${crewOf(n) != null ? '' : ctx.inCalendar(n.leg.date, n.leg.flight) === false ? ' – אינה ביומן והרכב הצוות שלה אינו ידוע' : ' – הרכב הצוות אינו ידוע'}`).join(', ');
-    const which = unknown.length ? ` בצוות ${crewNames} או בהרכב צוות לא ידוע` : ` בצוות ${crewNames}`;
-    ctx.note(null, `${rule.title}: ${flightsWord(pool.length)}${which} עם נחיתה בין ${params.window_from} ל-${params.window_to}` +
-      `${pool.length ? ` (${listCrew(pool)})` : ''}. המינימום הוא ${params.min_planned_count}, ולכן אין פיצוי.`, rule);
+    const few = pool.length === 1 ? `תוכננה טיסת לילה אחת בצוות ${crewNames}` : pool.length ? `תוכננו ${pool.length} ${nightWord}` : `לא תוכננו ${nightWord}`;
+    ctx.note(null, unknown.length
+      ? `${rule.title}: לא תוכננו מעל ${min - 1} ${nightWord} ${landing} (${listCrew(pool)}), ולכן אין פיצוי.`
+      : `${rule.title}: ${few} ${landing}${pool.length ? ` (${list(pool)})` : ''}. המינימום הוא ${min}, ולכן אין פיצוי.`, rule);
     return;
   }
 
@@ -493,6 +502,14 @@ function night_landings(ctx, params, rule) {
   counted.sort((a, b) => a.leg.date.localeCompare(b.leg.date) || a.clock - b.clock);
   const paying = counted.slice(threshold - 1);
   const open = crews ? pool.filter((n) => crewOf(n) == null) : [];
+  // בתכנון לבד הרכב הצוות אינו נשאל (בעל המוצר, 03/10/2026): ייתכן שמגיע פיצוי, וזה ייבדק אחרי
+  // שתועלה הרומה (בעל המוצר, 04/10/2026).
+  if (open.length && !ctx.hasExec) {
+    const what = open.length === pool.length ? ` (${names(pool)}), והרכב הצוות ${pool.length === 1 ? 'שלה' : 'שלהן'} אינו ידוע` : ` (${listCrew(pool)})`;
+    ctx.note(null, `${rule.title}: תוכננו ${pool.length} טיסות לילה ${landing}${what}. ` +
+      `המינימום הוא ${min}, כך שייתכן שמגיע פיצוי, וזה ייבדק אחרי הביצוע.`, rule);
+    return;
+  }
   if (open.length) {
     const unpaid = paying.filter((n) => !(n.target ? ctx.paidOn(n.target, params.report_column, key, hours)
       : ctx.paidOnDate(n.pairing.from, params.report_column, key, hours)));
@@ -527,7 +544,7 @@ function night_landings(ctx, params, rule) {
 
   // כשכל מה שתוכנן נספר כבוצע, מספר אחד מספיק לשניהם.
   const counts = counted.length === base.length
-    ? `תוכננו ונספרות ${base.length} טיסות${known ? ` בצוות ${crewNames}` : ''} עם נחיתה בין ${params.window_from} ל-${params.window_to}`
+    ? `תוכננו ונספרות ${base.length} ${known ? nightWord : 'טיסות לילה'} ${landing}`
     : `${planned}, ונספרות ${counted.length}`;
   ctx.note(null, `${rule.title}: ${counts} (${list(counted)}). הפיצוי הוא מהטיסה ה-${threshold} שבוצעה, ` +
     `ולכן מגיע פיצוי של ${minToHhmm(hours)} על ${names(paying)}.`, rule);
