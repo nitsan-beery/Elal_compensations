@@ -45,6 +45,8 @@ const hm = (v, unit) => (unit === 'count' ? String(v) : minToHhmm(v));
 console.log(`חודש ${r.period.month}/${r.period.year} · מצב ${r.mode} · בסיס ${r.domicile} · חוקים ${r.rulesVersion}`);
 console.log(`חוקים נתמכים: ${r.rules.supported.length} · לא נתמכים: ${r.rules.unsupported.length}`);
 if (calendar) console.log(`יומן: הרכב הצוות של ${r.calendarCrew} טיסות`);
+if (r.calendarMissing?.length) console.log(`יומן: אין הרכב צוות לטיסות שבוצעו: ${r.calendarMissing.map((m) => `${m.date.slice(8)}/${m.date.slice(5, 7)} ${m.flight}`).join(', ')}`);
+if (r.keptUsed?.length) console.log(`יומן: הרכב צוות של טיסות שירדו מהיומן: ${r.keptUsed.join(', ')}`);
 for (const w of r.warnings) console.log('אזהרה:', w);
 if (r.legal) {
   console.log('\n== מגבלות החוק ==');

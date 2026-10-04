@@ -4,7 +4,7 @@
 import { parsePlan } from './pdf/plan.js';
 import { parseExec } from './pdf/exec.js';
 import { xlsxBlob } from './xlsx.js';
-import { evaluate, monthCalendar, calendarGaps, crewAnswersInCalendar, relatedCrewIds } from './rules/evaluate.js';
+import { evaluate, monthCalendar, calendarGaps, crewAnswersInCalendar, relatedCrewIds, keepRemovedFlights } from './rules/evaluate.js';
 import { loadRules, partitionRules } from './rules/catalog.js';
 import { minToHhmm } from './time.js';
 import * as store from './store.js';
@@ -267,9 +267,9 @@ async function runAndSave() {
   const r = state.record;
   const months = await safe(() => store.listMonths(), []);
   // ההשלמות מהיומן נשמרות בחודש, ונשארות בו גם אחרי ניתוק (בעל המוצר, 04/10/2026). יומן שאין בו
-  // דבר מהחודש אינו מוחק את מה שנשמר.
+  // דבר מהחודש אינו מוחק את מה שנשמר, וטיסה שירדה מהיומן שומרת את הרכב הצוות שהיה רשום בה (`keepRemovedFlights`).
   const fresh = monthCalendar(calendarFacts(), r.period);
-  if (fresh?.flights.length || fresh?.standby.length) r.calendar = fresh;
+  if (fresh?.flights.length || fresh?.standby.length) r.calendar = keepRemovedFlights(fresh, r.calendar);
   state.result = evaluate({ rulesData: state.rulesData, plan: r.plan, exec: r.exec, answers: r.answers ?? {}, history: historyFor(r.key, months), calendar: r.calendar ?? null,
     reopen: r.calendarIgnored ?? [] });
   r.rulesVersion = state.result.rulesVersion;
@@ -350,6 +350,12 @@ function renderCalendarBar() {
   }
   const review = crewReview();
   if (review.length) notices.push(renderCrewReview(review));
+  // טיסות שבוצעו ואין ביומן הרכב הצוות שלהן: כנראה שהיומן לא מעודכן (בעל המוצר, 04/10/2026).
+  const missing = c && !state.calBusy ? state.result?.calendarMissing ?? [] : [];
+  if (missing.length) {
+    notices.push(`<div class="notice warn">ביומן לא מופיע הרכב הצוות של ${missing.length === 1 ? 'טיסה אחת' : `${missing.length} טיסות`} שבוצעו: ${
+      missing.map((m) => esc(`⁦${ddmm(m.date)} ${m.flight}⁩`)).join(', ')}. ודא שבוצע סנכרון של היומן מהאורגנייזר.</div>`);
+  }
   const parts = calendarParts(c);
   if (state.result) {
     bar.innerHTML = notices.join('');
@@ -867,6 +873,7 @@ function renderQuestion(q, i) {
     <h3>${titleHtml(q.title)}</h3>
     ${q.body ? `<p>${esc(datesFirst(q.body))}</p>` : ''}
     ${hint ? `<p class="small muted">ענית קודם ${esc(answerLabel(hint.answer, kind))}, וביומן ${esc(answerLabel(hint.calendar, kind))}.</p>` : ''}
+    ${q.calendarBefore && !hint ? `<p class="small muted">ביומן היה רשום קודם ${esc(answerLabel(q.calendarBefore, kind))}, והטיסה כבר אינה בו.</p>` : ''}
     <form data-qid="${esc(q.id)}">
       ${picker}${options}
       <div class="row" style="margin-top:.5rem"><button class="btn primary" type="submit" ${q.dateInput ? '' : 'disabled'}>שמור תשובה</button></div>
