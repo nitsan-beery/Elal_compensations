@@ -126,6 +126,8 @@ export function evaluate({ rulesData, plan = null, exec = null, answers = {}, hi
     // בלי דוח ביצוע, הסבבים המתוכננים משמשים לחישוב הקרדיט והרי"ג הצפויים.
     execPairings: exec ? execPairings : planPairings });
   ctx.legalRest = legalRest;
+  // האם היומן מכיר את הטיסה: null כשאין ביומן טיסות.
+  ctx.inCalendar = (date, flight) => (calendar?.flights?.length ? cal.has(date, flight) : null);
 
   // מגבלות החוק על התכנון (בעל המוצר, 03/10/2026). לפני החוקים, כדי ששאלת הרכב הצוות שלהן
   // תשמש גם את נחיתות הלילה.

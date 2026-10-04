@@ -449,9 +449,11 @@ function night_landings(ctx, params, rule) {
   // (הן נספרות, ואחרת לא היו מגיעים לכאן).
   if (crews && pool.length < params.min_planned_count) {
     const unknown = pool.filter((n) => crewOf(n) == null);
+    // ליד כל טיסה שהרכב הצוות שלה אינו ידוע – למה: בדרך כלל היא אינה ביומן, כי הוחלפה או בוטלה.
+    const listCrew = (items) => items.map((n) => `${list([n])}${crewOf(n) != null ? '' : ctx.inCalendar(n.leg.date, n.leg.flight) === false ? ' – אינה ביומן והרכב הצוות שלה אינו ידוע' : ' – הרכב הצוות אינו ידוע'}`).join(', ');
     const which = unknown.length ? ` בצוות ${crewNames} או בהרכב צוות לא ידוע` : ` בצוות ${crewNames}`;
     ctx.note(null, `${rule.title}: ${flightsWord(pool.length)}${which} עם נחיתה בין ${params.window_from} ל-${params.window_to}` +
-      `${pool.length ? ` (${list(pool)})` : ''}. המינימום הוא ${params.min_planned_count}, ולכן אין פיצוי.`, rule);
+      `${pool.length ? ` (${listCrew(pool)})` : ''}. המינימום הוא ${params.min_planned_count}, ולכן אין פיצוי.`, rule);
     return;
   }
 
