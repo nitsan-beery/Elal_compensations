@@ -1220,7 +1220,7 @@ function legal_crew_composition(ctx, params, rule) {
       ctx.note(fdp.date, `${routeOnly(fdp.what)}: הרומה מזכה את הפיצוי, ולכן הצוות היה קטן מהצוות החוזי (${CREW_LABEL[need]}).`, rule, { aside: true });
       ctx.expectPairingDay(pairing, day, key, amount, rule,
         `${rule.title}: ${fdp.what}. הרומה מזכה את הפיצוי, ולכן הצוות היה קטן מהחוזי (${CREW_LABEL[need]})`,
-        { explain: `הרומה מזכה את הפיצוי, ו${contract}. האפליקציה מניחה` });
+        { explain: `הרומה מזכה את הפיצוי, ו${contract}. האפליקציה מניחה שהטיסה בוצעה בצוות קטן ממנו.` });
     } else if (ctx.hasExec) {
       pending.push(fdp);
       // מה חורג בהרכב הקטן ממנו: למה זה הצוות החוזי.
