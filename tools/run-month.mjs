@@ -61,6 +61,11 @@ for (const c of r.changes) {
   for (const n of c.notes ?? []) console.log(`      ${n.message}${n.byUser ? ' (לפי תשובת המשתמש)' : ''}`);
 }
 
+if (r.calendarChanges) {
+  console.log('\n== שינויים בין התכנון ליומן ==');
+  for (const c of r.calendarChanges) console.log(`${c.date.slice(8)}  ${c.label.padEnd(30)} תכנון: ${c.plan ?? '—'}  |  יומן: ${c.calendar ?? '—'}`);
+}
+
 console.log('\n== השוואה מול הדוח ==');
 for (const row of r.comparison) {
   const mark = row.pending ? '…' : row.ok ? '✓' : '✗';
