@@ -147,6 +147,8 @@ export function evaluate({ rulesData, plan = null, exec = null, answers = {}, hi
     });
     out.legal = legal.result;
     crewIdOf = legal.crewIdOf;
+    // ה-FDP בזמנים המתוכננים, לצוות החוזי (`legal_crew_composition`).
+    ctx.legalFdps = legal.fdps;
   }
   // מזהה השאלה לפי הרגל בקובץ שנבדק; הרגל מהקובץ השני יכולה להיות רשומה ביום שלידו.
   const near = (date, k) => new Date(Date.parse(date) + k * 864e5).toISOString().slice(0, 10);
@@ -173,7 +175,7 @@ export function evaluate({ rulesData, plan = null, exec = null, answers = {}, hi
   explainCompensations(out);
   if (exec) {
     out.comparison = compare({ out, timeline, execPairings, domicile, codes, fdp });
-    explainUnexplained(out);
+    explainUnexplained(out, timeline, cal);
     out.totals = compareTotals(out, exec);
     warnMissingColumns(out, exec);
   }
@@ -289,10 +291,10 @@ function makeContext({ out, timeline, domicile, codes, holidays, answers, plan, 
         pairing: describePairing(pairing), key, min, note, ...ruleRef(rule), ...extra });
     },
     /** ציפייה של סבב שנרשמת ביום מסוים (הקרדיט של כל יממה בסבב). */
-    expectPairingDay(pairing, date, key, min, rule, note) {
+    expectPairingDay(pairing, date, key, min, rule, note, extra) {
       if (!min) return;
       out.expectations.push({ date, dates: [date], pairingId: pairing.id,
-        pairing: describePairing(pairing), key, min, note, ...ruleRef(rule) });
+        pairing: describePairing(pairing), key, min, note, ...ruleRef(rule), ...extra });
     },
     /**
      * קוד שאינו ב-`rules.json`, ומה שהמשתמש ענה עליו. גם קוד שהקוד מזהה לפי קידומת
@@ -773,11 +775,17 @@ function explainCompensations(out) {
   }
 }
 
-/** פיצוי שרשום ברומה ואף חוק אינו מסביר: גם הוא בשורה שלו (`notes`). שורה שממתינה לתשובה אינה ממצא עדיין. */
-function explainUnexplained(out) {
+/**
+ * פיצוי שרשום ברומה ואף חוק אינו מסביר: גם הוא בשורה שלו (`notes`). שורה שממתינה לתשובה אינה ממצא עדיין.
+ * כשהיומן מכיר את הטיסות בשורה, הרכב הצוות ידוע ואינו יכול להסביר את הפיצוי: "לא נמצא הסבר מתאים"
+ * (בעל המוצר, 04/10/2026; 11/11/2025 DME: ‏05:00 בצוות כפול).
+ */
+function explainUnexplained(out, timeline, cal) {
+  const known = (dates) => dates.some((d) => (dayOf(timeline, d)?.exec?.legs ?? []).some((l) => l.flight && cal.has(d, l.flight)));
   for (const row of out.comparison) {
     if (!COMPENSATION_COLUMNS.includes(row.column) || row.pending || row.reported <= row.expected) continue;
-    row.notes = [`ברומה רשום פיצוי ${minToHhmm(row.reported - row.expected)} שאף חוק אינו מסביר.`];
+    const amount = minToHhmm(row.reported - row.expected);
+    row.notes = [known(row.dates ?? []) ? `ברומה רשום פיצוי ${amount}. לא נמצא הסבר מתאים לפיצוי.` : `ברומה רשום פיצוי ${amount} שאף חוק אינו מסביר.`];
   }
 }
 

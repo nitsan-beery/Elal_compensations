@@ -1094,6 +1094,106 @@ function ulh_flight(ctx, params, rule) {
   }
 }
 
+// ---------- הרכב צוות חוקי במקום חוזי (2024 ס' 36; הצוות החוזי: 2018 ס' 50–51) ----------
+
+const CREWS = Object.keys(CREW_LABEL); // מהקטן לגדול
+
+/**
+ * המגבלות החוזיות לכל הרכב, לפי התכנון (`fdp` מ-`plannedFdp` ב-legal.js), ו-null להרכב שאינו אפשרי.
+ * - זמן טיסה: צוות בודד לפי `single_flight_time` – השורה הראשונה שמתאימה לשעת ההתייצבות המקומית,
+ *   לשעת ה-On block (`on_block_until`: עד השעה הזאת בלילה שאחרי יום ההתייצבות) ולסבב ליעד
+ *   (`round_stations`: סבב למוסקבה, שנוחת בבסיס). מוגבר וכפול – ערך קבוע, חוץ מיעד שיש לו חריגה.
+ * - FDP: המגבלה החוקית לאותה התייצבות, פחות `fdp_reduction_minutes` בצוות בודד ובמוגבר, ובכפול בלי
+ *   הפחתה. סבב לילה במוגבר עם מתקן מנוחה במחלקה `night_round.rest_class`, שה-FDP שלו עובר את
+ *   `night_round.base_clock` ונוחת בבסיס: `night_round.fdp`.
+ * - רגליים: כמו בחוק.
+ */
+function contractLimits(fdp, params, domicile) {
+  const dayStart = Math.floor(fdp.reportLocal / 1440) * 1440;
+  const reportClock = clockOf(fdp.reportLocal);
+  const inWindow = (r) => {
+    const from = parseClock(r.report_from);
+    const to = parseClock(r.report_to);
+    return from <= to ? reportClock >= from && reportClock <= to : reportClock >= from || reportClock <= to;
+  };
+  const last = fdp.flights.at(-1);
+  const round = (r) => !r.round_stations || (last.dst === domicile && fdp.flights.some((f) => r.round_stations.includes(f.dst)));
+  const landed = (r) => !r.on_block_until || fdp.onBlockLocal <= dayStart + 1440 + parseClock(r.on_block_until);
+  const singleFt = params.single_flight_time.find((r) => inWindow(r) && round(r) && landed(r));
+  const exception = (list) => (list ?? []).find((x) => fdp.flights.some((f) => f.dst === x.dst) &&
+    (!x.fleets || x.fleets.some((k) => (fdp.ac ?? '').startsWith(k))));
+  const red = params.fdp_reduction_minutes ?? 0;
+  const n = params.night_round;
+  const crossesNight = !!n && last.dst === domicile && fdp.restClass === n.rest_class &&
+    [0, 1].some((k) => { const c = Math.floor(fdp.start / 1440) * 1440 + k * 1440 + parseClock(n.base_clock); return c > fdp.start && c < fdp.end; });
+  const lim = fdp.legal;
+  return {
+    single: lim.single && singleFt ? { ft: parseClock(singleFt.max), fdp: lim.single.fdp - red, seg: lim.single.seg } : null,
+    augmented: lim.augmented ? { ft: parseClock(exception(params.augmented_exceptions)?.max ?? params.augmented_flight_time),
+      fdp: crossesNight ? parseClock(n.fdp) : lim.augmented.fdp - red, seg: lim.augmented.seg } : null,
+    double: lim.double ? { ft: parseClock(params.double_flight_time), fdp: lim.double.fdp, seg: lim.double.seg } : null,
+  };
+}
+
+/**
+ * צוות חוקי ולא חוזי (2024 ס' 36): טיסה בהרכב קטן מהצוות החוזי מזכה כל מי שביצע אותה ב-`hours`.
+ * הצוות החוזי הוא ההרכב הקטן ביותר שה-FDP המתוכנן עומד במגבלות ההסכם שלו (`contractLimits`).
+ * ההסכם מגביל את הפיצוי ל"יעדים או טיסות כפי שיוסכם מעת לעת מול ועד אצ"א", והרשימה אינה בקבצים:
+ * כל טיסה בהרכב קטן מהחוזי נחשבת כזאת (בעל המוצר, 04/10/2026). FDP שאינו עומד באף הרכב חוזי אינו
+ * מזכה. הרכב הצוות – מהיומן או מתשובת המשתמש, באותה שאלה של מגבלות החוק (`crew:`). בלעדיו:
+ * כשהרומה זיכתה את הפיצוי, מניחים צוות קטן מהחוזי; כשלא – שואלים, רק כשיש רומה (בעל המוצר, 04/10/2026).
+ */
+function legal_crew_composition(ctx, params, rule) {
+  const key = keyFor(params.report_column);
+  const own = ctx.rulesWithLogic('legal_crew_composition').map((r) => r.id);
+  const pairings = ctx.hasExec ? ctx.execPairings : ctx.planPairings;
+  const near = (a, b) => Math.abs(Date.parse(a) - Date.parse(b)) <= dayMs;
+  const amount = H(params.hours);
+  for (const fdp of ctx.legalFdps ?? []) {
+    const lim = contractLimits(fdp, params, ctx.domicile);
+    const fits = (c) => lim[c] && fdp.ft <= lim[c].ft && fdp.fdp <= lim[c].fdp && fdp.seg <= lim[c].seg;
+    const need = CREWS.find(fits);
+    if (!need || need === 'single') continue;
+    const first = fdp.flights[0];
+    const pairing = pairings.find((p) => p.legs.some((l) => l.flight === first.flight && near(l.date, first.date)));
+    if (!pairing) continue;
+    const day = pairing.dates.includes(first.date) ? first.date : pairing.from;
+    const answered = ctx.answer(fdp.id) ??
+      fdp.flights.map((f) => ctx.answer(`night_crew:${f.date}:${f.flight}`)).find(Boolean) ?? null;
+    const below = (c) => CREWS.indexOf(c) < CREWS.indexOf(need);
+    const contract = `הצוות החוזי ${CREW_LABEL[need]}`;
+    if (answered) {
+      if (!below(answered.value)) continue;
+      const by = answered.source === 'calendar' ? 'לפי היומן' : 'לפי תשובתך';
+      ctx.expectPairingDay(pairing, day, key, amount, rule,
+        `${rule.title}: ${fdp.what} ${ctx.hasExec ? 'בוצעה' : 'מתוכננת'} בצוות ${CREW_LABEL[answered.value]} ${by}, ו${contract}`,
+        { explain: `צוות ${CREW_LABEL[answered.value]} ${by}, ו${contract}.` });
+    } else if (ctx.paidOn(pairing, params.report_column, key, amount, own)) {
+      ctx.expectPairingDay(pairing, day, key, amount, rule,
+        `${rule.title}: ${fdp.what}. הרומה מזכה את הפיצוי, ולכן הצוות היה קטן מהחוזי (${CREW_LABEL[need]})`,
+        { explain: `הרומה מזכה את הפיצוי, ו${contract}. האפליקציה מניחה` });
+    } else if (ctx.hasExec) {
+      // מה חורג בהרכב הקטן ממנו: למה זה הצוות החוזי.
+      const smaller = CREWS[CREWS.indexOf(need) - 1];
+      const l = lim[smaller];
+      const over = !l ? [] : [
+        fdp.ft > l.ft && `זמן הטיסה המתוכנן ${minToHhmm(fdp.ft)}, והמקסימום בצוות ${CREW_LABEL[smaller]} ${minToHhmm(l.ft)}`,
+        fdp.fdp > l.fdp && `ה-FDP המתוכנן ${minToHhmm(fdp.fdp)}, והמקסימום בצוות ${CREW_LABEL[smaller]} ${minToHhmm(l.fdp)}`,
+        fdp.seg > l.seg && `${fdp.seg} רגליים, והמקסימום בצוות ${CREW_LABEL[smaller]} ${l.seg}`,
+      ].filter(Boolean);
+      ctx.ask({
+        id: fdp.id,
+        date: fdp.date,
+        title: `באיזה צוות בוצע ${fdp.what}?`,
+        body: `${contract}${over.length ? `: ${over.join('; ')}` : ''}. בצוות קטן ממנו מגיע פיצוי, והרומה לא מזכה אותו.`,
+        options: CREWS.map((c) => ({ value: c, label: `${CREW_LABEL[c]} (${CREW_PILOTS[c]} טייסים)`,
+          ...(below(c) && { hint: `${minToHhmm(amount)} – פער מול הרומה` }) })),
+        ruleId: rule.id,
+      });
+    }
+  }
+}
+
 // ---------- הארכת שהייה (ישן כ"ה ס' 10.א(5), 10.ב) ----------
 
 /**
@@ -1558,6 +1658,7 @@ export const DUTY_LOGIC = {
   sim_extension,
   sim_friday_holiday_eve,
   covered_by,
+  legal_crew_composition,
 };
 
 export const DUTY_PARAMS = {
@@ -1580,4 +1681,6 @@ export const DUTY_PARAMS = {
   sim_friday_holiday_eve: ['hours', 'report_column', 'stations'],
   sim_extension: ['hours', 'report_column', 'stations', 'max_hours'],
   covered_by: ['rule'],
+  legal_crew_composition: ['hours', 'report_column', 'single_flight_time', 'augmented_flight_time', 'augmented_exceptions', 'double_flight_time',
+    'fdp_reduction_minutes', 'night_round'],
 };

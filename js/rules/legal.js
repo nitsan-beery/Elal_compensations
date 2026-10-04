@@ -59,18 +59,20 @@ export function restDefinition(limits) {
  * @param {Function} o.answer    (id) → תשובה או null
  * @param {Function} o.ask       (question) → void
  * @param {Function} [o.calendarStandby]  (date, code) → {start, end} מהיומן, או null
- * @returns {{result: object, crewIdOf: Map<string, string>}}
+ * @returns {{result: object, crewIdOf: Map<string, string>, fdps: Array}}
+ *   `fdps`: כל FDP בחודש, בזמנים המתוכננים (הבלוק המקובע וה-STD), לצוות החוזי (`plannedFdp`).
  */
 export function checkLegalLimits(o) {
   const { limits, period, domicile } = o;
   // `crewNeeded`: בתכנון לבד, FDP שעומד בחוק רק בצוות מוגבר או כפול – {date, what, crews}.
   const result = { basis: o.exec ? 'exec' : 'plan', violations: [], extensions: [], crewNeeded: [], source: limits.source };
   const crewIdOf = new Map(); // "date:flight" → מזהה שאלת הרכב הצוות של ה-FDP
+  const fdps = [];
   const monthStart = at(isoMonth(period), 0);
   const monthEnd = at(isoMonth(nextMonth(period)), 0);
   if (limits.valid_from && Date.parse(isoMonth(period)) < Date.parse(limits.valid_from.slice(0, 7) + '-01')) {
     result.skipped = `מגבלות החוק נבדקות מ-${limits.valid_from.slice(5, 7)}/${limits.valid_from.slice(0, 4)}, לפי גרסת ה-OMA שבידינו.`;
-    return { result, crewIdOf };
+    return { result, crewIdOf, fdps };
   }
 
   const own = o.exec ? execDuties(o.exec, o, plannedCodes(o.plan, o)) : planDuties(o.plan, o);
@@ -112,6 +114,7 @@ export function checkLegalLimits(o) {
     for (const f of ch.flights) crewIdOf.set(`${f.date}:${f.flight}`, id);
     if (!inMonth(ch.fdpStart)) continue;
     checkFdp(ch, id, o, flag, extend, (need) => result.crewNeeded.push(need));
+    fdps.push(plannedFdp(ch, id, o));
   }
   checkReserve(chains, limits, inMonth, flag);
   checkDeadheadRest(chains, o, inMonth, flag);
@@ -122,7 +125,7 @@ export function checkLegalLimits(o) {
 
   result.violations.sort((a, b) => a.date.localeCompare(b.date));
   result.extensions.sort((a, b) => a.date.localeCompare(b.date));
-  return { result, crewIdOf };
+  return { result, crewIdOf, fdps };
 }
 
 // ---------- התפקידים מהקבצים ----------
@@ -203,7 +206,7 @@ function execDuties(exec, o, planned = null) {
       const skd = at(day.date, mod(sched - off, 1440));
       const std = skd + (actual ? mod(leg.atd - sched + 720, 1440) - 720 : 0);
       // ההתייצבות לפי ה-STD: עיכוב אינו מזיז אותה.
-      legs.push({ kind: leg.type === 'LEG' ? 'flight' : 'dh', date: day.date, flight: leg.flight ?? leg.type, org: leg.org, dst: leg.dst, ac: null, skd, std, sta: std + dur, block: dur });
+      legs.push({ kind: leg.type === 'LEG' ? 'flight' : 'dh', date: day.date, flight: leg.flight ?? leg.type, org: leg.org, dst: leg.dst, ac: null, skd, std, sta: std + dur, block: dur, planBlock: leg.skdDur ?? dur });
     }
     // ביום הראשון, כשהוא מחוץ לבסיס מתחילתו (TAB של 24:00), הרומה חוזרת על סבב שיצא בחודש הקודם
     // (01/06/2026: LY387 ו-LY388 של 31/05; כמו `markCarryIn`): הרגליים עד החזרה לבסיס יצאו יום קודם.
@@ -275,6 +278,8 @@ function setTimes(it, o) {
   const sched = (x) => (x.delayedReport ? x.std : Math.min(x.std, x.skd ?? x.std));
   if (it.kind === 'flight') {
     it.start = sched(it) - reportMinutes(it, o);
+    // ההתייצבות המתוכננת, לצוות החוזי (`plannedFdp`).
+    it.plannedStart = (it.skd ?? it.std) - reportMinutes(it, o);
     it.release = it.sta + (limits.post_flight_minutes ?? 0);
     it.station = it.org;
   } else if (it.kind === 'dh') {
@@ -471,6 +476,36 @@ function checkFdp(ch, id, o, flag, extend, needCrew) {
     ruleId: null,
     ruleTitle: LEGAL_TITLE,
   });
+}
+
+/**
+ * ה-FDP בזמנים המתוכננים: ההסכם קובע את הצוות החוזי לפי התכנון ו"זמני הבלוק המקובע" (2018 ס' 50–51).
+ * המגבלות החוקיות (`legal`) מחושבות לאותה התייצבות; הצוות החוזי נגזר מהן ב-`legal_crew_composition`.
+ * שעות מקומיות (`reportLocal`, `onBlockLocal`): ההסכם מגדיר בהן את חלונות זמן הטיסה של צוות בודד.
+ */
+function plannedFdp(ch, id, o) {
+  const last = ch.flights.at(-1);
+  const before = ch.items.filter((i) => i.start <= last.start && i.kind !== 'rap');
+  const start = Math.min(...before.map((i) => i.plannedStart ?? i.start));
+  const end = (last.skd ?? last.std) + (last.planBlock ?? last.block);
+  const planned = { ...ch, fdpStart: start };
+  const first = ch.flights[0];
+  return {
+    id,
+    date: first.date,
+    what: describeChain(ch),
+    flights: ch.flights.map((f) => ({ date: f.date, flight: f.flight, org: f.org, dst: f.dst })),
+    ft: ch.flights.reduce((s, f) => s + (f.planBlock ?? f.block), 0),
+    fdp: end - start,
+    seg: ch.flights.length,
+    start,
+    end,
+    reportLocal: start + (o.offsetAt(first.org, first.date) ?? 0),
+    onBlockLocal: end + (o.offsetAt(last.dst, last.date) ?? 0),
+    ac: first.ac ?? null,
+    restClass: restClass(first.ac, o.limits),
+    legal: { single: limitsFor('single', planned, o.limits), augmented: limitsFor('augmented', planned, o.limits), double: limitsFor('double', planned, o.limits) },
+  };
 }
 
 // ---------- מנוחה ----------

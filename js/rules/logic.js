@@ -454,23 +454,6 @@ function absence_month_cap(ctx, params, rule) {
   ctx.capAbsenceTotal(H(params.cap_hours), rule);
 }
 
-/**
- * פיצוי בדוח שאף חוק אינו מסביר, בגובה `hours` בדיוק על סבב, עשוי להיות החוק הזה. החוק תלוי
- * במידע שאינו בקבצים (למשל הרכב הצוות), ולכן לא מנחשים שהפיצוי מגיע; כשהוא כבר בדוח, הוא
- * נרשם כצפוי עם הערה `hint`. רץ אחרי כל שאר החוקים.
- */
-function unexplained_report_amount(ctx, params, rule) {
-  if (!ctx.hasExec) return;
-  const key = params.report_column === 'S/C' ? 'sc' : 'com';
-  for (const p of ctx.execPairings) {
-    const extra = ctx.reportedOn(p, params.report_column) - ctx.expectedAround(p, key);
-    if (extra !== H(params.hours)) continue;
-    // לא "מגיע": הפיצוי כבר ברומה, ואין בקבצים מה שמסביר אותו.
-    ctx.expectPairing(p, key, extra, rule, `${describePairing(p)}: ${minToHhmm(extra)} שאף חוק אחר אינו מסביר. ${params.hint}`,
-      { hint: true, explain: `ברומה רשום פיצוי שאף חוק אחר אינו מסביר. ${params.hint}` });
-  }
-}
-
 // ---------- חוקי ביצוע ----------
 
 /**
@@ -1503,7 +1486,6 @@ export const LOGIC = {
   dh_activated,
   standby_end_for_bid,
   standby_activation,
-  unexplained_report_amount,
   ...DUTY_LOGIC,
 };
 
@@ -1531,7 +1513,6 @@ export const KNOWN_PARAMS = {
   dh_activated: ['hours', 'report_column', 'report_dh_types'],
   standby_end_for_bid: ['requires_user_answer', 'plan_codes', 'plan_code_prefixes', 'last_days'],
   standby_activation: ['plan_codes', 'plan_code_prefixes'],
-  unexplained_report_amount: ['hours', 'report_column', 'hint'],
   ...DUTY_PARAMS,
 };
 
@@ -1577,7 +1558,7 @@ export const LOGIC_ORDER = [
   'sim_extension',
   'sim_friday_holiday_eve',
   'covered_by',
-  // אחרון מבין חוקי הפיצוי: מה שנשאר בדוח בלי הסבר.
-  'unexplained_report_amount',
+  // אחרון מבין חוקי הפיצוי: בלי הרכב צוות, הוא מניח צוות חוקי רק כשהפיצוי ברומה ושאר החוקים אינם מסבירים אותו.
+  'legal_crew_composition',
   'absence_month_cap',
 ];
