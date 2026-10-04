@@ -415,13 +415,8 @@ function night_landings(ctx, params, rule) {
   const nightWord = `טיסות לילה${crews ? ` בצוות ${crewNames}` : ''}`;
   const landing = `שנוחתות בין ${params.window_from} ל-${params.window_to}`;
   const names = (items) => items.map((n) => `${ddmm(n.leg.date)} ${n.leg.flight}`).join(', ');
-  // בכל מקרה אין פיצוי, בלי קשר להרכב הצוות (בעל המוצר, 04/10/2026). כשאין פיצוי ההערה בלי מספרי הטיסות.
-  if (night.length < min) {
-    if (night.length + unsure.length < min) {
-      ctx.note(null, `לא תוכננו מעל ${min - 1} ${nightWord} ${landing}, ולכן אין פיצוי.`, rule);
-    }
-    return;
-  }
+  // פחות מהמינימום, בכל הרכב צוות: אין פיצוי, ואין הערה (בעל המוצר, 04/10/2026).
+  if (night.length < min) return;
 
   // מה נחשב ביצוע: הטיסה בדוח, או ביטול ושינוי הצבה ביוזמת החברה (ס' 40). הסיבה נשאלת
   // במקום אחד בלבד, בשאלה על הסבב שלא בוצע, וכאן רק קוראים מה יצא ממנה.
@@ -445,8 +440,8 @@ function night_landings(ctx, params, rule) {
   // נספרות רק טיסות בהרכב צוות מ-`counted_crews` (2024 ס' 39–40: בודד או מוגבר). ההרכב אינו
   // בקבצים, ולכן מניחים תחילה שכל טיסה שלא נענתה נספרת: ההרכב יכול רק להוריד את המספר, וזאת
   // התוצאה הגבוהה האפשרית. רק אם תחתיה מגיע פיצוי שהדוח לא זיכה, נשאלת שאלה על הרכב הצוות
-  // (החלטת בעל המוצר, 23/09/2026). מרגע שתוכננו `min_planned_count` טיסות כאלה, כל מסלול
-  // מסתיים בהערה שמסבירה את המצב ואת הסיבה – גם כשאין פיצוי (בקשת בעל המוצר, 23/09/2026).
+  // (החלטת בעל המוצר, 23/09/2026). מרגע שתוכננו `min_planned_count` טיסות לילה, בכל הרכב, כל
+  // מסלול מסתיים בהערה שמסבירה את המצב ואת הסיבה – גם כשאין פיצוי (בעל המוצר, 23/09/2026 ו‑04/10/2026).
   const pool = crews ? night.filter((n) => crewOf(n) == null || crews.includes(crewOf(n))) : night;
   const list =(items) => items.map((n) => `${ddmm(n.leg.date)} ${n.leg.flight}${n.status === 'company' ? ' – שינוי ביוזמת החברה' : ''}`).join(', ');
   // כשהרכב הצוות ידוע בכל הטיסות, סופרים רק את אלה שבהרכב שנספר (בעל המוצר, 04/10/2026).
@@ -455,14 +450,14 @@ function night_landings(ctx, params, rule) {
   const planned = `תוכננו ${base.length} ${known ? nightWord : 'טיסות לילה'} ${landing}`;
   // ליד כל טיסה שהרכב הצוות שלה אינו ידוע – למה: בדרך כלל היא אינה ביומן, כי הוחלפה או בוטלה.
   const listCrew = (items) => items.map((n) => `${list([n])}${crewOf(n) != null ? '' : ctx.inCalendar(n.leg.date, n.leg.flight) === false ? ' – אינה ביומן והרכב הצוות שלה אינו ידוע' : ' – הרכב הצוות אינו ידוע'}`).join(', ');
-  // פחות מהמינימום גם כשכל טיסה שהרכב הצוות שלה אינו ידוע נספרת: בטוח שאין פיצוי (בעל המוצר, 04/10/2026).
-  // כשההרכבים ידועים – כמה תוכננו; כשלא – לכל היותר כמה.
+  // פחות מהמינימום גם כשכל טיסה שהרכב הצוות שלה אינו ידוע נספרת: בטוח שאין פיצוי. ההערה אומרת
+  // אילו טיסות אינן נספרות בגלל הרכב הצוות שלהן (בעל המוצר, 04/10/2026).
   if (crews && pool.length < min) {
-    const unknown = pool.filter((n) => crewOf(n) == null);
-    const few = pool.length === 1 ? `תוכננה טיסת לילה אחת בצוות ${crewNames}` : pool.length ? `תוכננו ${pool.length} ${nightWord}` : `לא תוכננו ${nightWord}`;
-    ctx.note(null, unknown.length
-      ? `לא תוכננו מעל ${min - 1} ${nightWord} ${landing}, ולכן אין פיצוי.`
-      : `${few} ${landing}. המינימום הוא ${min}, ולכן אין פיצוי.`, rule);
+    const out = night.filter((n) => !pool.includes(n));
+    const each = out.map((n) => `${ddmm(n.leg.date)} ${n.leg.flight} בצוות ${CREW_LABEL[crewOf(n)] ?? crewOf(n)}`);
+    const which = each.length > 1 ? `${each.slice(0, -1).join(', ')} ו-${each.at(-1)}` : each[0];
+    ctx.note(null, `תוכננו ${night.length} טיסות לילה ${landing}, אבל ${which}, ו${out.length === 1 ? 'אינה נספרת' : 'אינן נספרות'}. ` +
+      `${pool.length === 1 ? 'נשארה אחת' : pool.length ? `נשארו ${pool.length}` : 'לא נשארה אף אחת'}, ולכן אין פיצוי.`, rule);
     return;
   }
 
