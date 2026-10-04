@@ -41,8 +41,8 @@ const CREDIT_LABEL_COLUMNS = ['Credit', 'FLT+DH', 'Rig'];
  *        מגבלות החוק שמתחילים לפני החודש (168 שעות, 672 שעות, 365 ימים).
  * @param {{flights: Array, standby: Array}|null} [input.calendar]  השלמות מהיומן, כשהמשתמש חיבר
  *        אותו (`parseEvents` ב-js/calendar.js): הרכב הצוות ושעות הכוננות. תשובה של המשתמש קודמת להן.
- * @param {string[]} [input.reopen]  שאלות שהמשתמש ביקש לשנות את התשובה עליהן: הן נשאלות שוב גם
- *        כשהיומן עונה עליהן (בעל המוצר, 04/10/2026).
+ * @param {string[]} [input.reopen]  שאלות שהיומן אינו עונה עליהן, כי המשתמש החליט בהן בעצמו
+ *        (`calendarIgnored` ברשומת החודש; בעל המוצר, 04/10/2026).
  */
 export function evaluate({ rulesData, plan = null, exec = null, answers = {}, history = [], calendar = null, reopen = [] }) {
   if (!plan && !exec) throw new Error('לא הועלה אף קובץ.');
@@ -270,10 +270,9 @@ const crewClass = (pilots) => (pilots >= 4 ? 'double' : pilots === 3 ? 'augmente
  * פערים בהרכב הצוות בין היומן המעודכן לבין מה שכבר שמור בחודש הפתוח (בעל המוצר, 04/10/2026):
  * - `changed` / `removed`: טיסה של החודש שהרכב הצוות שלה ביומן השמור (`prev`) שונה ביומן המעודכן, או שאינה בו.
  *   כשביומן המעודכן אין אף טיסה של החודש (למשל, החודש מחוץ לטווח שנקרא) – לא משווים.
- * - `answer`: תשובה של המשתמש לשאלת הרכב צוות (`crew:`, ‏`night_crew:`, ‏`white:`) שהיומן המעודכן עונה עליה אחרת.
- *   התשובה של המשתמש ממשיכה לקבוע.
+ * תשובות של המשתמש שהיומן עונה עליהן: `crewAnswersInCalendar`.
  */
-export function calendarGaps({ prev, fresh, answers = {}, domicile, period }) {
+export function calendarGaps({ prev, fresh, domicile, period }) {
   if (!domicile || !fresh) return [];
   const month = `${period.year}-${String(period.month).padStart(2, '0')}`;
   const crewOf = (cal) => {
@@ -294,19 +293,31 @@ export function calendarGaps({ prev, fresh, answers = {}, domicile, period }) {
       else if (after.get(k) !== was) gaps.push({ kind: 'changed', date, flight, before: was, after: after.get(k) });
     }
   }
-  const cal = calendarFacts(fresh, domicile);
+  return gaps.sort((a, b) => a.date.localeCompare(b.date));
+}
+
+/**
+ * תשובות של המשתמש על הרכב הצוות (`crew:`, ‏`night_crew:`, ‏`white:`) שהיומן של החודש עונה עליהן, חוץ
+ * ממה שב-`ignored` (שאלות שהמשתמש כבר החליט בהן מול היומן). האפליקציה שואלת אם לעדכן אותן מהיומן
+ * (בעל המוצר, 04/10/2026). `calendar`: היומן ששמור בחודש. `differs`: היומן עונה אחרת.
+ */
+export function crewAnswersInCalendar({ calendar, answers = {}, domicile, period, ignored = [] }) {
+  if (!domicile || !calendar?.flights?.length) return [];
+  const month = `${period.year}-${String(period.month).padStart(2, '0')}`;
+  const cal = calendarFacts(calendar, domicile);
+  const out = [];
   for (const [id, a] of Object.entries(answers)) {
     const m = /^(?:crew|night_crew|white):(\d{4}-\d{2}-\d{2}):/.exec(id);
-    const c = m && m[1].slice(0, 7) === month ? cal.answer(id) : null;
-    if (c && c.value !== a.value) gaps.push({ kind: 'answer', id, date: m[1], answer: a.value, calendar: c.value });
+    const c = m && m[1].slice(0, 7) === month && !ignored.includes(id) ? cal.answer(id) : null;
+    if (c) out.push({ id, date: m[1], answer: a.value, calendar: c.value, differs: c.value !== a.value });
   }
-  return gaps.sort((a, b) => a.date.localeCompare(b.date));
+  return out.sort((a, b) => a.date.localeCompare(b.date));
 }
 
 /**
  * כל השאלות על הרכב הצוות שהיומן יכול לענות עליהן במקום `id`: שאלת מגבלות החוק של ה-FDP שלו
  * (`crew:`), ושאלות נחיתות הלילה והטיסה הלבנה של כל טיסה בו, גם ביום שליד. התשובה לאחת משמשת את
- * האחרות, ולכן "שנה" פותח את כולן מחדש (`reopen`; בעל המוצר, 04/10/2026). `crewIdOf`: מהתוצאה.
+ * האחרות, ולכן החלטה של המשתמש על אחת מהן חלה על כולן (`reopen`; בעל המוצר, 04/10/2026). `crewIdOf`: מהתוצאה.
  */
 export function relatedCrewIds(id, crewIdOf = {}) {
   const m = /^(crew|night_crew|white):(\d{4}-\d{2}-\d{2}):(.+)$/.exec(id);

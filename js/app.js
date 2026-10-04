@@ -4,7 +4,7 @@
 import { parsePlan } from './pdf/plan.js';
 import { parseExec } from './pdf/exec.js';
 import { xlsxBlob } from './xlsx.js';
-import { evaluate, monthCalendar, calendarGaps, relatedCrewIds } from './rules/evaluate.js';
+import { evaluate, monthCalendar, calendarGaps, crewAnswersInCalendar, relatedCrewIds } from './rules/evaluate.js';
 import { loadRules, partitionRules } from './rules/catalog.js';
 import { minToHhmm } from './time.js';
 import * as store from './store.js';
@@ -68,7 +68,6 @@ const state = {
   calBusy: false,
   calInfo: false,
   calGaps: null, // {key, items}: פערים שהעדכון האחרון מהיומן מצא בחודש הפתוח (`calendarGaps`)
-  reopen: { key: null, ids: [] }, // שאלות שהמשתמש לחץ "שנה" על התשובה להן: נשאלות שוב גם כשהיומן עונה עליהן
   calError: null,
 };
 
@@ -272,7 +271,7 @@ async function runAndSave() {
   const fresh = monthCalendar(calendarFacts(), r.period);
   if (fresh?.flights.length || fresh?.standby.length) r.calendar = fresh;
   state.result = evaluate({ rulesData: state.rulesData, plan: r.plan, exec: r.exec, answers: r.answers ?? {}, history: historyFor(r.key, months), calendar: r.calendar ?? null,
-    reopen: state.reopen.key === r.key ? state.reopen.ids : [] });
+    reopen: r.calendarIgnored ?? [] });
   r.rulesVersion = state.result.rulesVersion;
   r.summary = summarize(state.result);
   await safe(() => store.putMonth(r));
@@ -331,10 +330,6 @@ function bindCalendar(scope) {
 /** פער בין היומן המעודכן לבין מה שנשמר בחודש, לתצוגה. */
 function describeGap(g) {
   const crew = (v) => answerLabel(v, 'crew');
-  if (g.kind === 'answer') {
-    const kind = g.id.split(':')[0];
-    return `${describeQuestionId(g.id)}: תשובתך ${answerLabel(g.answer, kind)}, וביומן ${answerLabel(g.calendar, kind)}. התשובה שלך קובעת. אפשר לשנות אותה ב"תשובות שנשמרו".`;
-  }
   const what = `⁦${ddmm(g.date)} ${g.flight}⁩`;
   return g.kind === 'removed'
     ? `${what}: הטיסה כבר אינה ביומן. קודם: ${crew(g.before)}.`
@@ -353,6 +348,8 @@ function renderCalendarBar() {
   if (gaps.length) {
     notices.push(`<div class="notice warn">היומן המעודכן שונה ממה שנשמר בחודש הזה:<ul>${gaps.map((g) => `<li>${esc(describeGap(g))}</li>`).join('')}</ul></div>`);
   }
+  const review = crewReview();
+  if (review.length) notices.push(renderCrewReview(review));
   const parts = calendarParts(c);
   if (state.result) {
     bar.innerHTML = notices.join('');
@@ -366,6 +363,56 @@ function renderCalendarBar() {
     bar.innerHTML = `<div class="row">${parts.label}<span class="spacer"></span>${parts.buttons}</div>${parts.infoHtml}${notices.join('')}`;
   }
   bindCalendar(bar);
+  for (const btn of bar.querySelectorAll('[data-crew-review]')) btn.addEventListener('click', () => applyCrewReview(btn.dataset.crewReview === 'yes'));
+}
+
+// ---------- תשובות על הרכב הצוות שהיומן עונה עליהן ----------
+
+/** תשובות של המשתמש על הרכב הצוות בחודש הפתוח שהיומן עונה עליהן, ועוד לא הוחלט בהן מולו. */
+function crewReview() {
+  const r = state.record;
+  if (!r || !state.result) return [];
+  return crewAnswersInCalendar({ calendar: r.calendar, answers: r.answers ?? {}, domicile: state.result.domicile, period: r.period, ignored: r.calendarIgnored ?? [] });
+}
+
+/**
+ * תשובות שנשמרו לפני שהיומן הראה את הרכב הצוות: האם לעדכן מהיומן (בעל המוצר, 04/10/2026). כן –
+ * מה שהיומן מאשר עובר אליו, ומה שהוא שונה בו נשאל שוב; לא – התשובות נשארות, וניתנות לשינוי ידני.
+ */
+function renderCrewReview(review) {
+  const n = review.length;
+  const diff = review.filter((x) => x.differs);
+  const kind = (x) => x.id.split(':')[0];
+  const lead = diff.length === n
+    ? (n === 1 ? 'היומן שונה מהתשובה שלך, והשאלה תישאל שוב' : 'בכולן היומן שונה מהתשובה שלך, והן יישאלו שוב')
+    : `ב-${diff.length} מהן היומן שונה מהתשובה שלך, ו${diff.length === 1 ? 'היא תישאל' : 'הן יישאלו'} שוב`;
+  return `<div class="notice warn">ביומן מופיע הרכב הצוות של ${n === 1 ? 'טיסה אחת' : `${n} טיסות`} שכבר ענית עליהן. לעדכן אותן מהיומן?
+    ${diff.length ? `<p class="small">${lead}:</p>
+    <ul>${diff.map((x) => `<li>${esc(describeQuestionId(x.id))}: ענית ${esc(answerLabel(x.answer, kind(x)))}, ביומן ${esc(answerLabel(x.calendar, kind(x)))}</li>`).join('')}</ul>` : ''}
+    <div class="row"><button type="button" class="btn primary" data-crew-review="yes">עדכן מהיומן</button>
+      <button type="button" class="btn" data-crew-review="no">השאר את התשובות שלי</button></div>
+  </div>`;
+}
+
+async function applyCrewReview(update) {
+  const r = state.record;
+  const ignored = new Set(r.calendarIgnored ?? []);
+  const hints = { ...(r.crewHints ?? {}) };
+  for (const x of crewReview()) {
+    const related = relatedCrewIds(x.id, state.result?.crewIdOf);
+    if (update) {
+      delete r.answers[x.id];
+      if (!x.differs) continue;
+      // השאלה נשאלת שוב, עם מה שענית קודם ומה שביומן.
+      for (const id of related) { ignored.add(id); hints[id] = { answer: x.answer, calendar: x.calendar }; }
+    } else {
+      for (const id of related) ignored.add(id);
+    }
+  }
+  r.calendarIgnored = [...ignored];
+  r.crewHints = hints;
+  state.notices = [];
+  await runAndSave();
 }
 
 /**
@@ -464,7 +511,7 @@ async function syncCalendar(pending = calendarToken()) {
     const facts = await calendar.fetchFacts(token, cals.map((x) => x.id), timeMin, timeMax);
     // הפערים נבדקים מול החודש הפתוח בלבד (בעל המוצר, 04/10/2026), לפני שהיומן המעודכן נשמר בו.
     const r = state.record;
-    state.calGaps = r && state.result ? { key: r.key, items: calendarGaps({ prev: r.calendar, fresh: monthCalendar(facts, r.period), answers: r.answers ?? {}, domicile: state.result.domicile, period: r.period }) } : null;
+    state.calGaps = r && state.result ? { key: r.key, items: calendarGaps({ prev: r.calendar, fresh: monthCalendar(facts, r.period), domicile: state.result.domicile, period: r.period }) } : null;
     const hint = all.find((x) => x.primary)?.id ?? c.hint ?? null;
     state.calendar = { ...c, calendars: cals, hint, facts, synced: new Date().toISOString() };
     await safe(() => store.putSetting(CAL_SETTING, state.calendar));
@@ -815,9 +862,12 @@ function renderQuestion(q, i) {
   const picker = q.dateInput ? `<label class="date-pick">בחר תאריך
     <input type="date" name="date" value="${esc(q.dateInput.value)}"${q.dateInput.min ? ` min="${esc(q.dateInput.min)}"` : ''}${q.dateInput.max ? ` max="${esc(q.dateInput.max)}"` : ''} required>
   </label>` : '';
+  const hint = state.record?.crewHints?.[q.id];
+  const kind = q.id.split(':')[0];
   return `<div class="question">
     <h3>${titleHtml(q.title)}</h3>
     ${q.body ? `<p>${esc(datesFirst(q.body))}</p>` : ''}
+    ${hint ? `<p class="small muted">ענית קודם ${esc(answerLabel(hint.answer, kind))}, וביומן ${esc(answerLabel(hint.calendar, kind))}.</p>` : ''}
     <form data-qid="${esc(q.id)}">
       ${picker}${options}
       <div class="row" style="margin-top:.5rem"><button class="btn primary" type="submit" ${q.dateInput ? '' : 'disabled'}>שמור תשובה</button></div>
@@ -1080,9 +1130,7 @@ function bindResults(root) {
       // שאלה שנשאלה רק בגלל התשובה הזאת נפתחת מחדש יחד איתה.
       for (const dep of [id, ...(state.result?.dependentAnswers?.[id] ?? [])]) delete state.record.answers[dep];
       // בלי זה היומן היה עונה במקום התשובה שנמחקה, והשאלה לא הייתה נשאלת (בעל המוצר, 04/10/2026).
-      const key = state.record.key;
-      state.reopen = { key, ids: [...(state.reopen.key === key ? state.reopen.ids : []), ...relatedCrewIds(id, state.result?.crewIdOf)] };
-      if (state.calGaps) state.calGaps.items = state.calGaps.items.filter((g) => g.id !== id);
+      if (/^(crew|night_crew|white):/.test(id)) state.record.calendarIgnored = [...new Set([...(state.record.calendarIgnored ?? []), ...relatedCrewIds(id, state.result?.crewIdOf)])];
       state.notices = [];
       await runAndSave();
     });
@@ -1128,6 +1176,7 @@ function bindResults(root) {
         answer.creditMin = due === 'yes' ? Number($('select[name="creditMin"]', credit).value) : 0;
       }
       state.record.answers = { ...(state.record.answers ?? {}), [form.dataset.qid]: answer };
+      if (state.record.crewHints) for (const id of relatedCrewIds(form.dataset.qid, state.result?.crewIdOf)) delete state.record.crewHints[id];
       state.notices = [];
       await runAndSave();
     });
@@ -1140,7 +1189,7 @@ function bindResults(root) {
 function currentSummary(m, months) {
   if (!state.rulesData || !(m.plan || m.exec)) return m.summary ?? {};
   try {
-    return summarize(evaluate({ rulesData: state.rulesData, plan: m.plan, exec: m.exec, answers: m.answers ?? {}, history: historyFor(m.key, months), calendar: m.calendar ?? monthCalendar(calendarFacts(), m.period) }));
+    return summarize(evaluate({ rulesData: state.rulesData, plan: m.plan, exec: m.exec, answers: m.answers ?? {}, history: historyFor(m.key, months), calendar: m.calendar ?? monthCalendar(calendarFacts(), m.period), reopen: m.calendarIgnored ?? [] }));
   } catch {
     return m.summary ?? {};
   }
