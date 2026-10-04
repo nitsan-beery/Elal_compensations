@@ -377,7 +377,7 @@ function legEndsFdp(p, i, legal, rest) {
 
 function night_landings(ctx, params, rule) {
   if (!ctx.hasPlan) {
-    ctx.note(null, `${rule.title}: החוק נקבע לפי התכנון, ובלי קובץ תכנון הוא לא נבדק.`, rule);
+    ctx.note(null, `נחיתות לילה נבדקות לפי התכנון, ובלי קובץ תכנון הן לא נבדקו.`, rule);
     return;
   }
   const from = parseClock(params.window_from);
@@ -418,7 +418,7 @@ function night_landings(ctx, params, rule) {
   // בכל מקרה אין פיצוי, בלי קשר להרכב הצוות (בעל המוצר, 04/10/2026). כשאין פיצוי ההערה בלי מספרי הטיסות.
   if (night.length < min) {
     if (night.length + unsure.length < min) {
-      ctx.note(null, `${rule.title}: לא תוכננו מעל ${min - 1} ${nightWord} ${landing}, ולכן אין פיצוי.`, rule);
+      ctx.note(null, `לא תוכננו מעל ${min - 1} ${nightWord} ${landing}, ולכן אין פיצוי.`, rule);
     }
     return;
   }
@@ -461,8 +461,8 @@ function night_landings(ctx, params, rule) {
     const unknown = pool.filter((n) => crewOf(n) == null);
     const few = pool.length === 1 ? `תוכננה טיסת לילה אחת בצוות ${crewNames}` : pool.length ? `תוכננו ${pool.length} ${nightWord}` : `לא תוכננו ${nightWord}`;
     ctx.note(null, unknown.length
-      ? `${rule.title}: לא תוכננו מעל ${min - 1} ${nightWord} ${landing}, ולכן אין פיצוי.`
-      : `${rule.title}: ${few} ${landing}. המינימום הוא ${min}, ולכן אין פיצוי.`, rule);
+      ? `לא תוכננו מעל ${min - 1} ${nightWord} ${landing}, ולכן אין פיצוי.`
+      : `${few} ${landing}. המינימום הוא ${min}, ולכן אין פיצוי.`, rule);
     return;
   }
 
@@ -470,7 +470,7 @@ function night_landings(ctx, params, rule) {
   const unsettled = pool.filter((n) => n.status === 'unknown' || n.status === 'review');
   if (counted.length + unsettled.length < threshold) {
     const missed = pool.filter((n) => !counted.includes(n));
-    ctx.note(null, `${rule.title}: ${planned}, ונספרות רק ${counted.length}` +
+    ctx.note(null, `${planned}, ונספרות רק ${counted.length}` +
       `${missed.length ? `, כי ${missed.length === 1 ? 'אחת לא בוצעה (בוטלה או הוחלפה' : `${missed.length} לא בוצעו (בוטלו או הוחלפו`} שלא ביוזמת החברה)` : ''}. הפיצוי הוא מהטיסה ה-${threshold} שבוצעה, ולכן אין פיצוי.`, rule);
     return;
   }
@@ -478,7 +478,7 @@ function night_landings(ctx, params, rule) {
   // שלא בוצע, ולכן כאן לא שואלים שוב (החלטת בעל המוצר, 23/09/2026), אלא מסבירים במה זה תלוי.
   // גם על הרכב הצוות לא שואלים עד שהיא תיסגר: עד אז לא ידוע אם בכלל מגיע פיצוי.
   if (counted.length < threshold) {
-    const why = `${rule.title}: נספרות ${counted.length} טיסות מתוך ${pool.length} מתוכננות עם נחיתה בין ` +
+    const why = `נספרות ${counted.length} טיסות מתוך ${pool.length} מתוכננות עם נחיתה בין ` +
       `${params.window_from} ל-${params.window_to}, והפיצוי הוא מהטיסה ה-${threshold} שבוצעה`;
     const reviewed = unsettled.filter((x) => x.status === 'review');
     for (const n of reviewed) {
@@ -506,7 +506,7 @@ function night_landings(ctx, params, rule) {
   // שתועלה הרומה (בעל המוצר, 04/10/2026).
   if (open.length && !ctx.hasExec) {
     const what = open.length === pool.length ? ` (${names(pool)}), והרכב הצוות ${pool.length === 1 ? 'שלה' : 'שלהן'} אינו ידוע` : ` (${listCrew(pool)})`;
-    ctx.note(null, `${rule.title}: תוכננו ${pool.length} טיסות לילה ${landing}${what}. ` +
+    ctx.note(null, `תוכננו ${pool.length} טיסות לילה ${landing}${what}. ` +
       `המינימום הוא ${min}, כך שייתכן שמגיע פיצוי, וזה ייבדק אחרי הביצוע.`, rule);
     return;
   }
@@ -515,7 +515,7 @@ function night_landings(ctx, params, rule) {
       : ctx.paidOnDate(n.pairing.from, params.report_column, key, hours)));
     if (!unpaid.length) {
       const one = paying.length === 1;
-      ctx.note(null, `${rule.title}: ${planned}, והרומה מזכה ${minToHhmm(hours)} על ` +
+      ctx.note(null, `${planned}, והרומה מזכה ${minToHhmm(hours)} על ` +
         `${names(paying)}. לכן ${one ? 'היא בוצעה' : 'הן בוצעו'} בצוות ${crewNames}, ` +
         'ולא נשאלה שאלה על הרכב הצוות.', rule);
     } else {
@@ -525,7 +525,7 @@ function night_landings(ctx, params, rule) {
         a.leg.date.localeCompare(b.leg.date))[0];
       // השאלה על הרכב הצוות כבר נשאלה בבדיקת מגבלות החוק, על ה-FDP של הטיסה הזאת.
       const pendingLegal = ctx.legalCrewAsked(next.leg);
-      ctx.note(null, `${rule.title}: ${planned}. תחת ההנחה שכל טיסה שעדיין לא נענתה היא בצוות ` +
+      ctx.note(null, `${planned}. תחת ההנחה שכל טיסה שעדיין לא נענתה היא בצוות ` +
         `${crewNames}, מגיע פיצוי של ${minToHhmm(hours)}.`, rule);
       // בתכנון לבד הרכב הצוות אינו נשאל (בעל המוצר, 03/10/2026): ההערה כבר אומרת תחת איזו הנחה מגיע פיצוי.
       if (!pendingLegal && ctx.hasExec) ctx.ask({
@@ -546,7 +546,7 @@ function night_landings(ctx, params, rule) {
   const counts = counted.length === base.length
     ? `תוכננו ונספרות ${base.length} ${known ? nightWord : 'טיסות לילה'} ${landing}`
     : `${planned}, ונספרות ${counted.length}`;
-  ctx.note(null, `${rule.title}: ${counts} (${list(counted)}). הפיצוי הוא מהטיסה ה-${threshold} שבוצעה, ` +
+  ctx.note(null, `${counts} (${list(counted)}). הפיצוי הוא מהטיסה ה-${threshold} שבוצעה, ` +
     `ולכן מגיע פיצוי של ${minToHhmm(hours)} על ${names(paying)}.`, rule);
   paying.forEach((n) => {
     const why = `${ddmm(n.leg.date)} ${n.leg.flight}, נחיתה ${minToHhmm(n.clock)} שעון ישראל: הטיסה ה-${counted.indexOf(n) + 1} מתוך ` +
