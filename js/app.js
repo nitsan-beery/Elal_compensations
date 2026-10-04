@@ -990,13 +990,17 @@ function renderAnswered() {
   </details>`;
 }
 
+// מה נבדק, בחלונית של ההערה כשאין חריגה (כמו שם החוק; בעל המוצר, 04/10/2026).
+const LEGAL_TIP = 'נבדקו לכל לג/סבב שעות טיסה ו-FDP, מנוחה בין טיסות, ומגבלות טיסה מצטברות';
+
 function renderNotes(res) {
   const legal = legalNote(res);
+  const legalTip = res.legal && !res.legal.skipped && !res.legal.violations?.length ? LEGAL_TIP : null;
   const count = res.notes.length + (legal ? 1 : 0);
   if (!count) return '';
   return `<details class="card" data-section="notes">
     <summary><h2 style="display:inline">הערות <span class="count">${count}</span></h2></summary>
-    <ul class="list">${res.notes.map((n) => `<li${ruleAttr([n.ruleTitle])}>${n.date ? `<strong class="num">${ddmm(n.date)}</strong> ` : ''}${esc(n.message)}${n.byUser ? ' <span class="small muted">לפי תשובת המשתמש</span>' : ''}</li>`).join('')}${legal ? `<li>${esc(legal)}</li>` : ''}</ul>
+    <ul class="list">${res.notes.map((n) => `<li${ruleAttr([n.ruleTitle])}>${n.date ? `<strong class="num">${ddmm(n.date)}</strong> ` : ''}${esc(n.message)}${n.byUser ? ' <span class="small muted">לפי תשובת המשתמש</span>' : ''}</li>`).join('')}${legal ? `<li${ruleAttr([legalTip])}>${esc(legal)}</li>` : ''}</ul>
   </details>`;
 }
 
