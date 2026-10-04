@@ -758,11 +758,10 @@ function legalNote(res) {
   const crew = [...byCrews].map(([crews, what]) => `כדי לעמוד בחוק, ${what.length > 1
     ? `הטיסות ${what.slice(0, -1).join(', ')} ו-${what.at(-1)} נדרשות להיות מבוצעות` : `הטיסה ${what[0]} נדרשת להיות מבוצעת`} בצוות ${crews}.`).join(' ');
   if (l.violations?.length) return crew || null;
-  const by = l.basis === 'exec' ? ' לפי הרומה' : '';
   const pending = res.questions.filter((q) => q.id.startsWith('crew:')).length;
   const status = pending
-    ? `מגבלות החוק נבדקו${by}: אין חריגה, חוץ מ${pending === 1 ? '-FDP אחד שממתין' : `-${pending} FDP שממתינים`} לתשובה על הרכב הצוות.`
-    : `מגבלות החוק נבדקו${by}: אין חריגה.`;
+    ? `נבדקה עמידה בכל מגבלות החוק: אין חריגה, חוץ מ${pending === 1 ? '-FDP אחד שממתין' : `-${pending} FDP שממתינים`} לתשובה על הרכב הצוות.`
+    : `נבדקה עמידה בכל מגבלות החוק: אין חריגה.`;
   return crew ? `${status} ${crew}` : status;
 }
 
