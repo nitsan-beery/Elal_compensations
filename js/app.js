@@ -908,8 +908,8 @@ function renderCalendarChanges(res) {
   const changes = res.calendarChanges;
   if (!changes) return '';
   return `<details class="card" data-section="changes" ${changes.length ? 'open' : ''}>
-    <summary><h2 style="display:inline">שינויים בין התכנון ליומן <span class="count">${changes.length}</span></h2></summary>
-    <p class="small muted">לפי היומן, למידע בלבד. הקרדיט והפיצויים על השינויים ייבדקו כשתועלה הרומה.</p>
+    <summary><h2 style="display:inline">שינויים בין תכנון לביצוע <span class="count">${changes.length}</span></h2></summary>
+    <p class="small muted">הקרדיט והפיצויים על השינויים ייבדקו כשתועלה הרומה.</p>
     ${changes.length ? `<ul class="list">${changes.map((c) => `<li>
       <strong class="num">${ddmm(c.date)}</strong> ${esc(c.label)}
       <div class="small"><span class="side-plan">תכנון: ${esc(datesFirst(c.plan ?? '—'))}</span> · <span class="side-exec">יומן: ${esc(datesFirst(c.calendar ?? '—'))}</span></div>
