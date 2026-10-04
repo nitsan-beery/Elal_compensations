@@ -122,7 +122,7 @@ export function evaluate({ rulesData, plan = null, exec = null, answers = {}, hi
 
   const assumed = new Map(); // planId → ערכי התשובה שהאפליקציה הניחה בלי לשאול
   const ctx = makeContext({ out, timeline, domicile, codes, holidays: rulesData.holidays ?? {}, answers, plan, exec, supported, matches, planPairings,
-    period, fleet, fdp, assumed, calendarAnswer: cal.answer,
+    period, fleet, fdp, assumed, calendarAnswer: cal.answer, calendarFirstDay: cal.firstDay,
     // בלי דוח ביצוע, הסבבים המתוכננים משמשים לחישוב הקרדיט והרי"ג הצפויים.
     execPairings: exec ? execPairings : planPairings });
   ctx.legalRest = legalRest;
@@ -303,6 +303,8 @@ export function calendarGaps({ prev, fresh, answers = {}, domicile, period }) {
  * - `answer(id)`: שאלות הרכב הצוות (`crew:`, `night_crew:`, `white:`) לפי מספר הטייסים בטיסה:
  *   2 – בודד, 3 – מוגבר, 4 ומעלה – כפול. התשובה מסומנת `source: 'calendar'`.
  * - `standby(date, code)`: שעות כוננות שאינה בתכנון, לפי חמשת התווים הראשונים של הקוד.
+ * - `firstDay(date)`: טיסה ביומן ביום הראשון של החודש: null – אין; `carried` – היא חלק מסבב שיצא
+ *   בחודש הקודם (הטיסה הראשונה ביום אינה יוצאת מהבסיס, או שהטיסה שלפניה לא חזרה אליו).
  */
 function calendarFacts(calendar, domicile) {
   const crew = new Map(); // "date|flight" → מספר הטייסים
@@ -318,8 +320,17 @@ function calendarFacts(calendar, domicile) {
     if (a && b) standby.push({ code: s.code, date: a.date, start: a.abs, end: b.abs });
   }
   const near = (date, k) => new Date(Date.parse(date) + k * 864e5).toISOString().slice(0, 10);
+  const legs = (calendar?.flights ?? []).map((f) => ({ ...f, t: domicile ? baseTime(f.std, domicile) : null }))
+    .filter((f) => f.t).sort((a, b) => a.std.localeCompare(b.std));
   return {
     used,
+    firstDay(date) {
+      const i = legs.findIndex((f) => f.t.date === date);
+      if (i < 0) return null;
+      const prev = legs[i - 1];
+      const carried = legs[i].org !== domicile || (!!prev && prev.t.date >= near(date, -2) && prev.dst !== domicile);
+      return { carried, flight: legs[i].flight };
+    },
     answer(id) {
       const m = /^(crew|night_crew|white):(\d{4}-\d{2}-\d{2}):(.+)$/.exec(id);
       if (!m || !crew.size) return null;
@@ -339,7 +350,7 @@ function calendarFacts(calendar, domicile) {
 
 // ---------- ctx: מה שהלוגיקות רואות ----------
 
-function makeContext({ out, timeline, domicile, codes, holidays, answers, plan, exec, supported, matches, planPairings, period, fleet, execPairings, fdp, assumed, calendarAnswer }) {
+function makeContext({ out, timeline, domicile, codes, holidays, answers, plan, exec, supported, matches, planPairings, period, fleet, execPairings, fdp, assumed, calendarAnswer, calendarFirstDay }) {
   const absenceBy = new Map(); // date → Set(ruleId)
   const pairingTags = new Map(); // pairing.id → Set(tag)
   const askedIds = new Set();
@@ -375,6 +386,8 @@ function makeContext({ out, timeline, domicile, codes, holidays, answers, plan, 
     hasPlan: !!plan,
     // תשובת המשתמש, ובלעדיה – השלמה מהיומן, אם חובר.
     answer: (id) => answers[id] ?? calendarAnswer?.(id) ?? null,
+    // מה היומן מראה ב-1 לחודש (`calendarFacts`).
+    calendarFirstDay: (date) => calendarFirstDay?.(date) ?? null,
     /** תשובה על סבב מתוכנן שהאפליקציה מניחה בלי לשאול, כי הדוח כבר זיכה: לשורת השינוי ולהערה עליו. */
     assumeAnswer(pairing, value) {
       assumed.set(pairing.id, [...new Set([...(assumed.get(pairing.id) ?? []), value])]);

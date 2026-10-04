@@ -763,7 +763,8 @@ function free_days_waived(ctx, params, rule) {
   // המוצר, 23/09/2026), גם כשחסר יום אחד בלבד ולא מגיע עליו זיכוי: המספר עצמו צריך להיות נכון.
   // עם רומה אין מה לנחש ואין מה לשאול (בעל המוצר, 01/10/2026): היא חוזרת ביום 1 על סבב שיצא
   // בחודש הקודם, ולכן ידוע אם נחתת בו ומתי. בלי סבב כזה ה-X הוא יום פנוי, גם כשבוצעה בו
-  // פעילות שלא תוכננה – עליה נשאלת השאלה על פעילות ביום לא מתוכנן.
+  // פעילות שלא תוכננה – עליה נשאלת השאלה על פעילות ביום לא מתוכנן. בתכנון לבד, כשהיומן מראה ביום
+  // הזה טיסה שיוצאת מהבסיס, גם הוא מראה שלא נחתת בו מסבב של החודש הקודם.
   const first = ctx.timeline.find((d) => d.date === ctx.monthFirst);
   let pendingFirst = false;
   const firstIsX = free.includes(ctx.monthFirst) && (first?.plan?.codes ?? []).includes('X');
@@ -774,6 +775,9 @@ function free_days_waived(ctx, params, rule) {
       free.splice(free.indexOf(ctx.monthFirst), 1);
       ctx.note(ctx.monthFirst, `${rule.title}: ב-${ddmm(ctx.monthFirst)} מסומן X, אבל לפי הרומה נחתת מסבב של החודש הקודם (${describePairing(carried)}) ב-${ddmm(dateOf(landed))} ${hhmm(landed)}, אחרי ${params.on_block_until}, ולכן היום אינו נספר.`, rule);
     }
+  } else if (firstIsX && ctx.calendarFirstDay(ctx.monthFirst)?.carried === false) {
+    // היומן מראה טיסה ב-1 לחודש שיוצאת מהבסיס, ולא סבב מהחודש הקודם: לא נחתת בו מסבב כזה, וה-X
+    // הוא יום פנוי לפי התכנון, כמו עם רומה (בעל המוצר, 04/10/2026). הטיסה עצמה בשינויים.
   } else if (firstIsX) {
     const fid = `free_days_first:${ctx.monthFirst.slice(0, 7)}`;
     const fa = ctx.answer(fid);
