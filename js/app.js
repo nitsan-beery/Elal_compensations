@@ -37,19 +37,22 @@ const dayCounts = (expectations) => DAY_KINDS.map((k) => {
   const n = new Set(expectations.filter((e) => e.key === 'absence' && k.test(e)).map((e) => e.date)).size;
   return n ? (n === 1 ? k.one : `<span class="num">${n}</span> ${k.many}`) : null;
 }).filter(Boolean);
-// תוויות לתשובות שכבר ניתנו. ערך שאינו כאן מוצג כמות שהוא.
+// תוויות לתשובות שנשמרו לפני שהתווית של האפשרות נשמרה איתן (`answer.label`). ערך שאינו כאן מוצג כמות שהוא.
 const ANSWER_LABEL = {
   special_call: 'קריאה מיוחדת', voluntary_swap: 'החלפה מרצוני', replaced: 'החלפה ביוזמת החברה (כולל זכיה במכרז או סטיה לשדה משנה)',
   wet_lease: 'הורדה מהטיסה המקורית', trainee: 'הורדה מהטיסה המקורית', swap_777: 'הטיסה עברה ל-777 (לא כשיר MFF)',
   cancelled: 'הטיסה המקורית בוטלה ללא קרדיט', other: 'סיבה אחרת',
-  yes: 'כן, הייתי מוצב', no: 'לא הייתי מוצב',
+  yes: 'כן', no: 'לא',
   company: 'לבקשת החברה', own: 'ויתור מרצון',
   standby_bid: 'סיום כוננות בגלל זכייה במכרז', standby_activated: 'הפעלת הכוננות', regular_standby: 'מצב הכן רגיל',
   single: 'צוות בודד (2 טייסים)', augmented: 'צוות מוגבר (3 טייסים)', double: 'צוות כפול (4 טייסים)',
 };
 
+// "כן" ו"לא" שייכים לשאלה, ולא לערך: בלעדי זה תשובה על סטיה לשדה משנה הוצגה "כן, הייתי מוצב" (23/09/2024).
+const ANSWER_LABEL_BY_KIND = { assigned: { yes: 'כן, הייתי מוצב', no: 'לא הייתי מוצב' } };
+
 /** ערך תשובה לתצוגה. תאריך שנבחר ביומן מוצג כיום/חודש. */
-const answerLabel = (v) => ANSWER_LABEL[v] ?? (/^\d{4}-\d{2}-\d{2}$/.test(v) ? ddmm(v) : v);
+const answerLabel = (v, kind = null) => ANSWER_LABEL_BY_KIND[kind]?.[v] ?? ANSWER_LABEL[v] ?? (/^\d{4}-\d{2}-\d{2}$/.test(v) ? ddmm(v) : v);
 
 const state = {
   rulesData: null,
@@ -877,7 +880,7 @@ function renderAnswered() {
   return `<details class="card" data-section="answered">
     <summary><h2 style="display:inline">תשובות שנשמרו <span class="count">${answers.length}</span></h2></summary>
     <ul class="list">${answers.map(([id, a]) => `<li class="row">
-      <span>${esc(describeQuestionId(id))}: <strong>${esc(a.value === 'partial' && a.count ? `ויתרתי מרצוני על ${a.count === 1 ? 'יום אחד' : `${a.count} ימים`}` : answerLabel(a.value))}</strong>
+      <span>${esc(describeQuestionId(id))}: <strong>${esc(a.value === 'partial' && a.count ? `ויתרתי מרצוני על ${a.count === 1 ? 'יום אחד' : `${a.count} ימים`}` : a.label ?? answerLabel(a.value, id.split(':')[0]))}</strong>
         ${a.link !== undefined ? `<span class="small muted">(${a.link === 'none' ? 'מסירת הטיסה ללא חלופה' : a.link ? `עם ${esc(describePairingId(a.link))}` : 'בחודש אחר'})</span>` : ''}
         ${a.text ? `<span class="small muted">– ${esc(a.text)}</span>` : ''}
         ${typeof a.creditMin === 'number' ? `<span class="small muted">(${a.creditMin ? `מגיע קרדיט ${minToHhmm(a.creditMin)}` : 'לא מגיע קרדיט'})</span>` : ''}</span>
@@ -899,12 +902,24 @@ function renderNotes(res) {
 
 const QUESTION_KIND = { cancelled: 'סבב שלא בוצע', unplanned: 'פעילות לא מתוכננת', replaced: 'סבב שהוחלף', assigned: 'מוצב לפעילות', standby_bid: 'טיסה בסוף כוננות', standby_code: 'קוד כוננות',
   school_start: 'פתיחת שנת הלימודים', free_days: 'ימים ללא פעילות', free_days_first: 'ימים ללא פעילות, X ב-1 לחודש',
-  crew: 'הרכב הצוות', night_crew: 'הרכב הצוות' };
+  crew: 'הרכב הצוות', night_crew: 'הרכב הצוות', white: 'טיסה לבנה', diversion: 'סטיה לשדה משנה', swap_conflict: 'סבב שהוחלף',
+  base_rest: 'מנוחה בבסיס', second_activity: 'פעילות נוספת באותו FDP', occasion: 'תאריך מיוחד', night_rounds: 'טיסות סבב לילה עוקבות',
+  stay_extension: 'הארכת שהייה', miami_short_rest: 'קיצור מנוחה במיאמי', miami_delay: 'דחייה במיאמי', las_vegas_rest: 'קיצור מנוחה בלאס וגאס',
+  sim_extension: 'הארכת סימולטור' };
 
+/**
+ * "diversion:2024-09-23:LY5104" → "סטיה לשדה משנה 23/09 LY5104". בחלק מהמזהים לפני התאריך יש מילה
+ * (`occasion:<חוק>:`, `second_activity:sim:`), ואחריו מה שמבדיל בין שאלות באותו יום (`sim_extension:<תאריך>:<STD>`):
+ * מוצגים הסבב, או הטיסה, או היום.
+ */
 function describeQuestionId(id) {
   const [kind, ...rest] = id.split(':');
-  const ref = rest.join(':');
-  const what = /^\d{4}-\d{2}-\d{2}$/.test(ref) ? ddmm(ref) : /^\d{4}-\d{2}$/.test(ref) ? `${ref.slice(5)}/${ref.slice(0, 4)}` : describePairingId(ref);
+  const ref = rest.join(':').replace(/^(?:[a-z][a-z_]*:)+/, '');
+  const pairing = ref.match(/^\d{4}-\d{2}-\d{2}\.\.\d{4}-\d{2}-\d{2}:[^:]+/)?.[0];
+  const what = pairing ? describePairingId(pairing)
+    : /^\d{4}-\d{2}-\d{2}:[A-Z]{2}\d+$/.test(ref) ? describePairingId(ref)
+      : /^\d{4}-\d{2}-\d{2}/.test(ref) ? ddmm(ref.slice(0, 10))
+        : /^\d{4}-\d{2}$/.test(ref) ? `${ref.slice(5)}/${ref.slice(0, 4)}` : describePairingId(ref);
   return `${QUESTION_KIND[kind] ?? kind} ${what}`;
 }
 
@@ -991,6 +1006,9 @@ function bindResults(root) {
       if (!chosen && !picker) return;
       if (picker && !picker.value) { alert('בחר תאריך.'); return; }
       const answer = { value: picker ? picker.value : chosen.value };
+      // התווית של האפשרות שנבחרה, כפי שהופיעה בשאלה: "תשובות שנשמרו" מציג אותה.
+      const label = state.result?.questions.find((q) => q.id === form.dataset.qid)?.options?.find((o) => o.value === answer.value)?.label;
+      if (label) answer.label = label;
       if (chosen?.hasAttribute('data-needs-link')) {
         const sel = $(`.extra[data-for="${CSS.escape(chosen.value)}"] select`, form);
         answer.link = sel?.value || null;
