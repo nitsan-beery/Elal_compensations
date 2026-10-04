@@ -440,7 +440,15 @@ function night_landings(ctx, params, rule) {
   const pool = crews ? night.filter((n) => crewOf(n) == null || crews.includes(crewOf(n))) : night;
   const names = (items) => items.map((n) => `${ddmm(n.leg.date)} ${n.leg.flight}`).join(', ');
   const list = (items) => items.map((n) => `${ddmm(n.leg.date)} ${n.leg.flight}${n.status === 'company' ? ' – שינוי ביוזמת החברה' : ''}`).join(', ');
-  const planned = `תוכננו ${night.length} טיסות עם נחיתה בין ${params.window_from} ל-${params.window_to}`;
+  // כשהרכב הצוות ידוע בכל הטיסות, סופרים רק את אלה שבהרכב שנספר (בעל המוצר, 04/10/2026).
+  const known = crews && night.every((n) => crewOf(n) != null);
+  const base = known ? pool : night;
+  const flightsWord = (n) => (n === 0 ? 'לא תוכננו טיסות' : n === 1 ? 'תוכננה טיסה אחת' : `תוכננו ${n} טיסות`);
+  const planned = `${flightsWord(base.length)}${known ? ` בצוות ${crewNames}` : ''} עם נחיתה בין ${params.window_from} ל-${params.window_to}`;
+  if (known && pool.length < params.min_planned_count) {
+    ctx.note(null, `${rule.title}: ${planned}${pool.length ? ` (${list(pool)})` : ''}. המינימום הוא ${params.min_planned_count}, ולכן אין פיצוי.`, rule);
+    return;
+  }
   if (pool.length < params.min_planned_count) {
     // הרכב הצוות שהוציא טיסה מהספירה: מהיומן, או מתשובות המשתמש.
     const byCalendar = night.some((n) => !pool.includes(n) && crewAnswer(n)?.source === 'calendar');
@@ -518,14 +526,14 @@ function night_landings(ctx, params, rule) {
   }
 
   // כשכל מה שתוכנן נספר כבוצע, מספר אחד מספיק לשניהם.
-  const counts = counted.length === night.length
-    ? `תוכננו ונספרות ${night.length} טיסות עם נחיתה בין ${params.window_from} ל-${params.window_to}`
+  const counts = counted.length === base.length
+    ? `תוכננו ונספרות ${base.length} טיסות${known ? ` בצוות ${crewNames}` : ''} עם נחיתה בין ${params.window_from} ל-${params.window_to}`
     : `${planned}, ונספרות ${counted.length}`;
   ctx.note(null, `${rule.title}: ${counts} (${list(counted)}). הפיצוי הוא מהטיסה ה-${threshold} שבוצעה, ` +
     `ולכן מגיע פיצוי של ${minToHhmm(hours)} על ${names(paying)}.`, rule);
   paying.forEach((n) => {
     const why = `${ddmm(n.leg.date)} ${n.leg.flight}, נחיתה ${minToHhmm(n.clock)} שעון ישראל: הטיסה ה-${counted.indexOf(n) + 1} מתוך ` +
-      `${night.length} מתוכננות עם נחיתת לילה`;
+      `${base.length} מתוכננות עם נחיתת לילה${known ? ` בצוות ${crewNames}` : ''}`;
     if (n.target) ctx.expectPairing(n.target, key, hours, rule, why);
     else ctx.expect(n.pairing.from, key, hours, rule, `${why} (בוטלה ביוזמת החברה)`);
   });
