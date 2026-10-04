@@ -445,14 +445,12 @@ function night_landings(ctx, params, rule) {
   const base = known ? pool : night;
   const flightsWord = (n) => (n === 0 ? 'לא תוכננו טיסות' : n === 1 ? 'תוכננה טיסה אחת' : `תוכננו ${n} טיסות`);
   const planned = `${flightsWord(base.length)}${known ? ` בצוות ${crewNames}` : ''} עם נחיתה בין ${params.window_from} ל-${params.window_to}`;
-  if (known && pool.length < params.min_planned_count) {
-    ctx.note(null, `${rule.title}: ${planned}${pool.length ? ` (${list(pool)})` : ''}. המינימום הוא ${params.min_planned_count}, ולכן אין פיצוי.`, rule);
-    return;
-  }
-  if (pool.length < params.min_planned_count) {
-    // הרכב הצוות שהוציא טיסה מהספירה: מהיומן, או מתשובות המשתמש.
-    const byCalendar = night.some((n) => !pool.includes(n) && crewAnswer(n)?.source === 'calendar');
-    ctx.note(null, `${rule.title}: ${planned}, ו${byCalendar ? 'לפי הרכב הצוות ביומן' : 'אחרי התשובות על הרכב הצוות'} נספרות ${pool.length}` +
+  // פחות מהמינימום: סופרים רק את הטיסות בהרכב שנספר, גם כשהרכב הצוות של חלקן אינו ידוע
+  // (הן נספרות, ואחרת לא היו מגיעים לכאן).
+  if (crews && pool.length < params.min_planned_count) {
+    const unknown = pool.filter((n) => crewOf(n) == null);
+    const which = unknown.length ? ` בצוות ${crewNames} או בהרכב צוות לא ידוע` : ` בצוות ${crewNames}`;
+    ctx.note(null, `${rule.title}: ${flightsWord(pool.length)}${which} עם נחיתה בין ${params.window_from} ל-${params.window_to}` +
       `${pool.length ? ` (${list(pool)})` : ''}. המינימום הוא ${params.min_planned_count}, ולכן אין פיצוי.`, rule);
     return;
   }
