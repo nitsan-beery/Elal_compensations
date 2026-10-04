@@ -297,7 +297,7 @@ function calendarParts(c) {
   const when = state.calBusy ? 'מתעדכן…' : c.synced ? `מעודכן ל-${stamp(c.synced)}` : 'עוד לא עודכן';
   const noData = c.synced && !c.facts?.flights?.length;
   const info = [`${c.calendars.length === 1 ? 'יומן מחובר' : 'יומנים מחוברים'}: ${c.calendars.map((x) => x.name).join(', ')}`,
-    n ? `הרכב הצוות של ${n} ${n === 1 ? 'טיסה' : 'טיסות'} בחודש הזה מהיומן` : ''].filter(Boolean);
+    n ? `הרכב הצוות של ${n} ${state.result?.monthFlights >= n ? `מתוך ${state.result.monthFlights} ` : ''}${n === 1 && !(state.result?.monthFlights >= n) ? 'טיסה' : 'טיסות'} בחודש הזה מהיומן` : ''].filter(Boolean);
   const hover = matchMedia('(hover: hover)').matches;
   const label = hover
     ? `<span class="cal-label" title="${esc(info.join('\n'))}">יומן ${when}</span>`
