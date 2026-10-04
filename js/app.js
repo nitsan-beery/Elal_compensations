@@ -78,6 +78,7 @@ init();
 async function init() {
   setupTabs();
   setupUploads();
+  setupRuleTips();
   registerServiceWorker();
   try {
     const { data, source, error } = await loadRules();
@@ -540,18 +541,72 @@ const isGap = (c) => c.ok === false || c.marks.length > 0;
 
 /**
  * שורת פיצוי או Rig מוסברת בטבלה עצמה, ולא בהערות (בעל המוצר, 01/10/2026): מתחת לטיסה ההסבר
- * (`explain` של כל ציפייה) ואחריו שם החוק בתגית, כמו בהערות. הסכום אינו בהסבר, כי הוא כבר בשורה;
- * רק כשכמה חוקים חולקים שורה כתוב ליד כל אחד החלק שלו. קריאה מיוחדת היא תגית בלבד. `notes` של
- * השורה: פיצוי שברומה ואף חוק אינו מסביר.
+ * (`explain` של כל ציפייה). שם החוק מוצג רק כשמרחפים מעל השורה או לוחצים עליה (`setupRuleTips`).
+ * הסכום אינו בהסבר, כי הוא כבר בשורה; רק כשכמה חוקים חולקים שורה כתוב ליד כל אחד החלק שלו. קריאה
+ * מיוחדת: בלי הסבר. `notes` של השורה: פיצוי שברומה ואף חוק אינו מסביר.
  */
 function explainOf(c) {
   if (!COMP_COLUMNS.has(c.column)) return '';
   const share = (e) => (c.items.length > 1 && c.unit !== 'count' ? ` · <span class="num">${minToHhmm(e.min)}</span>` : '');
   const lines = [
-    ...c.items.map((e) => `${esc(share(e) ? (e.explain ?? '').replace(/\.$/, '') : e.explain ?? '')}${share(e)}${e.ruleTitle ? ` <span class="tag">${esc(e.ruleTitle)}</span>` : ''}`.trim()),
+    ...c.items.map((e) => `${esc(share(e) ? (e.explain ?? '').replace(/\.$/, '') : e.explain ?? '')}${share(e)}`.trim()),
     ...(c.notes ?? []).map(esc),
   ];
   return [...new Set(lines.filter(Boolean))].map((l) => `<div class="explain">${l}</div>`).join('');
+}
+
+// ---------- שם החוק ----------
+
+/** `data-rule` של שורה: שמות החוקים שמסבירים אותה, שם בכל שורה. */
+const ruleAttr = (titles) => {
+  const t = [...new Set(titles.filter(Boolean))];
+  return t.length ? ` data-rule="${esc(t.join('\n'))}"` : '';
+};
+
+// ציור מחדש של התוצאות מסיר את השורה שהחלון מתאר.
+function hideRuleTip() {
+  const tip = $('.rule-tip');
+  if (tip) tip.hidden = true;
+}
+
+/**
+ * שם החוק אינו כתוב בטבלאות ובהערות (בעל המוצר, 04/10/2026): הוא מוצג כשמרחפים עם העכבר מעל
+ * השורה, ובמגע (iPad) כשלוחצים עליה. לחיצה נוספת, או לחיצה במקום אחר, סוגרת אותו.
+ */
+function setupRuleTips() {
+  const tip = document.createElement('div');
+  tip.className = 'rule-tip no-print';
+  tip.hidden = true;
+  document.body.append(tip);
+  let shownFor = null;
+  let pointer = 'mouse';
+  const hide = hideRuleTip;
+  const isShown = (el) => !tip.hidden && el === shownFor;
+  const show = (el, x) => {
+    tip.textContent = el.dataset.rule;
+    tip.hidden = false;
+    shownFor = el;
+    const r = el.getBoundingClientRect();
+    const w = tip.offsetWidth;
+    const h = tip.offsetHeight;
+    tip.style.left = `${Math.min(Math.max(8, x - w / 2), innerWidth - w - 8)}px`;
+    tip.style.top = `${r.bottom + h + 8 > innerHeight ? r.top - h - 4 : r.bottom + 4}px`;
+  };
+  document.addEventListener('pointerdown', (e) => { pointer = e.pointerType; }, true);
+  document.addEventListener('pointerover', (e) => {
+    if (e.pointerType !== 'mouse') return;
+    const el = e.target.closest?.('[data-rule]');
+    if (el) { if (!isShown(el)) show(el, e.clientX); } else hide();
+  });
+  document.documentElement.addEventListener('mouseleave', hide);
+  document.addEventListener('click', (e) => {
+    if (pointer === 'mouse') return;
+    const el = e.target.closest?.('[data-rule]');
+    if (!el || e.target.closest('button, a, input, select, textarea, summary, label')) { hide(); return; }
+    if (isShown(el)) hide(); else show(el, e.clientX);
+  });
+  addEventListener('scroll', hide, true);
+  addEventListener('resize', hide);
 }
 
 function summarize(res) {
@@ -587,6 +642,7 @@ async function openMonth(key, { quiet = false } = {}) {
  * `keepDom` false: המצב שעל המסך אינו של המשתמש (ההדפסה פותחת הכול), ולכן לא נקרא ממנו.
  */
 function renderResults(keepDom = true) {
+  hideRuleTip();
   const root = $('#results');
   const res = state.result;
   const key = state.record?.key ?? null;
@@ -684,7 +740,7 @@ function renderAlerts(res) {
       <button class="btn no-print" data-action="copy-codes">העתק פרטים</button></div>`);
   }
   if (res.reviews.length) {
-    out.push(`<div class="notice bad"><strong>לבדיקה ידנית</strong><ul>${res.reviews.map((v) => `<li>${esc(v.message)}${v.ruleTitle ? ` <span class="tag">${esc(v.ruleTitle)}</span>` : ''}</li>`).join('')}</ul></div>`);
+    out.push(`<div class="notice bad"><strong>לבדיקה ידנית</strong><ul>${res.reviews.map((v) => `<li${ruleAttr([v.ruleTitle])}>${esc(v.message)}</li>`).join('')}</ul></div>`);
   }
   return out.length ? `<div class="card">${out.join('')}</div>` : '';
 }
@@ -838,11 +894,12 @@ function renderComparison(res) {
             .map((e) => `${esc(e.ruleTitle ?? '')}${e.note ? `: ${esc(e.note)}` : ''}${e.min != null && c.unit !== 'count' ? ` <span class="num">${minToHhmm(e.min)}</span>` : ''}`),
           ...c.marks.map((m) => `${esc(m.column)}: צפוי <span class="num">${hm(m.expected, m.unit)}</span>, ברומה <span class="num">${hm(m.reported, m.unit)}</span>`),
         ].join('<br>');
-        return `<tr class="${cls}">
+        const rule = ruleAttr([...c.items, ...c.marks.flatMap((m) => m.items)].map((e) => e.ruleTitle));
+        return `<tr class="${cls}"${rule}>
           <td>${esc(c.label).replace(/\n/g, '<br>')}${explainOf(c)}</td><td class="col">${esc(c.column)}</td>
           <td class="num">${hm(c.expected, c.unit)}</td><td class="num">${hm(c.reported, c.unit)}</td>
           <td class="num">${c.ok ? '' : (c.diff > 0 ? '+' : '') + hm(c.diff, c.unit)}</td><td>${status}</td></tr>
-          ${why ? `<tr class="detail"><td colspan="6">${why}</td></tr>` : ''}`;
+          ${why ? `<tr class="detail"${rule}><td colspan="6">${why}</td></tr>` : ''}`;
       }).join('') || '<tr><td colspan="6" class="muted">אין שורות בסינון הזה.</td></tr>'}</tbody>
     </table></div>
   </details>`;
@@ -892,7 +949,7 @@ function renderChanges(res) {
   if (res.mode !== 'full') return '';
   return `<details class="card" data-section="changes" ${changes.length ? 'open' : ''}>
     <summary><h2 style="display:inline">שינויים בין תכנון לביצוע <span class="count">${changes.length}</span></h2></summary>
-    ${changes.length ? `<ul class="list">${changes.map((c) => `<li>
+    ${changes.length ? `<ul class="list">${changes.map((c) => `<li${ruleAttr((c.notes ?? []).map((n) => n.ruleTitle))}>
       <strong class="num">${ddmm(c.date)}</strong> ${esc(c.label)}
       <div class="small"><span class="side-plan">תכנון: ${esc(datesFirst(c.plan ?? '—'))}</span> · <span class="side-exec">ביצוע: ${esc(datesFirst(c.exec ?? (c.replacedBy?.join(', ') || '—')))}</span></div>
       ${(c.notes ?? []).map((n) => `<div class="explain">${esc(n.message)}${n.byUser ? ' <span class="muted">לפי תשובת המשתמש</span>' : ''}</div>`).join('')}
@@ -939,7 +996,7 @@ function renderNotes(res) {
   if (!count) return '';
   return `<details class="card" data-section="notes">
     <summary><h2 style="display:inline">הערות <span class="count">${count}</span></h2></summary>
-    <ul class="list">${res.notes.map((n) => `<li>${n.date ? `<strong class="num">${ddmm(n.date)}</strong> ` : ''}${esc(n.message)}${n.byUser ? ' <span class="small muted">לפי תשובת המשתמש</span>' : ''}${n.ruleTitle ? ` <span class="tag">${esc(n.ruleTitle)}</span>` : ''}</li>`).join('')}${legal ? `<li>${esc(legal)}</li>` : ''}</ul>
+    <ul class="list">${res.notes.map((n) => `<li${ruleAttr([n.ruleTitle])}>${n.date ? `<strong class="num">${ddmm(n.date)}</strong> ` : ''}${esc(n.message)}${n.byUser ? ' <span class="small muted">לפי תשובת המשתמש</span>' : ''}</li>`).join('')}${legal ? `<li>${esc(legal)}</li>` : ''}</ul>
   </details>`;
 }
 
