@@ -1142,37 +1142,60 @@ function contractLimits(fdp, params, domicile) {
  * כל טיסה בהרכב קטן מהחוזי נחשבת כזאת (בעל המוצר, 04/10/2026). FDP שאינו עומד באף הרכב חוזי אינו
  * מזכה. הרכב הצוות – מהיומן או מתשובת המשתמש, באותה שאלה של מגבלות החוק (`crew:`). בלעדיו:
  * כשהרומה זיכתה את הפיצוי, מניחים צוות קטן מהחוזי; כשלא – שואלים, רק כשיש רומה (בעל המוצר, 04/10/2026).
+ * הערות (בעל המוצר, 04/10/2026): כל טיסה בצוות קטן מהחוזי מקבלת הערה ביום שלה, וכשאין כזאת ואין טיסה
+ * שהרכב הצוות שלה עוד לא ידוע – "כל הטיסות עומדות בהרכב צוות חוזי" בסוף ההערות. טיסה שהצוות החוזי שלה
+ * מוגבר או כפול והרכב הצוות שלה אינו ידוע (בתכנון לבד, בלי היומן) נמנית בהערה בסוף. ההערות נבנות מחדש
+ * בכל הרצה, ולכן מתעדכנות עם היומן ועם התשובות. כשהיומן מראה צוות קטן מהחוזי והרומה אינה מזכה, ייתכן
+ * שהיומן אינו מעודכן, וההסבר מבקש לוודא סנכרון מהאורגנייזר.
  */
+// בהערה שכבר מתחילה ביום: הטיסה בלי התאריך שבראש התיאור.
+const routeOnly = (what) => what.replace(/^⁦[^⁩]*⁩\s*/, '');
+
 function legal_crew_composition(ctx, params, rule) {
   const key = keyFor(params.report_column);
   const own = ctx.rulesWithLogic('legal_crew_composition').map((r) => r.id);
   const pairings = ctx.hasExec ? ctx.execPairings : ctx.planPairings;
   const near = (a, b) => Math.abs(Date.parse(a) - Date.parse(b)) <= dayMs;
   const amount = H(params.hours);
+  let checked = 0;
+  let below = 0;
+  const unknown = [];
+  const pending = [];
   for (const fdp of ctx.legalFdps ?? []) {
     const lim = contractLimits(fdp, params, ctx.domicile);
     const fits = (c) => lim[c] && fdp.ft <= lim[c].ft && fdp.fdp <= lim[c].fdp && fdp.seg <= lim[c].seg;
     const need = CREWS.find(fits);
-    if (!need || need === 'single') continue;
+    if (!need) continue;
+    checked++;
+    if (need === 'single') continue;
     const first = fdp.flights[0];
     const pairing = pairings.find((p) => p.legs.some((l) => l.flight === first.flight && near(l.date, first.date)));
-    if (!pairing) continue;
+    if (!pairing) { checked--; continue; }
     const day = pairing.dates.includes(first.date) ? first.date : pairing.from;
     const answered = ctx.answer(fdp.id) ??
       fdp.flights.map((f) => ctx.answer(`night_crew:${f.date}:${f.flight}`)).find(Boolean) ?? null;
-    const below = (c) => CREWS.indexOf(c) < CREWS.indexOf(need);
+    const smallerThan = (c) => CREWS.indexOf(c) < CREWS.indexOf(need);
     const contract = `הצוות החוזי ${CREW_LABEL[need]}`;
     if (answered) {
-      if (!below(answered.value)) continue;
+      if (!smallerThan(answered.value)) continue;
+      below++;
       const by = answered.source === 'calendar' ? 'לפי היומן' : 'לפי תשובתך';
+      const verb = ctx.hasExec ? 'בוצעה' : 'מתוכננת';
+      // היומן מראה צוות קטן מהחוזי והרומה אינה מזכה: ייתכן שהיומן אינו מעודכן.
+      const stale = answered.source === 'calendar' && ctx.hasExec && !ctx.paidOn(pairing, params.report_column, key, amount, own)
+        ? ' ייתכן שהיומן אינו מעודכן: ודא שבוצע סנכרון של היומן מהאורגנייזר.' : '';
       ctx.expectPairingDay(pairing, day, key, amount, rule,
-        `${rule.title}: ${fdp.what} ${ctx.hasExec ? 'בוצעה' : 'מתוכננת'} בצוות ${CREW_LABEL[answered.value]} ${by}, ו${contract}`,
-        { explain: `צוות ${CREW_LABEL[answered.value]} ${by}, ו${contract}.` });
+        `${rule.title}: ${fdp.what} ${verb} בצוות ${CREW_LABEL[answered.value]} ${by}, ו${contract}`,
+        { explain: `צוות ${CREW_LABEL[answered.value]} ${by}, ו${contract}.${stale}` });
+      ctx.note(fdp.date, `${routeOnly(fdp.what)} ${verb} בצוות ${CREW_LABEL[answered.value]} ${by}, קטן מהצוות החוזי (${CREW_LABEL[need]}).${stale}`, rule, { aside: true });
     } else if (ctx.paidOn(pairing, params.report_column, key, amount, own)) {
+      below++;
+      ctx.note(fdp.date, `${routeOnly(fdp.what)}: הרומה מזכה את הפיצוי, ולכן הצוות היה קטן מהצוות החוזי (${CREW_LABEL[need]}).`, rule, { aside: true });
       ctx.expectPairingDay(pairing, day, key, amount, rule,
         `${rule.title}: ${fdp.what}. הרומה מזכה את הפיצוי, ולכן הצוות היה קטן מהחוזי (${CREW_LABEL[need]})`,
         { explain: `הרומה מזכה את הפיצוי, ו${contract}. האפליקציה מניחה` });
     } else if (ctx.hasExec) {
+      pending.push(fdp);
       // מה חורג בהרכב הקטן ממנו: למה זה הצוות החוזי.
       const smaller = CREWS[CREWS.indexOf(need) - 1];
       const l = lim[smaller];
@@ -1187,10 +1210,17 @@ function legal_crew_composition(ctx, params, rule) {
         title: `באיזה צוות בוצע ${fdp.what}?`,
         body: `${contract}${over.length ? `: ${over.join('; ')}` : ''}. בצוות קטן ממנו מגיע פיצוי, והרומה לא מזכה אותו.`,
         options: CREWS.map((c) => ({ value: c, label: `${CREW_LABEL[c]} (${CREW_PILOTS[c]} טייסים)`,
-          ...(below(c) && { hint: `${minToHhmm(amount)} – פער מול הרומה` }) })),
+          ...(smallerThan(c) && { hint: `${minToHhmm(amount)} – פער מול הרומה` }) })),
         ruleId: rule.id,
       });
+    } else {
+      unknown.push(`${fdp.what} (${contract})`);
     }
+  }
+  if (unknown.length) {
+    ctx.note(null, `הרכב הצוות אינו ידוע ב${unknown.length === 1 ? 'טיסה שהצוות החוזי בה מוגבר או כפול' : `-${unknown.length} טיסות שהצוות החוזי בהן מוגבר או כפול`}, ולכן לא נבדק אם הוא חוזי: ${unknown.join('; ')}.`, rule);
+  } else if (checked && !below && !pending.length) {
+    ctx.note(null, 'כל הטיסות עומדות בהרכב צוות חוזי.', rule);
   }
 }
 
