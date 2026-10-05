@@ -39,7 +39,7 @@ const dayCounts = (expectations) => DAY_KINDS.map((k) => {
 }).filter(Boolean);
 // תוויות לתשובות שנשמרו לפני שהתווית של האפשרות נשמרה איתן (`answer.label`). ערך שאינו כאן מוצג כמות שהוא.
 const ANSWER_LABEL = {
-  special_call: 'קריאה מיוחדת', voluntary_swap: 'החלפה מרצוני', replaced: 'החלפה ביוזמת החברה (כולל זכיה במכרז או סטיה לשדה משנה)',
+  special_call: 'קריאה מיוחדת', voluntary_swap: 'החלפה מרצוני', replaced: 'שינוי ביוזמת החברה (כולל סטיה לשדה משנה)', bid: 'זכייה במכרז',
   wet_lease: 'הורדה מהטיסה המקורית', trainee: 'הורדה מהטיסה המקורית', swap_777: 'הטיסה עברה ל-777 (לא כשיר MFF)',
   cancelled: 'הטיסה המקורית בוטלה ללא קרדיט', other: 'סיבה אחרת',
   yes: 'כן', no: 'לא',

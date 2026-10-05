@@ -375,6 +375,41 @@ function legEndsFdp(p, i, legal, rest) {
   return dep - arr - (rest?.postMin ?? 0) - (rest?.outstationReportMin ?? 0) >= legal;
 }
 
+/**
+ * נחיתת לילה בסבב שבוצע (לזכייה במכרז במקום טיסת לילה מתוכננת): רגל פעילה בצי, שהנחיתה
+ * המתוכננת שלה בשעון ישראל בחלון, ומסיימת FDP – הרגל האחרונה, או שאחריה מנוחה חוקית ביעד.
+ * בדוח STD ו-STA מקומיים: נחיתה בבסיס היא STA; ביציאה מהבסיס STD + SkdDur; בין שני שדות
+ * זרים – STA אחרי המרה לפי אזור הזמן של היעד. מחזירה את הרגל ואת שעת הנחיתה, או null.
+ */
+function execNightLanding(ctx, pairing, params, inWindow, legal) {
+  const dh = (l) => l.dhd || l.type === 'DHO' || l.type === 'DHX';
+  const arrival = (l) => {
+    if (l.sta == null) return null;
+    if (l.dst === ctx.domicile) return l.sta;
+    if (l.org === ctx.domicile && l.std != null && l.skdDur != null) return mod(l.std + l.skdDur, 1440);
+    const off = stationOffset(l.dst, l.date, ctx.domicile);
+    return off == null ? null : mod(l.sta - off, 1440);
+  };
+  // שתי השעות מקומיות באותו שדה. נחיתה שעברה חצות (STA לפני STD) – ביום שאחרי.
+  const endsFdp = (i) => {
+    const l = pairing.legs[i];
+    const next = pairing.legs[i + 1];
+    if (!next || l.sta == null || next.std == null) return true;
+    const arr = at(l.date, l.sta) + (l.std != null && l.sta < l.std - 180 ? 1440 : 0);
+    const rest = ctx.legalRest;
+    return at(next.date, next.std) - arr - (rest?.postMin ?? 0) - (rest?.outstationReportMin ?? 0) >= legal;
+  };
+  for (let i = 0; i < pairing.legs.length; i++) {
+    const l = pairing.legs[i];
+    if (dh(l) || !endsFdp(i)) continue;
+    if (params.base_landings_only && l.dst !== ctx.domicile) continue;
+    if (params.fleet && (l.ac ?? ctx.fleet) !== params.fleet) continue;
+    const clock = arrival(l);
+    if (clock != null && inWindow(clock)) return { leg: l, clock };
+  }
+  return null;
+}
+
 function night_landings(ctx, params, rule) {
   if (!ctx.hasPlan) {
     ctx.note(null, `נחיתות לילה נבדקות לפי התכנון, ובלי קובץ תכנון הן לא נבדקו.`, rule);
@@ -426,6 +461,15 @@ function night_landings(ctx, params, rule) {
         Math.abs(Date.parse(l.date) - Date.parse(n.leg.date)) <= dayMs)) ?? null;
       if (n.target) { n.status = 'done'; continue; }
       n.status = cancelStatus(ctx, n.pairing);
+      // זכייה במכרז אינה "ביוזמת החברה", אבל זכייה בטיסה עם נחיתת לילה אינה פוגעת בזכאות (ס' 40;
+      // בעל המוצר, 05/10/2026): נספרת רק כשהטיסה שבקישור היא גם נחיתת לילה.
+      if (n.status === 'bid') {
+        const won = bidTarget(ctx, n.pairing);
+        const landing = won && execNightLanding(ctx, won, params, inWindow, legal);
+        n.status = landing ? 'done' : 'no';
+        n.bid = { won, landing };
+        if (landing) n.target = won;
+      }
     }
   } else {
     for (const n of night) { n.target = n.pairing; n.status = 'done'; }
@@ -446,7 +490,8 @@ function night_landings(ctx, params, rule) {
   // (החלטת בעל המוצר, 23/09/2026). מרגע שתוכננו `min_planned_count` טיסות לילה, בכל הרכב, כל
   // מסלול מסתיים בהערה שמסבירה את המצב ואת הסיבה – גם כשאין פיצוי (בעל המוצר, 23/09/2026 ו‑04/10/2026).
   const pool = crews ? night.filter((n) => crewOf(n) == null || crews.includes(crewOf(n))) : night;
-  const list =(items) => items.map((n) => `${ddmm(n.leg.date)} ${n.leg.flight}${n.status === 'company' ? ' – שינוי ביוזמת החברה' : ''}`).join(', ');
+  const list = (items) => items.map((n) => `${ddmm(n.leg.date)} ${n.leg.flight}${n.status === 'company' ? ' – שינוי ביוזמת החברה'
+    : n.bid?.landing ? ` – זכייה במכרז ב-${ddmm(n.bid.landing.leg.date)} ${n.bid.landing.leg.flight}, גם היא נחיתת לילה` : ''}`).join(', ');
   // כשהרכב הצוות ידוע בכל הטיסות, סופרים רק את אלה שבהרכב שנספר (בעל המוצר, 04/10/2026).
   const known = crews && night.every((n) => crewOf(n) != null);
   const base = known ? pool : night;
@@ -468,9 +513,17 @@ function night_landings(ctx, params, rule) {
   const unsettled = pool.filter((n) => n.status === 'unknown' || n.status === 'review');
   if (counted.length + unsettled.length < threshold) {
     const missed = pool.filter((n) => !counted.includes(n));
+    // זכייה במכרז בטיסה שאינה נחיתת לילה אינה "ביוזמת החברה" (ס' 40), ולכן אינה נספרת.
+    const bids = missed.filter((n) => n.bid);
+    const others = missed.filter((n) => !n.bid);
+    const reasons = [
+      bids.length ? `${names(bids)} ${bids.length === 1 ? 'הוחלפה' : 'הוחלפו'} בזכייה במכרז ` +
+        `${bids.every((n) => n.bid.won) ? 'בטיסה שאינה נחיתת לילה' : 'בטיסה שאינה בקבצים של החודש'}, וזכייה במכרז נספרת רק בטיסה שגם היא נחיתת לילה (ס' 40)` : '',
+      others.length ? `${others.length === 1 ? 'אחת לא בוצעה (בוטלה או הוחלפה' : `${others.length} לא בוצעו (בוטלו או הוחלפו`} שלא ביוזמת החברה)` : '',
+    ].filter(Boolean);
     // כאן תמיד בהרכב שנספר: טיסה שהרכב הצוות שלה אינו ידוע נספרת, וגם כך אין פיצוי (בעל המוצר, 04/10/2026).
     ctx.note(null, `תוכננו ${pool.length} ${nightWord} ${landing}, ונספרות רק ${counted.length}` +
-      `${missed.length ? `, כי ${missed.length === 1 ? 'אחת לא בוצעה (בוטלה או הוחלפה' : `${missed.length} לא בוצעו (בוטלו או הוחלפו`} שלא ביוזמת החברה)` : ''}. הפיצוי הוא מהטיסה ה-${threshold} שבוצעה, ולכן אין פיצוי.`, rule);
+      `${reasons.length ? `, כי ${reasons.join(', ו')}` : ''}. הפיצוי הוא מהטיסה ה-${threshold} שבוצעה, ולכן אין פיצוי.`, rule);
     return;
   }
   // הספירה אינה סגורה כל עוד לא ידוע למה סבב לא בוצע. השאלה על כך כבר נשאלה בחוק הסבב
@@ -549,7 +602,8 @@ function night_landings(ctx, params, rule) {
     `ולכן מגיע פיצוי של ${minToHhmm(hours)} על ${names(paying)}.`, rule);
   paying.forEach((n) => {
     const why = `${ddmm(n.leg.date)} ${n.leg.flight}, נחיתה ${minToHhmm(n.clock)} שעון ישראל: הטיסה ה-${counted.indexOf(n) + 1} מתוך ` +
-      `${base.length} מתוכננות עם נחיתת לילה${known ? ` בצוות ${crewNames}` : ''}`;
+      `${base.length} מתוכננות עם נחיתת לילה${known ? ` בצוות ${crewNames}` : ''}` +
+      (n.bid?.landing ? ` (זכייה במכרז ב-${ddmm(n.bid.landing.leg.date)} ${n.bid.landing.leg.flight}, גם היא נחיתת לילה)` : '');
     if (n.target) ctx.expectPairing(n.target, key, hours, rule, why);
     else ctx.expect(n.pairing.from, key, hours, rule, `${why} (בוטלה ביוזמת החברה)`);
   });
@@ -611,6 +665,8 @@ function arrivalAtBaseClock(ctx, leg) {
  * לפי הסימונים שהחוקים הקודמים שמו על הסבב, ולא לפי התשובה בלבד: כשהדוח כבר מזכה את
  * השעות שהפסיד לא נשאלת שאלה, והסבב מסומן `lost_hours_credit` (החלטת בעל המוצר, 23/09/2026).
  * `company` נספר כבוצע, `no` לא נספר, `review` נדרשת בדיקה ידנית, `unknown` השאלה עוד פתוחה.
+ * `bid` – זכייה במכרז: אינה "ביוזמת החברה" (ס' 40), ולכן אינה נספרת, אלא אם הטיסה שזכה בה
+ * מאותו סוג (נחיתת לילה, שבת). את זה בודק החוק עצמו, לפי הטיסה שבקישור (`bidTarget`).
  */
 function cancelStatus(ctx, planPairing) {
   const m = ctx.matches.find((x) => x.plan === planPairing);
@@ -623,9 +679,23 @@ function cancelStatus(ctx, planPairing) {
   // גם בלי סימון, כשהחוק שמסמן אינו בתוקף בחודש: התשובה עצמה.
   const a = ctx.answerFor(m)?.value;
   if (a === 'voluntary_swap') return 'no';
+  if (a === 'bid') return 'bid';
   if (['cancelled', 'wet_lease', 'trainee', 'swap_777', 'replaced'].includes(a)) return 'company';
   if (a === 'other') return 'review';
   return 'unknown';
+}
+
+/**
+ * הטיסה שזכה בה במכרז במקום הסבב המתוכנן: הקישור שבתשובה, או null (טיסה בחודש אחר). תשובה
+ * שהגיעה דרך הסבב שבוצע באותם ימים (`via`) או שנשמרה בלי קישור – הסבב שבוצע באותם ימים,
+ * כמו ב-`higher_of_planned_performed`.
+ */
+function bidTarget(ctx, planPairing) {
+  const m = ctx.matches.find((x) => x.plan === planPairing);
+  const a = m && ctx.answerFor(m);
+  if (!a) return null;
+  if ('link' in a) return a.link ? ctx.pairingById(a.link) : null;
+  return m.exec ?? null;
 }
 
 // ---------- פעילות בתאריכים מיוחדים (2024 ס' 42.1–42.5) ----------
@@ -954,6 +1024,8 @@ function consecutive_night_rounds(ctx, params, rule) {
   const statusOf = (d) => {
     if (!ctx.hasExec || performed.has(d)) return 'done';
     const st = cancelStatus(ctx, planned.get(d));
+    // זכייה במכרז על טיסת סבב לילה כבר נספרת כבוצעה דרך `performed`; אחרת היא אינה נספרת (ס' 40).
+    if (st === 'bid') return 'no';
     return st === 'review' ? 'unknown' : st; // הבדיקה הידנית על הרצף מכסה גם את זה
   };
 

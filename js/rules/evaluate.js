@@ -892,7 +892,7 @@ function showSwaps(out, answers, assumed) {
     }
     const linked = a.link && out.changes.find((x) => x.execId === a.link)?.exec;
     c.exec = a.value === 'voluntary_swap' ? (a.link === GAVE_AWAY ? GAVE_AWAY_LABEL : linked ?? 'טיסה בחודש אחר')
-      : a.value === 'replaced' ? linked ?? 'טיסה בחודש אחר'
+      : a.value === 'replaced' || a.value === 'bid' ? linked ?? 'טיסה בחודש אחר'
       : a.value === 'other' ? `סיבה אחרת${a.text ? `: ${a.text}` : ''}`
       : CANCELLED_OUTCOME[a.value] ?? a.value;
   }
@@ -1020,7 +1020,7 @@ function explainUnexplained(out, timeline, cal) {
 }
 
 /** תשובות שמקשרות בין סבב מתוכנן שלא בוצע לבין הטיסה שבוצעה במקומו בתאריכים אחרים. */
-const LINKED_VALUES = ['voluntary_swap', 'replaced'];
+const LINKED_VALUES = ['voluntary_swap', 'replaced', 'bid'];
 
 /**
  * סבב מתוכנן שבמקומו בוצע סבב אחר באותם ימים, והתשובה עליו היא החלפה עם טיסה אחרת – בחודש אחר
@@ -1045,7 +1045,8 @@ const GAVE_AWAY_LABEL = 'מסירת הטיסה ללא חלופה';
 
 /** מה קרה לסבב שבמקומו בוצע סבב אחר באותם ימים, לפי התשובה לשאלה עליו. */
 const DATES_OUTCOME = {
-  replaced: 'החלפה ביוזמת החברה',
+  replaced: 'שינוי ביוזמת החברה',
+  bid: 'זכייה במכרז',
   voluntary_swap: 'החלפה מרצוני',
   cancelled: 'המתוכנן בוטל, ומה שבוצע לא היה מתוכנן',
   wet_lease: 'הורדה מהטיסה ביוזמת החברה',

@@ -728,6 +728,10 @@ const daysBetween = (a, b) => Math.round((Date.parse(b) - Date.parse(a)) / dayMs
 const addDays = (iso, n) => new Date(Date.parse(iso) + n * dayMs).toISOString().slice(0, 10);
 const dayOf = (iso) => iso.slice(8, 10) + '/' + iso.slice(5, 7);
 
+/** תשובות שמשלמות את הגבוה מבין שתי הטיסות: שינוי ביוזמת החברה, וזכייה במכרז. */
+const COMPANY_PAID_SWAPS = ['replaced', 'bid'];
+const swapWord = (answer) => (answer?.value === 'bid' ? 'זכייה במכרז' : 'שינוי ביוזמת החברה');
+
 /**
  * שינוי בתוכנית: תשלום לפי הגבוה מבין המתוכנן לבין שבוצע. חל אחרי תשובה "החלפה ביוזמת
  * החברה" בשאלה על הסבב המתוכנן שלא בוצע (`cancelled_no_compensation`), כי טיסה אחרת באותם
@@ -744,7 +748,7 @@ function higher_of_planned_performed(ctx, params, rule) {
     if (!match.plan) continue;
     const answer = ctx.answerFor(match);
     if (params.excluded_when_voluntary_swap && answer?.value === 'voluntary_swap') continue;
-    if (answer && answer.value !== 'replaced') continue;
+    if (answer && !COMPANY_PAID_SWAPS.includes(answer.value)) continue;
     if (!answer && (params.requires_user_answer || match.how !== 'dates')) continue;
     if (ctx.pairingHandledBy(match.plan, 'lost_hours_credit')) continue;
     if (ctx.pairingHandledBy(match.plan, 'cancelled_no_compensation')) continue;
@@ -754,7 +758,7 @@ function higher_of_planned_performed(ctx, params, rule) {
     // תשובה ישנה נשמרה בלי קישור, ואז ההחלפה היא הסבב שבוצע באותם ימים.
     const exec = answer && 'link' in answer ? (answer.link ? ctx.pairingById(answer.link) : null) : match.exec;
     if (!exec) {
-      ctx.review(`${describePairing(match.plan)}: החלפה ביוזמת החברה בטיסה שאינה בקבצים של החודש, ` +
+      ctx.review(`${describePairing(match.plan)}: ${swapWord(answer)} בטיסה שאינה בקבצים של החודש, ` +
         'ולכן לא ניתן לחשב את ההפרש. דורש בדיקה ידנית.', rule);
       continue;
     }
@@ -785,9 +789,9 @@ function higher_of_planned_performed(ctx, params, rule) {
     const paidOn = extra <= 0 ? null
       : findShortfallPaid(ctx, m, extra, column, reportColumn) ?? findShortfallPaid(ctx, m, extra, column, reportColumn, true);
     const moved = paidOn && paidOn !== exec ? paidOn : null;
-    ctx.note(match.plan.from, `החלפה ביוזמת החברה: קרדיט של הטיסה הארוכה מבין השתיים${which}.`, rule);
+    ctx.note(match.plan.from, `${swapWord(answer)}: קרדיט של הטיסה הארוכה מבין השתיים${which}.`, rule);
     // ביום של הטיסה שבוצעה, כשהוא אחר.
-    if (exec.from !== match.plan.from) ctx.note(exec.from, 'החלפה ביוזמת החברה: קרדיט על הטיסה שבוצעה.', rule);
+    if (exec.from !== match.plan.from) ctx.note(exec.from, `${swapWord(answer)}: קרדיט על הטיסה שבוצעה.`, rule);
     if (extra <= 0) continue;
 
     const where = moved ? `, ונרשם על ${describePairing(moved)}` : '';
@@ -798,7 +802,7 @@ function higher_of_planned_performed(ctx, params, rule) {
     // `showOn`: בטבלת הפירוט השורה מוצגת על הטיסה שהחליפה, עם מה שהרומה רשמה על הסבב האחר, וההסבר
     // אומר איפה זה ברומה (בעל המוצר, 01/10/2026; 10–11/06/2026). לחוקים הציפייה נשארת על הסבב
     // שעליו הרומה רשמה אותה, כדי שהסכום שם לא ייראה להם כזיכוי בלי הסבר.
-    const explain = `החלפה ביוזמת החברה, מגיע הקרדיט של הטיסה הארוכה מבין השתיים (${minToHhmm(planned)} לעומת ${minToHhmm(performed)}).` +
+    const explain = `${swapWord(answer)}, מגיע הקרדיט של הטיסה הארוכה מבין השתיים (${minToHhmm(planned)} לעומת ${minToHhmm(performed)}).` +
       (alreadyMinSlip ? ` מתוך ההפרש, ${minToHhmm(alreadyMinSlip)} כבר בהשלמה לסליפ קצר.` : '') +
       (moved ? ` הקרדיט הזה מופיע ברומה ב-${dayOf(moved.from)}.` : '');
     ctx.expectPairing(paidOn ?? exec, column, extra, rule,
@@ -1038,7 +1042,7 @@ function checkLinkConflicts(ctx, rule) {
 
   // סבב מתוכנן עם קישור, מול מה שכבר סומן על הטיסה שהוא מצביע עליה.
   for (const entry of planResolution.values()) {
-    if (!['replaced', 'voluntary_swap'].includes(entry.value) || !entry.link || entry.link === 'none') continue;
+    if (![...COMPANY_PAID_SWAPS, 'voluntary_swap'].includes(entry.value) || !entry.link || entry.link === 'none') continue;
     const exec = execResolution.get(entry.link);
     if (!exec) continue;
     const compatible = entry.value === 'voluntary_swap' && exec.value === 'voluntary_swap' && exec.link === entry.match.plan.id;
@@ -1171,7 +1175,10 @@ function whatHappenedOptions(ctx, plan, exec) {
     : diff > 0 ? `: ${amountWord(shortfall)} של ${minToHhmm(diff)}`
     : '; מה שבוצע אינו קצר מהמתוכנן, ולכן אין הפרש לתשלום');
   return [
-    { value: 'replaced', label: 'החלפה ביוזמת החברה (כולל זכיה במכרז או סטיה לשדה משנה)', hint: higher, needsLink: true },
+    { value: 'replaced', label: 'שינוי ביוזמת החברה (כולל סטיה לשדה משנה)', hint: higher, needsLink: true },
+    // זכייה במכרז משלמת כמו שינוי ביוזמת החברה, אבל אינה "ביוזמת החברה" לעניין 2024 ס' 34–37 ו-39
+    // (ס' 40): נחיתות לילה, שבתות ברצף וטיסות סבב לילה עוקבות (בעל המוצר, 05/10/2026).
+    { value: 'bid', label: 'זכייה במכרז', hint: higher, needsLink: true },
     { value: 'voluntary_swap', label: 'החלפה מרצוני', hint: 'רק הקרדיט של הטיסה שבוצעה', needsLink: true },
     { value: 'cancelled', label: 'הטיסה המקורית בוטלה ללא קרדיט',
       hint: exec ? 'מגיע פיצוי של קריאה מיוחדת על הטיסה שבוצעה' : 'לא מגיע כלום' },
