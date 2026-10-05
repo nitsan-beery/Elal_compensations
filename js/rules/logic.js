@@ -973,7 +973,7 @@ function voluntary_swap(ctx, params, rule) {
  * הורדה מהטיסה המקורית – השעות שהפסיד, בנוסף לקרדיט של מה שבוצע (`lost_hours_credit`).
  * בשתי ההחלפות נבחרת הטיסה שבוצעה במקום: קודם זו שבאותם ימים, ואחריה כל פעילות שלא תוכננה.
  *
- * סטיה לשדה משנה (הסבב שבוצע כולל, לצד היעד המתוכנן, יעד נוסף יחיד) אינה נשאלת: מניחים
+ * סטיה לשדה משנה (הסבב שבוצע כולל, לצד היעד המתוכנן, יעד נוסף אחד או יותר) אינה נשאלת: מניחים
  * החלפה ביוזמת החברה בלי שאלה, כי הקרדיט כבר כולל את כל מה שבוצע (`assumeDiversion`).
  */
 function cancelled_no_compensation(ctx, params, rule) {
@@ -1125,15 +1125,16 @@ function assumeCancelled(ctx, match, rule) {
 }
 
 /**
- * סטיה לשדה משנה: הסבב המתוכנן היה ליעד יחיד X, והסבב שבוצע כולל את X ועוד יעד אחד בלבד –
- * לפני X (סטיה ביציאה: "טיסה ל-X" הופכת ל"טיסה ל-Y ומ-Y ל-X") או אחריו (סטיה בחזרה: "טיסה
- * מ-X" הופכת ל"טיסה מ-X ל-G ומ-G"). מחזיר את היעד הנוסף, או null כשזה לא המקרה.
+ * סטיה לשדה משנה: הסבב המתוכנן היה ליעד יחיד X, והסבב שבוצע הגיע ל-X ועבר גם ביעד אחד או
+ * יותר – לפני X (סטיה ביציאה: "טיסה ל-X" הופכת ל"טיסה ל-Y ומ-Y ל-X") או אחריו (סטיה בחזרה:
+ * "טיסה מ-X" הופכת ל"טיסה מ-X ל-G ומ-G"; בעל המוצר, 05/10/2026: לא בהכרח יעד אחד בדיוק).
+ * מחזיר את היעדים הנוספים, או null כשזה לא המקרה.
  */
-function diversionExtraDestination(plan, exec) {
-  if (plan.destinations.length !== 1 || exec.destinations.length !== 2) return null;
+function diversionExtraDestinations(plan, exec) {
+  if (plan.destinations.length !== 1 || exec.destinations.length < 2) return null;
   const [x] = plan.destinations;
   if (!exec.destinations.includes(x)) return null;
-  return exec.destinations.find((d) => d !== x) ?? null;
+  return [...new Set(exec.destinations.filter((d) => d !== x))];
 }
 
 /**
@@ -1144,14 +1145,14 @@ function diversionExtraDestination(plan, exec) {
  */
 function assumeDiversion(ctx, match, rule) {
   if (!match.exec) return false;
-  const extra = diversionExtraDestination(match.plan, match.exec);
+  const extra = diversionExtraDestinations(match.plan, match.exec);
   if (!extra) return false;
   const diff = plannedMinusPerformed(ctx, match.plan, match.exec);
   if (diff == null || diff > 0) return false;
   ctx.markPairing(match.plan, 'diversion');
   ctx.markPairing(match.exec, 'diversion');
   ctx.assumeAnswer(match.plan, 'diversion');
-  ctx.note(match.plan.from, `סטיה לשדה משנה (נחיתה גם ב-${extra}): הקרדיט כבר כולל את כל מה שבוצע, ואין פער לתשלום.`, rule);
+  ctx.note(match.plan.from, `סטיה לשדה משנה (נחיתה גם ב-${extra.join(', ')}): הקרדיט כבר כולל את כל מה שבוצע, ואין פער לתשלום.`, rule);
   return true;
 }
 
