@@ -951,6 +951,11 @@ function explainChanges(out, supported) {
     // הערה על סבב מסוים (`pairingId`) – רק בשורה שלו, גם כשסבב אחר בוצע באותם ימים.
     const ruled = out.notes.filter((n) => !n.aside && CHANGE_LOGIC.has(logicOf.get(n.ruleId)) && within(n.date) &&
       (!n.pairingId || ids.includes(n.pairingId)));
+    // סטיה לשדה משנה שהנחיתה המאוחרת זיהתה (`late_landing_home`): מעל מה שמגיע על השינוי, גם
+    // כשהסבב לא היה מתוכנן (בעל המוצר, 05/10/2026: כל סטיה מופיעה בשינויים).
+    const change = out.notes.filter((n) => n.change && within(n.date) && (!n.pairingId || ids.includes(n.pairingId)));
+    for (const n of change) n.placed = true;
+    const diverted = change.map((n) => ({ message: n.message.startsWith(`${c.label}: `) ? n.message.slice(c.label.length + 2) : n.message, byUser: false }));
     if (ruled.length) {
       // שם השינוי כבר בשורה שלו, ולכן הוא יורד מראש ההערה.
       const leads = [c.label, c.label.replace('מרצוני', 'מרצון')].map((l) => `${l}: `);
@@ -959,6 +964,7 @@ function explainChanges(out, supported) {
         const lead = leads.find((l) => n.message.startsWith(l));
         return { message: lead ? n.message.slice(lead.length) : n.message, byUser: !!n.byUser };
       });
+      c.notes.unshift(...diverted);
       continue;
     }
 
@@ -983,7 +989,7 @@ function explainChanges(out, supported) {
       const list = [...items];
       due = list.length ? (list.length > 1 ? `${list.slice(0, -1).join(', ')} ו${list.at(-1)}` : list[0]) : 'לא מגיע קרדיט ולא פיצוי';
     }
-    c.notes = [{ message: `${outcome}${due}.`, byUser: false }];
+    c.notes = [...diverted, { message: `${outcome}${due}.`, byUser: false }];
   }
 }
 
@@ -1053,7 +1059,7 @@ const DATES_OUTCOME = {
   trainee: 'הורדה מהטיסה ביוזמת החברה',
   swap_777: 'הועבר ל-777 (לא כשיר MFF)',
   other: 'סיבה אחרת',
-  diversion: 'סטיה לשדה משנה', // הנחה בלבד (`assumeDiversion`), אינה אפשרות בשאלה
+  diversion: 'סטיה לשדה משנה', // תשובה, או הנחה מהקבצים (`assumeDiversion`)
 };
 
 /** ההנחה בלשון התשובות. כמה חוקים יכולים להסביר את אותו זיכוי, ואז כולם מופיעים. */

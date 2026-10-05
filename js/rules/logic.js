@@ -500,6 +500,12 @@ function late_landing_home(ctx, params, rule) {
         if (answer === 'yes' || (!answer && ctx.paidOnDate(date, 'COM', 'com', divMin))) {
           delay = divDelay;
           diverted = `, מול הנחיתה המתוכננת לפני הסטיה ל-${via} (${minToHhmm(div.sta)})`;
+          // כל סטיה מופיעה בשינויים בין התכנון לביצוע, גם בסבב שלא תוכנן (`change`; בעל המוצר, 05/10/2026).
+          const pairing = ctx.execPairings.find((p) => p.legs.some((l) => l.flight === leg.flight && l.date === date));
+          if (pairing) {
+            ctx.markPairing(pairing, 'diversion');
+            ctx.note(date, `סטיה לשדה משנה: ${leg.flight} נחתה גם ב-${via}.`, rule, { change: true, pairingId: pairing.id });
+          }
         } else if (!answer) {
           ctx.ask({
             id,
@@ -728,9 +734,10 @@ const daysBetween = (a, b) => Math.round((Date.parse(b) - Date.parse(a)) / dayMs
 const addDays = (iso, n) => new Date(Date.parse(iso) + n * dayMs).toISOString().slice(0, 10);
 const dayOf = (iso) => iso.slice(8, 10) + '/' + iso.slice(5, 7);
 
-/** תשובות שמשלמות את הגבוה מבין שתי הטיסות: שינוי ביוזמת החברה, וזכייה במכרז. */
-const COMPANY_PAID_SWAPS = ['replaced', 'bid'];
-const swapWord = (answer) => (answer?.value === 'bid' ? 'זכייה במכרז' : 'שינוי ביוזמת החברה');
+/** תשובות שמשלמות את הגבוה מבין שתי הטיסות: שינוי ביוזמת החברה, זכייה במכרז וסטיה לשדה משנה. */
+const COMPANY_PAID_SWAPS = ['replaced', 'bid', 'diversion'];
+const SWAP_WORD = { bid: 'זכייה במכרז', diversion: 'סטיה לשדה משנה' };
+const swapWord = (answer) => SWAP_WORD[answer?.value] ?? 'שינוי ביוזמת החברה';
 
 /**
  * שינוי בתוכנית: תשלום לפי הגבוה מבין המתוכנן לבין שבוצע. חל אחרי תשובה "החלפה ביוזמת
@@ -746,7 +753,8 @@ function higher_of_planned_performed(ctx, params, rule) {
   const reportColumn = params.shortfall_column ?? 'COM';
   for (const match of ctx.matches) {
     if (!match.plan) continue;
-    const answer = ctx.answerFor(match);
+    // סטיה לשדה משנה שהונחה מהקבצים (`assumeDiversion`) היא כמו תשובה.
+    const answer = ctx.answerFor(match) ?? (ctx.pairingHandledBy(match.plan, 'diversion') ? { value: 'diversion' } : null);
     if (params.excluded_when_voluntary_swap && answer?.value === 'voluntary_swap') continue;
     if (answer && !COMPANY_PAID_SWAPS.includes(answer.value)) continue;
     if (!answer && (params.requires_user_answer || match.how !== 'dates')) continue;
@@ -973,8 +981,9 @@ function voluntary_swap(ctx, params, rule) {
  * הורדה מהטיסה המקורית – השעות שהפסיד, בנוסף לקרדיט של מה שבוצע (`lost_hours_credit`).
  * בשתי ההחלפות נבחרת הטיסה שבוצעה במקום: קודם זו שבאותם ימים, ואחריה כל פעילות שלא תוכננה.
  *
- * סטיה לשדה משנה (הסבב שבוצע כולל, לצד היעד המתוכנן, יעד נוסף אחד או יותר) אינה נשאלת: מניחים
- * החלפה ביוזמת החברה בלי שאלה, כי הקרדיט כבר כולל את כל מה שבוצע (`assumeDiversion`).
+ * סטיה לשדה משנה (הסבב שבוצע הוא המתוכנן, עם נחיתה ביעד אחד או יותר שלא תוכנן) אינה נשאלת:
+ * מניחים אותה, ומגיע הגבוה מבין השתיים (`assumeDiversion`). כשהצורה אינה ברורה מהקבצים, היא
+ * אפשרות בשאלה.
  */
 function cancelled_no_compensation(ctx, params, rule) {
   checkLinkConflicts(ctx, rule);
@@ -1125,34 +1134,41 @@ function assumeCancelled(ctx, match, rule) {
 }
 
 /**
- * סטיה לשדה משנה: הסבב המתוכנן היה ליעד יחיד X, והסבב שבוצע הגיע ל-X ועבר גם ביעד אחד או
- * יותר – לפני X (סטיה ביציאה: "טיסה ל-X" הופכת ל"טיסה ל-Y ומ-Y ל-X") או אחריו (סטיה בחזרה:
- * "טיסה מ-X" הופכת ל"טיסה מ-X ל-G ומ-G"; בעל המוצר, 05/10/2026: לא בהכרח יעד אחד בדיוק).
- * מחזיר את היעדים הנוספים, או null כשזה לא המקרה.
+ * סטיה לשדה משנה: הסבב שבוצע הוא הסבב המתוכנן – אותם מספרי טיסה ואותם יעדים באותו סדר – ובדרך
+ * נחת גם ביעד אחד או יותר שלא תוכנן, לפני יעד מתוכנן (סטיה ביציאה: "טיסה ל-X" הופכת ל"טיסה ל-Y
+ * ומ-Y ל-X") או אחריו (סטיה בחזרה: "טיסה מ-X" הופכת ל"טיסה מ-X ל-G ומ-G"). גם כשהסבב המתוכנן
+ * היה ליותר מיעד אחד (בעל המוצר, 05/10/2026). מחזיר את היעדים הנוספים, או null כשזה לא המקרה.
  */
 function diversionExtraDestinations(plan, exec) {
-  if (plan.destinations.length !== 1 || exec.destinations.length < 2) return null;
-  const [x] = plan.destinations;
-  if (!exec.destinations.includes(x)) return null;
-  return [...new Set(exec.destinations.filter((d) => d !== x))];
+  const planned = plan.destinations, done = exec.destinations;
+  if (!planned.length || done.length <= planned.length) return null;
+  let i = 0;
+  for (const d of done) if (d === planned[i]) i++;
+  if (i < planned.length) return null;
+  // מספר טיסה אחר הוא סבב אחר, ולא אותה טיסה עם נחיתה נוספת: נשאל.
+  const flights = new Set(exec.legs.map((l) => l.flight).filter(Boolean));
+  if (!plan.legs.every((l) => l.dh || !l.flight || flights.has(l.flight))) return null;
+  return done.filter((d) => !planned.includes(d));
 }
 
 /**
  * סטיה לשדה משנה במהלך הטיסה, למשל בגלל מזג אוויר: לא החלפה בסבב אחר, אלא אותה טיסה עם רגל
- * נוספת. הקרדיט כבר כולל את כל מה שבוצע (`credit_from_scheduled` סופר את כל רגלי הסבב, כולל
- * הרגל הנוספת), ולכן מניחים ולא שואלים – חוץ ממקרה לא צפוי שבו המבוצע יוצא קצר מהמתוכנן
- * למרות הרגל הנוספת, ואז בודקים ידנית כמו בהחלפה רגילה (בקשת בעל המוצר, 26/09/2026).
+ * נוספת. מניחים ולא שואלים, וסטיה נחשבת שינוי ביוזמת החברה: מגיע הגבוה מבין המתוכנן למה שבוצע
+ * (`higher_of_planned_performed`, לפי הסימון `diversion`). בדרך כלל הקרדיט של מה שבוצע כבר כולל
+ * את כל הרגליים, והוא הגבוה; כשהמבוצע קצר יותר, ההפרש צפוי, ופער מוצג אם הרומה לא זיכתה אותו
+ * (בעל המוצר, 26/09/2026 ו-05/10/2026).
  */
 function assumeDiversion(ctx, match, rule) {
   if (!match.exec) return false;
   const extra = diversionExtraDestinations(match.plan, match.exec);
   if (!extra) return false;
-  const diff = plannedMinusPerformed(ctx, match.plan, match.exec);
-  if (diff == null || diff > 0) return false;
   ctx.markPairing(match.plan, 'diversion');
+  // הנחיתה המאוחרת כבר רשמה את הסטיה על הסבב שבוצע (`late_landing_home`).
+  if (!ctx.pairingHandledBy(match.exec, 'diversion')) {
+    ctx.note(match.plan.from, `סטיה לשדה משנה: נחיתה גם ב-${extra.map((d) => `⁦${d}⁩`).join(' ו-')}.`, rule);
+  }
   ctx.markPairing(match.exec, 'diversion');
   ctx.assumeAnswer(match.plan, 'diversion');
-  ctx.note(match.plan.from, `סטיה לשדה משנה (נחיתה גם ב-${extra.join(', ')}): הקרדיט כבר כולל את כל מה שבוצע, ואין פער לתשלום.`, rule);
   return true;
 }
 
@@ -1176,7 +1192,10 @@ function whatHappenedOptions(ctx, plan, exec) {
     : diff > 0 ? `: ${amountWord(shortfall)} של ${minToHhmm(diff)}`
     : '; מה שבוצע אינו קצר מהמתוכנן, ולכן אין הפרש לתשלום');
   return [
-    { value: 'replaced', label: 'שינוי ביוזמת החברה (כולל סטיה לשדה משנה)', hint: higher, needsLink: true },
+    { value: 'replaced', label: 'שינוי ביוזמת החברה', hint: higher, needsLink: true },
+    // אותה טיסה, עם נחיתה ביעד שלא תוכנן: רק מול הסבב שבוצע באותם ימים, ולכן בלי קישור
+    // (בעל המוצר, 05/10/2026). משלמת כמו שינוי ביוזמת החברה.
+    ...(exec ? [{ value: 'diversion', label: 'סטיה לשדה משנה', hint: higher }] : []),
     // זכייה במכרז משלמת כמו שינוי ביוזמת החברה, אבל אינה "ביוזמת החברה" לעניין 2024 ס' 34–37 ו-39
     // (ס' 40): נחיתות לילה, שבתות ברצף וטיסות סבב לילה עוקבות (בעל המוצר, 05/10/2026).
     { value: 'bid', label: 'זכייה במכרז', hint: higher, needsLink: true },

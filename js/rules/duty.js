@@ -676,11 +676,12 @@ function cancelStatus(ctx, planPairing) {
   const by = (tag) => ctx.pairingHandledBy(planPairing, tag);
   if (by('lost_hours_credit') || by('cancelled_no_compensation')) return 'company';
   if (by('voluntary_swap')) return 'no';
+  if (by('diversion')) return 'company'; // סטיה לשדה משנה שהונחה מהקבצים (`assumeDiversion`)
   // גם בלי סימון, כשהחוק שמסמן אינו בתוקף בחודש: התשובה עצמה.
   const a = ctx.answerFor(m)?.value;
   if (a === 'voluntary_swap') return 'no';
   if (a === 'bid') return 'bid';
-  if (['cancelled', 'wet_lease', 'trainee', 'swap_777', 'replaced'].includes(a)) return 'company';
+  if (['cancelled', 'wet_lease', 'trainee', 'swap_777', 'replaced', 'diversion'].includes(a)) return 'company';
   if (a === 'other') return 'review';
   return 'unknown';
 }
