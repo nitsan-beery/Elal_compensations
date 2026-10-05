@@ -6,7 +6,7 @@
 // ההשוואה נעשית ב"קבוצות ימים": סבב ביצוע והימים שהקרדיט שלו התפצל אליהם הם קבוצה אחת,
 // וכל יום אחר הוא קבוצה לעצמו. כך טיסת לילה שהקרדיט שלה נרשם בשני ימים נבדקת כמכלול.
 
-import { LOGIC, LOGIC_ORDER, markDiversions } from './logic.js';
+import { LOGIC, LOGIC_ORDER } from './logic.js';
 import { rulesInEffect, partitionRules, rulesByLogic, classifyCode } from './catalog.js';
 import { buildTimeline, buildPairings, markCarryIn, matchPairings, describePairing, describeRoute, pairingParts, fdpParts } from '../model.js';
 import { hoursToMin, minToHhmm } from '../time.js';
@@ -108,7 +108,6 @@ function evaluateOnce({ rulesData, plan = null, exec = null, answers = {}, histo
     ? splitSwappedElsewhere(matchPairings(planPairings, execPairings), answers, dependentAnswers)
     : mode === 'exec' ? execPairings.map((e) => ({ plan: null, exec: e, how: 'noplan' })) : [];
   explainByActivity(matches, timeline, codes, sickCodeTest(supported), movableCodeTest(supported));
-  markDiversions(matches, answers);
 
   const out = {
     period,
