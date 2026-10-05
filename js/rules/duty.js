@@ -1095,20 +1095,19 @@ function consecutive_night_rounds(ctx, params, rule) {
 // ---------- טיסה לבנה (2018 הגדרות, ס' 27.4) ----------
 
 /**
- * טיסה לבנה: יוצאת מהבסיס, בצוות מוגבר, ההתייצבות המתוכננת (STD פחות `report_minutes_before_std`,
- * 90 דק' בצי רחב גוף, 2018 ס' 52.2) אחרי `report_after` ועד `report_until`, ובלוק מקובע ארוך
- * מ-`min_block_hours`. הרכב הצוות אינו בקבצים, ולכן שואלים: 3 טייסים ומעלה נחשבים צוות מוגבר,
- * גם כשאחד מ-4 עוד לא מוגדר קברניט או קצין ראשון (החלטת בעל המוצר, 21/09/2026).
+ * הרגליים שיכולות להיות טיסה לבנה: יוצאות מהבסיס, ההתייצבות המתוכננת (STD פחות `report_minutes_before_std`,
+ * 90 דק' בצי רחב גוף, 2018 ס' 52.2) אחרי `report_after` ועד `report_until`, ובלוק מקובע ארוך מ-`min_block_hours`.
+ * `block: null` – אין משך מתוכנן (השדה אינו בטבלת אזורי הזמן). גם מגבלות החוק (לפני החוקים) והצוות החוזי
+ * נשענים עליהן: טיסה כזאת לעולם אינה בצוות בודד, ולכן הרכב הצוות שלה נשאל רק בשאלת הטיסה הלבנה (בעל
+ * המוצר, 06/10/2026).
  */
-function white_flight(ctx, params, rule) {
+export function whiteFlightLegs(ctx, params) {
   const report = params.report_minutes_before_std ?? 0;
-  const key = keyFor(params.report_column);
   const from = parseClock(params.report_after);
   const to = parseClock(params.report_until);
   const inWindow = (c) => (from < to ? c > from && c <= to : c > from || c <= to);
   const pairings = ctx.hasExec ? ctx.execPairings : ctx.planPairings;
-  const own = ctx.rulesWithLogic('white_flight').map((r) => r.id);
-
+  const out = [];
   for (const p of pairings) {
     for (const l of p.legs) {
       const dh = ctx.hasExec ? l.dhd || l.type === 'DHO' : l.dh;
@@ -1117,37 +1116,59 @@ function white_flight(ctx, params, rule) {
       const reportAt = at(l.date, std) - report;
       if (!inWindow(clockOf(reportAt))) continue;
       const block = ctx.hasExec ? l.skdDur : planBlock(l);
-      if (block == null) {
-        ctx.review(`${rule.title}: אין משך מתוכנן ל-${l.flight} ${l.org}→${l.dst} ב-${ddmm(l.date)} (השדה אינו בטבלת אזורי הזמן), ולכן לא נבדק אם היא ארוכה מ-${params.min_block_hours} שעות.`, rule);
-        continue;
-      }
-      if (block <= H(params.min_block_hours)) continue;
-      ctx.crewMatters?.(l.date, l.flight);
+      if (block != null && block <= H(params.min_block_hours)) continue;
+      out.push({ p, l, reportAt, block });
+    }
+  }
+  return out;
+}
 
-      const what = `${l.flight} ${l.org}→${l.dst} ב-${ddmm(l.date)}, התייצבות ${hhmm(reportAt)}, בלוק ${minToHhmm(block)}`;
-      const id = `white:${l.date}:${l.flight}`;
-      const answered = ctx.answer(id);
-      const a = answered ?? (ctx.paidOn(p, params.report_column, key, H(params.hours), own) ? { value: 'yes' } : null);
-      if (!a && !ctx.hasExec) {
-        // בתכנון לבד הרכב הצוות אינו נשאל (בעל המוצר, 03/10/2026).
-        ctx.note(l.date, `${rule.title}: ${what}. אם תבוצע בצוות מוגבר (3 טייסים ומעלה), מגיע פיצוי של ${minToHhmm(H(params.hours))}.`, rule);
-      } else if (!a) {
-        ctx.ask({
-          id,
-          date: l.date,
-          title: `טיסה לבנה: האם ${l.flight} ב-${ddmm(l.date)} בוצעה בצוות מוגבר?`,
-          body: `${what}. הרומה לא מזכה עליה, והיא טיסה לבנה רק אם הצוות היה מוגבר: 3 טייסים ומעלה, ` +
-            'גם 4 כשאחד מהם עוד לא מוגדר קברניט או קצין ראשון.',
-          options: [
-            { value: 'yes', label: 'כן, צוות מוגבר (3 טייסים או יותר)', hint: `${minToHhmm(H(params.hours))} – פער מול הרומה` },
-            { value: 'no', label: 'לא', hint: 'אין פיצוי' },
-          ],
-          ruleId: rule.id,
-        });
-      } else if (a.value === 'yes') {
-        ctx.expectPairing(p, key, H(params.hours), rule,
-          `${rule.title}: ${what} (${answered ? (answered.source === 'calendar' ? 'צוות מוגבר לפי היומן' : 'צוות מוגבר לפי תשובתך') : `הרומה מזכה את הפיצוי, ולכן צוות מוגבר`})`);
-      }
+/** הרכב הצוות לפי התשובה על טיסה לבנה: כן – מוגבר (או כפול עם חניך), לא – כפול. */
+export const whiteCrew = (value) => (value === 'yes' ? 'augmented' : value === 'no' ? 'double' : null);
+
+/**
+ * טיסה לבנה: רגל מ-`whiteFlightLegs` שבוצעה בצוות מוגבר, או בצוות כפול עם חניך (בעל המוצר, 06/10/2026).
+ * הרכב הצוות אינו בקבצים, ולכן שואלים, רק כשהרומה לא זיכתה. מה שנקבע על כל רגלי הסבב (`ctx.whiteLegs`:
+ * הרכב הצוות, או null כשעוד לא ידוע) משמש את הצוות החוזי (`legal_crew_composition`).
+ */
+function white_flight(ctx, params, rule) {
+  const key = keyFor(params.report_column);
+  const own = ctx.rulesWithLogic('white_flight').map((r) => r.id);
+  ctx.whiteLegs ??= new Map();
+
+  for (const { p, l, reportAt, block } of whiteFlightLegs(ctx, params)) {
+    if (block == null) {
+      ctx.review(`${rule.title}: אין משך מתוכנן ל-${l.flight} ${l.org}→${l.dst} ב-${ddmm(l.date)} (השדה אינו בטבלת אזורי הזמן), ולכן לא נבדק אם היא ארוכה מ-${params.min_block_hours} שעות.`, rule);
+      continue;
+    }
+    ctx.crewMatters?.(l.date, l.flight);
+
+    const what = `${l.flight} ${l.org}→${l.dst} ב-${ddmm(l.date)}, התייצבות ${hhmm(reportAt)}, בלוק ${minToHhmm(block)}`;
+    const id = `white:${l.date}:${l.flight}`;
+    const answered = ctx.answer(id);
+    const a = answered ?? (ctx.paidOn(p, params.report_column, key, H(params.hours), own) ? { value: 'yes' } : null);
+    // כל רגלי הסבב: אותו צוות.
+    for (const x of p.legs) {
+      if (x.flight) ctx.whiteLegs.set(`${x.date}|${x.flight}`, a ? { value: whiteCrew(a.value), source: answered ? answered.source ?? 'white' : 'white_paid' } : null);
+    }
+    if (!a && !ctx.hasExec) {
+      // בתכנון לבד הרכב הצוות אינו נשאל (בעל המוצר, 03/10/2026).
+      ctx.note(l.date, `${rule.title}: ${what}. אם תבוצע בצוות מוגבר או בצוות כפול עם חניך, מגיע פיצוי של ${minToHhmm(H(params.hours))}.`, rule);
+    } else if (!a) {
+      ctx.ask({
+        id,
+        date: l.date,
+        title: `טיסה לבנה: האם ${l.flight} ב-${ddmm(l.date)} בוצעה בצוות מוגבר או בצוות כפול עם חניך?`,
+        body: `${what}. הרומה לא מזכה עליה, והיא טיסה לבנה רק אם בוצעה בצוות מוגבר או בצוות כפול עם חניך.`,
+        options: [
+          { value: 'yes', label: 'כן', hint: `${minToHhmm(H(params.hours))} – פער מול הרומה` },
+          { value: 'no', label: 'לא, צוות כפול', hint: 'אין פיצוי' },
+        ],
+        ruleId: rule.id,
+      });
+    } else if (a.value === 'yes') {
+      ctx.expectPairing(p, key, H(params.hours), rule,
+        `${rule.title}: ${what} (${answered ? (answered.source === 'calendar' ? 'צוות מוגבר לפי היומן' : 'צוות מוגבר או כפול עם חניך לפי תשובתך') : `הרומה מזכה את הפיצוי, ולכן צוות מוגבר`})`);
     }
   }
 }
@@ -1248,6 +1269,18 @@ function contractLimits(fdp, params, domicile) {
  * בכל הרצה, ולכן מתעדכנות עם היומן ועם התשובות. כשהיומן מראה צוות קטן מהחוזי והרומה אינה מזכה, ייתכן
  * שהיומן אינו מעודכן, וההסבר מבקש לוודא סנכרון מהאורגנייזר.
  */
+/**
+ * מה ש-`white_flight` קבע על הרגל (`ctx.whiteLegs`, גם ביום שליד): undefined – אינה טיסה לבנה אפשרית,
+ * null – הרכב הצוות עוד לא ידוע, אחרת {value, source}.
+ */
+function whiteLegOf(ctx, f) {
+  for (const k of [0, -1, 1]) {
+    const key = `${addDays(f.date, k)}|${f.flight}`;
+    if (ctx.whiteLegs?.has(key)) return ctx.whiteLegs.get(key);
+  }
+  return undefined;
+}
+
 // בהערה שכבר מתחילה ביום: הטיסה בלי התאריך שבראש התיאור.
 const routeOnly = (what) => what.replace(/^⁦[^⁩]*⁩\s*/, '');
 
@@ -1273,14 +1306,21 @@ function legal_crew_composition(ctx, params, rule) {
     if (!pairing) { checked--; continue; }
     for (const f of fdp.flights) ctx.crewMatters?.(f.date, f.flight);
     const day = pairing.dates.includes(first.date) ? first.date : pairing.from;
-    const answered = ctx.answer(fdp.id) ??
-      fdp.flights.map((f) => ctx.answer(`night_crew:${f.date}:${f.flight}`)).find(Boolean) ?? null;
     const smallerThan = (c) => CREWS.indexOf(c) < CREWS.indexOf(need);
     const contract = `הצוות החוזי ${CREW_LABEL[need]}`;
+    // טיסה לבנה: הרכב הצוות לפי התשובה עליה (`white_flight`), ובלעדיה לא שואלים (בעל המוצר, 06/10/2026).
+    const white = fdp.flights.map((f) => whiteLegOf(ctx, f)).find((w) => w !== undefined);
+    const answered = ctx.answer(fdp.id) ??
+      fdp.flights.map((f) => ctx.answer(`night_crew:${f.date}:${f.flight}`)).find(Boolean) ?? white ?? null;
+    if (!answered && white === null) {
+      if (ctx.hasExec) pending.push(fdp);
+      else unknown.push(`${fdp.what} (${contract})`);
+      continue;
+    }
     if (answered) {
       if (!smallerThan(answered.value)) continue;
       below++;
-      const by = answered.source === 'calendar' ? 'לפי היומן' : 'לפי תשובתך';
+      const by = { calendar: 'לפי היומן', white: 'לפי התשובה על הטיסה הלבנה', white_paid: 'לפי הפיצוי על טיסה לבנה ברומה' }[answered.source] ?? 'לפי תשובתך';
       const verb = ctx.hasExec ? 'בוצעה' : 'מתוכננת';
       // היומן מראה צוות קטן מהחוזי והרומה אינה מזכה: ייתכן שהיומן אינו מעודכן.
       const stale = answered.source === 'calendar' && ctx.hasExec && !ctx.paidOn(pairing, params.report_column, key, amount, own)

@@ -12,7 +12,7 @@ import { buildTimeline, buildPairings, markCarryIn, matchPairings, describePairi
 import { hoursToMin, minToHhmm } from '../time.js';
 import { OPTIONAL_COLUMNS } from '../pdf/exec.js';
 import { checkLegalLimits, restDefinition } from './legal.js';
-import { stationOffsetAt } from './duty.js';
+import { stationOffsetAt, whiteFlightLegs, whiteCrew } from './duty.js';
 import { baseTime } from '../airports.js';
 
 /** עמודות הדוח שכל סוג ציפייה נבדק מולן. */
@@ -165,6 +165,18 @@ function evaluateOnce({ rulesData, plan = null, exec = null, answers = {}, histo
   // מגבלות החוק על התכנון (בעל המוצר, 03/10/2026). לפני החוקים, כדי ששאלת הרכב הצוות שלהן
   // תשמש גם את נחיתות הלילה.
   let crewIdOf = new Map();
+  // סבב עם טיסה לבנה אפשרית: הרכב הצוות בכל הרגליים שלו לפי השאלה עליה (`whiteFlightLegs`), כי זה אותו צוות.
+  const whiteIds = new Map(); // "date|flight" → מזהה השאלה על הטיסה הלבנה
+  for (const rule of rulesByLogic(supported, 'white_flight')) {
+    for (const { p, l, block } of whiteFlightLegs(ctx, rule.logic.params ?? {})) {
+      if (block == null) continue;
+      for (const x of p.legs) if (x.flight) whiteIds.set(`${x.date}|${x.flight}`, `white:${l.date}:${l.flight}`);
+    }
+  }
+  const whiteCrewOf = (date, flight) => {
+    const id = [0, -1, 1].map((k) => whiteIds.get(`${new Date(Date.parse(date) + k * 864e5).toISOString().slice(0, 10)}|${flight}`)).find(Boolean);
+    return id ? whiteCrew(ctx.answer(id)?.value) : undefined;
+  };
   if ((plan || exec) && domicile && rulesData.legal_limits) {
     const leave = new Set(codes.leave ?? []);
     const activity = new Set([...(codes.relevant ?? []).filter((c) => !leave.has(c)), ...(codes.ground_activity ?? [])]);
@@ -179,6 +191,7 @@ function evaluateOnce({ rulesData, plan = null, exec = null, answers = {}, histo
       answer: ctx.answer,
       ask: ctx.ask,
       crewMatters: ctx.crewMatters,
+      whiteCrew: whiteCrewOf,
       calendarStandby: cal.standby,
     });
     out.legal = legal.result;

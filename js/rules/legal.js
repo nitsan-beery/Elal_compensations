@@ -414,7 +414,11 @@ function checkFdp(ch, id, o, flag, extend, needCrew) {
   const fdp = ch.fdpEnd - ch.fdpStart;
   const seg = ch.flights.length;
   const fits = (lim) => lim && ft <= lim.ft && fdp <= lim.fdp && seg <= lim.seg;
-  const crewAnswer = answer(id)?.value ?? ch.flights.map((f) => answer(`night_crew:${f.date}:${f.flight}`)?.value).find(Boolean) ?? null;
+  // טיסה לבנה לעולם אינה בצוות בודד, והרכב הצוות שלה נשאל רק בשאלה עליה (בעל המוצר, 06/10/2026): לפי
+  // התשובה שם, ובלעדיה ההשוואה למגבלות ההרכב שה-FDP עומד בהן הכי טוב, בלי לשאול (`o.whiteCrew`).
+  const white = ch.flights.map((f) => o.whiteCrew?.(f.date, f.flight)).find((w) => w !== undefined);
+  const crewAnswer = answer(id)?.value ?? ch.flights.map((f) => answer(`night_crew:${f.date}:${f.flight}`)?.value).find(Boolean) ??
+    (white === undefined ? null : white ?? 'double');
   const single = limitsFor('single', ch, limits);
   const lim = { single, augmented: limitsFor('augmented', ch, limits), double: limitsFor('double', ch, limits) };
   // מנוחה קצרה מהחוקית בתוך ה-FDP (שלוש שעות ומעלה, כלומר לא זמן קרקע בין רגליים) היא הסיבה
