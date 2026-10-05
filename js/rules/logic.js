@@ -1138,6 +1138,12 @@ function assumeCancelled(ctx, match, rule) {
   return true;
 }
 
+/** לפחות אחד ממספרי הטיסה המתוכננים (בלי DH) נמצא בסבב שבוצע. */
+function sharesFlight(plan, exec) {
+  const flights = new Set(exec.legs.map((l) => l.flight).filter(Boolean));
+  return plan.legs.some((l) => !l.dh && l.flight && flights.has(l.flight));
+}
+
 /**
  * סטיה לשדה משנה: הסבב שבוצע הוא הסבב המתוכנן – כל מספרי הטיסה המתוכננים (בלי DH) נמצאים בו – אבל
  * נחת ביעד שלא תוכנן: בנוסף ליעדים המתוכננים (בדרך אליהם או בחזרה מהם), או במקום אחד מהם (05/02/2026:
@@ -1200,8 +1206,9 @@ function whatHappenedOptions(ctx, plan, exec) {
   return [
     { value: 'replaced', label: 'שינוי ביוזמת החברה', hint: higher, needsLink: true },
     // אותה טיסה, עם נחיתה ביעד שלא תוכנן: רק מול הסבב שבוצע באותם ימים, ולכן בלי קישור. משלמת כמו
-    // שינוי ביוזמת החברה, ומוצגת בשמה בשינויים (בעל המוצר, 05/10/2026).
-    ...(exec ? [{ value: 'diversion', label: 'סטיה לשדה משנה', hint: higher }] : []),
+    // שינוי ביוזמת החברה, ומוצגת בשמה בשינויים (בעל המוצר, 05/10/2026). רק כשלפחות אחד ממספרי הטיסה
+    // המתוכננים נמצא במה שבוצע: בלי אף אחד זו טיסה אחרת, ולא סטיה (04/06/2024: SKG → WAW).
+    ...(exec && sharesFlight(plan, exec) ? [{ value: 'diversion', label: 'סטיה לשדה משנה', hint: higher }] : []),
     // זכייה במכרז משלמת כמו שינוי ביוזמת החברה, אבל אינה "ביוזמת החברה" לעניין 2024 ס' 34–37 ו-39
     // (ס' 40): נחיתות לילה, שבתות ברצף וטיסות סבב לילה עוקבות (בעל המוצר, 05/10/2026).
     { value: 'bid', label: 'זכייה במכרז', hint: higher, needsLink: true },
