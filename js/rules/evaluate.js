@@ -212,7 +212,7 @@ function evaluateOnce({ rulesData, plan = null, exec = null, answers = {}, histo
   explainCompensations(out);
   if (exec) {
     out.comparison = compare({ out, timeline, execPairings, domicile, codes, fdp });
-    explainUnexplained(out, timeline, cal);
+    explainUnexplained(out, timeline, cal, execPairings.filter((p) => ctx.pairingHandledBy(p, 'diversion_assumed')));
     out.totals = compareTotals(out, exec);
     warnMissingColumns(out, exec);
   }
@@ -1014,14 +1014,20 @@ function explainCompensations(out) {
 /**
  * פיצוי שרשום ברומה ואף חוק אינו מסביר: גם הוא בשורה שלו (`notes`). שורה שממתינה לתשובה אינה ממצא עדיין.
  * כשהיומן מכיר את הטיסות בשורה, הרכב הצוות ידוע ואינו יכול להסביר את הפיצוי: "לא נמצא הסבר מתאים"
- * (בעל המוצר, 04/10/2026; 11/11/2025 DME: ‏05:00 בצוות כפול).
+ * (בעל המוצר, 04/10/2026; 11/11/2025 DME: ‏05:00 בצוות כפול). קריאה מיוחדת על סבב שהאפליקציה הניחה בו
+ * סטיה לשדה משנה (`assumeDiversion`, אותם מספרי טיסה): ההנחה נשארת, ומתחת לטיסה כתוב שהסטיה אינה
+ * מזכה בקריאה מיוחדת (בעל המוצר, 06/10/2026).
  */
-function explainUnexplained(out, timeline, cal) {
+function explainUnexplained(out, timeline, cal, diverted) {
   const known = (dates) => dates.some((d) => (dayOf(timeline, d)?.exec?.legs ?? []).some((l) => l.flight && cal.has(d, l.flight)));
+  const onDiverted = (dates) => diverted.some((p) => dates.some((d) => p.dates.includes(d)));
   for (const row of out.comparison) {
     if (!COMPENSATION_COLUMNS.includes(row.column) || row.pending || row.reported <= row.expected) continue;
     const amount = minToHhmm(row.reported - row.expected);
     row.notes = [known(row.dates ?? []) ? `ברומה רשום פיצוי ${amount}. לא נמצא הסבר מתאים לפיצוי.` : `ברומה רשום פיצוי ${amount} שאף חוק אינו מסביר.`];
+    if (row.column === 'S/C' && onDiverted(row.dates ?? [])) {
+      row.notes.push('האפליקציה מניחה סטיה לשדה משנה (אותם מספרי טיסה), ועל סטיה אין קריאה מיוחדת.');
+    }
   }
 }
 

@@ -600,6 +600,8 @@ function special_call(ctx, params, rule) {
     if (ctx.pairingHandledBy(match.exec, 'swap_conflict_void')) continue;
     const reported = ctx.reportedOn(match.exec, column);
     const answer = ctx.answerFor(match);
+    // סטיה לשדה משנה היא אותה טיסה, ולא קריאה מיוחדת, גם כשהרומה זיכתה S/C (`explainUnexplained`; בעל המוצר, 06/10/2026).
+    if (ctx.pairingHandledBy(match.exec, 'diversion_assumed') || answer?.value === 'diversion') continue;
 
     const training = ctx.pairingHandledBy(match.exec, 'training_cancelled');
     const bid = ctx.pairingHandledBy(match.exec, 'standby_bid');
@@ -1165,6 +1167,8 @@ function isDiversion(plan, exec) {
 function assumeDiversion(ctx, match, rule) {
   if (!match.exec || !isDiversion(match.plan, match.exec)) return false;
   noteDiversion(ctx, match, rule);
+  // גם כשהרומה זיכתה קריאה מיוחדת: אותם מספרי טיסה הם אותה טיסה (`explainUnexplained`; בעל המוצר, 06/10/2026).
+  ctx.markPairing(match.exec, 'diversion_assumed');
   ctx.assumeAnswer(match.plan, 'diversion');
   return true;
 }
