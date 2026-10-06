@@ -1008,6 +1008,17 @@ function renderExpectations(res) {
  */
 const datesFirst = (text) => text.replace(/⁦(\d[^\s⁦⁩]*) ([^⁦⁩]*)⁩/g, '⁦$1⁩ ⁦$2⁩');
 
+/**
+ * שורת התכנון והביצוע של שינוי. כשהוא שרשרת של שינויים ביומן, לחיצה עליה פותחת את הפירוט: איך הסבב עבר
+ * מהתכנון, דרך הסבבים שביומן, עד מה שבוצע בסוף (`steps`; בעל המוצר, 06/10/2026).
+ */
+function chainSides(c, sides) {
+  if (!c.steps?.length) return `<div class="small">${sides}</div>`;
+  return `<details class="chain"><summary class="small">${sides}</summary>
+    ${c.steps.map((n) => `<div class="explain small">${esc(datesFirst(n.message))}${n.byUser ? ' <span class="muted">לפי תשובת המשתמש</span>' : ''}</div>`).join('')}
+  </details>`;
+}
+
 function renderChanges(res) {
   if (res.mode === 'plan') return renderCalendarChanges(res);
   const changes = res.changes.filter((c) => c.how !== 'exact' && c.how !== 'noplan');
@@ -1016,7 +1027,7 @@ function renderChanges(res) {
     <summary><h2 style="display:inline">שינויים בין תכנון לביצוע <span class="count">${changes.length}</span></h2></summary>
     ${changes.length ? `<ul class="list">${changes.map((c) => `<li${ruleAttr((c.notes ?? []).map((n) => n.ruleTitle))}>
       <strong class="num">${ddmm(c.date)}</strong> ${esc(c.label)}
-      <div class="small"><span class="side-plan">תכנון: ${esc(datesFirst(c.plan ?? '—'))}</span> · <span class="side-exec">ביצוע: ${esc(datesFirst(c.exec ?? (c.replacedBy?.join(', ') || '—')))}</span></div>
+      ${chainSides(c, `<span class="side-plan">תכנון: ${esc(datesFirst(c.plan ?? '—'))}</span> · <span class="side-exec">ביצוע: ${esc(datesFirst(c.exec ?? (c.replacedBy?.join(', ') || '—')))}</span>`)}
       ${(c.notes ?? []).map((n) => `<div class="explain">${esc(n.message)}${n.byUser ? ' <span class="muted">לפי תשובת המשתמש</span>' : ''}</div>`).join('')}
     </li>`).join('')}</ul>` : '<p class="muted">כל הסבבים בוצעו כמתוכנן.</p>'}
   </details>`;
@@ -1034,7 +1045,7 @@ function renderCalendarChanges(res) {
     <p class="small muted">הקרדיט והפיצויים על השינויים ייבדקו כשתועלה הרומה.</p>
     ${changes.length ? `<ul class="list">${changes.map((c) => `<li>
       <strong class="num">${ddmm(c.date)}</strong> ${esc(c.label)}
-      <div class="small"><span class="side-plan">תכנון: ${esc(datesFirst(c.plan ?? '—'))}</span> · <span class="side-exec">יומן: ${esc(datesFirst(c.calendar ?? '—'))}</span></div>
+      ${chainSides(c, `<span class="side-plan">תכנון: ${esc(datesFirst(c.plan ?? '—'))}</span> · <span class="side-exec">יומן: ${esc(datesFirst(c.calendar ?? '—'))}</span>`)}
       ${(c.notes ?? []).map((n) => `<div class="explain">${esc(datesFirst(n.message))}${n.byUser ? ' <span class="muted">לפי תשובת המשתמש</span>' : ''}</div>`).join('')}
     </li>`).join('')}</ul>` : '<p class="muted">היומן תואם את התכנון.</p>'}
   </details>`;

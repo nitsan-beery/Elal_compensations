@@ -381,10 +381,32 @@ function chainNotes(out, journal, answers) {
     const eff = moved ? { chain: true } : ch && answers[`cancelled:${c.planId}`];
     if (!eff?.chain) continue;
     const root = ch.root && journal.unplanned.find((n) => n.id === ch.plan.id);
-    const lines = [...(root?.note ? [{ message: `${describePairing(ch.plan)}: ${root.note}.`, byUser: true }] : []),
-      ...ch.steps.filter((s) => s.note).map((s) => ({ message: `${s.note}.`, byUser: !!s.answer }))];
-    c.notes = eff.value === 'chain_open' ? [...lines, { message: 'ממתין לתשובה בשאלה על הסבב.', byUser: false }] : [...lines, ...(c.notes ?? [])];
+    const view = chainView(ch, root);
+    // בצד התכנון כל השרשרת, ובצד הביצוע רק מה שבוצע בסוף (בעל המוצר, 06/10/2026): הסבב האחרון ביומן
+    // נכנס לשרשרת רק כשהוא אינו מה שבוצע.
+    const path = ch.steps.map((s) => describePairing(s.fromPairing));
+    const end = ch.last?.pairing ? describePairing(ch.last.pairing) : null;
+    if (end && end !== c.exec) path.push(end);
+    if (!ch.root && !moved) c.plan = path.join(' → ');
+    if (view.steps.length > 1 || path.length > 1 || root || moved) c.steps = view.steps;
+    // מתחת לשורה רק הסיבה, ומה שמגיע עליה; כשהיא כבר הכותרת של השורה – רק מה שמגיע.
+    const reason = view.reason && view.reason !== `${c.label}.` ? [{ message: view.reason, byUser: true }] : [];
+    c.notes = eff.value === 'chain_open' ? [...reason, { message: 'ממתין לתשובה בשאלה על הסבב.', byUser: false }] : [...reason, ...(c.notes ?? [])];
   }
+}
+
+/**
+ * שרשרת השינויים ביומן בטבלת השינויים (בעל המוצר, 06/10/2026): `reason` – מתחת לשורה, רק הסיבות לפי
+ * הסדר, בלי הסבבים, שכבר בשורה (`reason` של השלב ב-`stepNote`); `steps` – הפירוט שנפתח בלחיצה על
+ * השורה: כל שלב עם הסבבים שלו והתשובה עליו.
+ */
+function chainView(ch, root) {
+  const reasons = [root?.note, ...ch.steps.map((s) => s.reason)].filter(Boolean);
+  return {
+    reason: reasons.length ? `${reasons.join(', ואחר כך ')}.` : null,
+    steps: [...(root?.note ? [{ message: `${describePairing(ch.plan)}: ${root.note}.`, byUser: true }] : []),
+      ...ch.steps.filter((s) => s.note).map((s) => ({ message: `${s.note}.`, byUser: !!s.answer }))],
+  };
 }
 
 /** תיאור השלב בטבלת השינויים, כשאין עליו עדיין תשובה. */
@@ -414,14 +436,14 @@ function journalRows(journal, out) {
       : tail.answer ? null
         : tail.how === 'standby' ? sby(tail)
           : tail.candidates.length ? tail.candidates.map(describePairing).join(', ') : null;
-    // שלב יחיד: הסבב המתוכנן והסבב ביומן כבר בשורה, ומתחתיה רק הסיבה (בעל המוצר, 06/10/2026). כוננות בלי
-    // תשובה כבר כתובה בכותרת. בכמה שלבים – כל שלב עם הסבבים שלו, כי השלבים באמצע אינם בשורה.
-    const single = !ch.root && ch.steps.length === 1;
-    const notes = ch.steps.filter((s) => (single ? s.reason : s.note)).map((s) => ({ message: `${single ? s.reason : s.note}.`, byUser: !!s.answer }));
-    if (root?.note) notes.unshift({ message: `${describePairing(ch.plan)}: ${root.note}.`, byUser: true });
+    // בצד התכנון כל השרשרת, בצד היומן הסבב שבו היא נמצאת עכשיו, מתחת רק הסיבה, והפירוט בלחיצה על השורה
+    // (`chainView`; בעל המוצר, 06/10/2026). כוננות בלי תשובה כבר כתובה בכותרת.
+    const view = chainView(ch, root);
+    const notes = view.reason ? [{ message: view.reason, byUser: true }] : [];
     if (ch.steps.some((s) => pending(s.id))) notes.push({ message: 'ממתין לתשובה בשאלה על הסבב.', byUser: false });
     rows.push({ date: ch.plan.from, how: `cal_${tail.how}`, label: ch.root ? 'ביומן סבב שאינו בתכנון, ושהשתנה' : ch.steps.length > 1 ? 'כמה שינויים ביומן' : STEP_LABEL[tail.how],
-      plan: ch.root ? null : describePairing(ch.plan), planId: ch.root ? null : ch.plan.id, calendar, notes });
+      plan: ch.root ? null : ch.steps.map((s) => describePairing(s.fromPairing)).join(' → '), planId: ch.root ? null : ch.plan.id, calendar, notes,
+      ...((ch.steps.length > 1 || root) && { steps: view.steps }) });
   }
   for (const n of journal.unplanned) {
     if (n.step) continue;

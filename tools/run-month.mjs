@@ -63,6 +63,7 @@ console.log('\n== שינויים ==');
 for (const c of r.changes) {
   console.log(`${c.date.slice(8)}  ${c.label.padEnd(34)} תכנון: ${c.plan ?? '—'}  |  ביצוע: ${c.exec ?? '—'}${c.replacedBy ? '  ← ' + c.replacedBy.join(', ') : ''}`);
   for (const n of c.notes ?? []) console.log(`      ${n.message}${n.byUser ? ' (לפי תשובת המשתמש)' : ''}`);
+  for (const n of c.steps ?? []) console.log(`        ⤷ ${n.message}${n.byUser ? ' (לפי תשובת המשתמש)' : ''}`);
 }
 
 if (r.calendarChanges) {
@@ -70,6 +71,7 @@ if (r.calendarChanges) {
   for (const c of r.calendarChanges) {
     console.log(`${c.date.slice(8)}  ${c.label.padEnd(30)} תכנון: ${c.plan ?? '—'}  |  יומן: ${c.calendar ?? '—'}`);
     for (const n of c.notes ?? []) console.log(`      ${n.message}${n.byUser ? ' (לפי תשובת המשתמש)' : ''}`);
+  for (const n of c.steps ?? []) console.log(`        ⤷ ${n.message}${n.byUser ? ' (לפי תשובת המשתמש)' : ''}`);
   }
 }
 
