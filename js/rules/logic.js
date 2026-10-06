@@ -608,7 +608,11 @@ function special_call(ctx, params, rule) {
     const bid = ctx.pairingHandledBy(match.exec, 'standby_bid');
     // הסבב שתוכנן באותם ימים בוטל ללא קרדיט: מה שבוצע במקומו לא היה מתוכנן.
     const cancelledPlan = !!match.plan && ctx.pairingHandledBy(match.plan, 'cancelled_no_compensation');
-    if (reported > 0 || answer?.value === 'special_call' || training || bid || cancelledPlan) {
+    // טיסה ביום שלא תוכנן בו כלום, שבאה במקום סבב מתוכנן בשינוי ביוזמת החברה או בזכייה במכרז: גם קריאה
+    // מיוחדת, בנוסף לגבוה מבין השתיים (`companySwapToFreeDay`; בעל המוצר, 06/10/2026). רק הוספה בהסכמה
+    // והחלפה מרצוני אינן מזכות בקריאה מיוחדת.
+    const companyLinked = companySwapToFreeDay(match, answer);
+    if (reported > 0 || answer?.value === 'special_call' || companyLinked || training || bid || cancelledPlan) {
       ctx.markPairing(match.exec, 'special_call');
       const stay = awayFromBase(match.exec, ctx.domicile, ctx.timeline.at(-1).date);
       if (stay.error) {
@@ -640,8 +644,10 @@ function special_call(ctx, params, rule) {
         date: match.exec.from,
         title: `פעילות ביום שלא תוכננה בו פעילות: ${describePairing(match.exec)}`,
         body: 'הרומה לא מזכה קריאה מיוחדת, ולכן לא ניתן לדעת אם היא מגיעה. מה קרה?',
+        // הוספת טיסה בהסכמה: רק הקרדיט של הטיסה, בלי קריאה מיוחדת (בעל המוצר, 06/10/2026).
         options: [
           { value: 'special_call', label: 'קריאה מיוחדת' },
+          { value: 'added', label: 'הוספת טיסה בהסכמה' },
           { value: 'voluntary_swap', label: 'החלפה מרצוני', needsLink: true },
           otherOption(),
         ],
@@ -651,6 +657,16 @@ function special_call(ctx, params, rule) {
       applyOtherReason(ctx, answer, rule, { what: 'פעילות ביום שלא תוכננה בו פעילות', date: match.exec.from, pairing: match.exec });
     }
   }
+}
+
+/**
+ * פעילות ביום שלא תוכנן בו כלום (`unplanned`) שבאה במקום סבב מתוכנן בשינוי ביוזמת החברה או בזכייה
+ * במכרז (התשובה על הסבב המתוכנן, דרך הקישור): מגיעים גם קריאה מיוחדת וגם הגבוה מבין השתיים (בעל
+ * המוצר, 06/10/2026), ולכן זו אינה סתירה (`checkLinkConflicts`) ואינה מבטלת את "הגבוה מבין השתיים"
+ * (`excluded_when_special_call`).
+ */
+function companySwapToFreeDay(match, answer) {
+  return match?.how === 'unplanned' && !!answer?.via?.startsWith('cancelled:') && ['replaced', 'bid'].includes(answer.value);
 }
 
 /**
@@ -777,9 +793,12 @@ function higher_of_planned_performed(ctx, params, rule) {
         'ולכן לא ניתן לחשב את ההפרש. דורש בדיקה ידנית.', rule);
       continue;
     }
-    // זכייה במכרז ביומן שהוחלפה ביוזמת החברה בטיסה ביום שלא תוכנן בו כלום: גם קריאה מיוחדת וגם הגבוה
-    // מבין השתיים (`applyRootChain` ב-js/rules/evaluate.js; בעל המוצר, 06/10/2026).
-    if (params.excluded_when_special_call && !answer?.alsoSpecialCall && ctx.pairingHandledBy(exec, 'special_call')) continue;
+    // שינוי ביוזמת החברה או זכייה במכרז לטיסה ביום שלא תוכנן בו כלום (`companySwapToFreeDay`), וזכייה
+    // במכרז ביומן שהוחלפה בטיסה כזאת (`alsoSpecialCall`, `applyRootChain` ב-js/rules/evaluate.js): גם קריאה
+    // מיוחדת וגם הגבוה מבין השתיים (בעל המוצר, 06/10/2026).
+    const execMatch = ctx.matches.find((x) => x.exec === exec);
+    const alsoSc = !!answer?.alsoSpecialCall || (['replaced', 'bid'].includes(answer?.value) && execMatch?.how === 'unplanned');
+    if (params.excluded_when_special_call && !alsoSc && ctx.pairingHandledBy(exec, 'special_call')) continue;
 
     // בשרשרת מהיומן: הגבוה מבין הסבבים שלא בוצעו (`reduceChain`; בעל המוצר, 06/10/2026).
     const planned0 = answer?.basis ?? match.plan;
@@ -808,11 +827,11 @@ function higher_of_planned_performed(ctx, params, rule) {
     const paidOn = extra <= 0 ? null
       : findShortfallPaid(ctx, m, extra, column, reportColumn) ?? findShortfallPaid(ctx, m, extra, column, reportColumn, true);
     const moved = paidOn && paidOn !== exec ? paidOn : null;
-    // זכייה במכרז ביומן שהוחלפה בטיסה ביום שלא תוכנן בו כלום (`alsoSpecialCall`): גם קריאה מיוחדת.
-    const sc = answer?.alsoSpecialCall ? ' וקריאה מיוחדת על הטיסה שבוצעה' : '';
-    ctx.note(match.plan.from, `${swapWord(answer)}: קרדיט של הטיסה הארוכה מבין השתיים${which}${sc}.`, rule);
+    const sc = alsoSc ? ' וקריאה מיוחדת על הטיסה שבוצעה' : '';
+    // `pairingId`: רק בשורה של הסבב, ולא מתחת לטיסה אחרת שבוצעה באותם ימים.
+    ctx.note(match.plan.from, `${swapWord(answer)}: קרדיט של הטיסה הארוכה מבין השתיים${which}${sc}.`, rule, { pairingId: match.plan.id });
     // ביום של הטיסה שבוצעה, כשהוא אחר.
-    if (exec.from !== match.plan.from) ctx.note(exec.from, `${swapWord(answer)}: קרדיט על הטיסה שבוצעה${sc ? ' וקריאה מיוחדת' : ''}.`, rule);
+    if (exec.from !== match.plan.from) ctx.note(exec.from, `${swapWord(answer)}: קרדיט על הטיסה שבוצעה${sc ? ' וקריאה מיוחדת' : ''}.`, rule, { pairingId: exec.id });
     if (extra <= 0) continue;
 
     const where = moved ? `, ונרשם על ${describePairing(moved)}` : '';
@@ -1075,7 +1094,10 @@ function checkLinkConflicts(ctx, rule) {
     if (![...COMPANY_PAID_SWAPS, 'voluntary_swap'].includes(entry.value) || !entry.link || entry.link === 'none') continue;
     const exec = execResolution.get(entry.link);
     if (!exec) continue;
-    const compatible = entry.value === 'voluntary_swap' && exec.value === 'voluntary_swap' && exec.link === entry.match.plan.id;
+    // שינוי ביוזמת החברה או זכייה במכרז לטיסה ביום שלא תוכנן בו כלום, שהיא קריאה מיוחדת: שניהם מגיעים
+    // (`companySwapToFreeDay`; בעל המוצר, 06/10/2026).
+    const compatible = (entry.value === 'voluntary_swap' && exec.value === 'voluntary_swap' && exec.link === entry.match.plan.id) ||
+      (['replaced', 'bid'].includes(entry.value) && exec.value === 'special_call');
     if (!compatible) addConflict(entry, exec);
   }
 
