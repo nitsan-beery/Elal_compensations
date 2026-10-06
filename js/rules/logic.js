@@ -1444,12 +1444,15 @@ function askChainOpen(ctx, open, rule) {
 /** שלב בשרשרת לטבלת השינויים: מה היה, לאן עבר, ובלשון האפשרות שנבחרה. */
 function stepNote(ctx, st) {
   const from = describePairing(st.fromPairing);
+  // `reason`: רק הסיבה, לשורה של שלב יחיד, שבה הסבבים כבר כתובים (`journalRows`; בעל המוצר, 06/10/2026).
+  st.reason = null;
   if (!st.answer) return st.end === 'standby' ? `${from}: ביומן רשומה כוננות במקום הסבב` : null;
   const a = st.answer;
   const to = st.to?.pairing ?? (a.link && a.link !== 'none' ? ctx.pairingById(a.link) : null);
   const opt = whatHappenedOptions(ctx, { ...st.fromPairing, id: st.node.id }, null, st.candidates[0] ?? null).find((o) => o.value === a.value);
   const label = a.value === 'other' ? `סיבה אחרת${a.text ? `: ${a.text}` : ''}` : opt?.label ?? a.value;
   const where = to ? describePairing(to) : opt?.needsLink ? (a.link === 'none' ? 'מסירת הטיסה ללא חלופה' : 'טיסה בחודש אחר') : null;
+  st.reason = !to && where ? `${label}: ${where}` : label;
   return `${from}${where ? ` → ${where}` : ''}: ${label}`;
 }
 

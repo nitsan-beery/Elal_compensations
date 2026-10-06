@@ -414,7 +414,10 @@ function journalRows(journal, out) {
       : tail.answer ? null
         : tail.how === 'standby' ? sby(tail)
           : tail.candidates.length ? tail.candidates.map(describePairing).join(', ') : null;
-    const notes = ch.steps.filter((s) => s.note).map((s) => ({ message: `${s.note}.`, byUser: !!s.answer }));
+    // שלב יחיד: הסבב המתוכנן והסבב ביומן כבר בשורה, ומתחתיה רק הסיבה (בעל המוצר, 06/10/2026). כוננות בלי
+    // תשובה כבר כתובה בכותרת. בכמה שלבים – כל שלב עם הסבבים שלו, כי השלבים באמצע אינם בשורה.
+    const single = !ch.root && ch.steps.length === 1;
+    const notes = ch.steps.filter((s) => (single ? s.reason : s.note)).map((s) => ({ message: `${single ? s.reason : s.note}.`, byUser: !!s.answer }));
     if (root?.note) notes.unshift({ message: `${describePairing(ch.plan)}: ${root.note}.`, byUser: true });
     if (ch.steps.some((s) => pending(s.id))) notes.push({ message: 'ממתין לתשובה בשאלה על הסבב.', byUser: false });
     rows.push({ date: ch.plan.from, how: `cal_${tail.how}`, label: ch.root ? 'ביומן סבב שאינו בתכנון, ושהשתנה' : ch.steps.length > 1 ? 'כמה שינויים ביומן' : STEP_LABEL[tail.how],
