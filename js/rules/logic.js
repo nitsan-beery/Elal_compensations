@@ -992,6 +992,7 @@ function voluntary_swap(ctx, params, rule) {
  * בשאלה.
  */
 function cancelled_no_compensation(ctx, params, rule) {
+  askCalendarChanges(ctx, rule);
   checkLinkConflicts(ctx, rule);
   for (const match of ctx.matches) {
     if (!match.plan || (match.how !== 'cancelled' && match.how !== 'dates')) continue;
@@ -1201,8 +1202,11 @@ function noteCancelled(ctx, match, rule, why) {
  * (`askWhatHappened`) ולשאלת הסתירה (`resolveLinkConflict`, דרך `claimLabel`), כדי שאותו
  * ערך תמיד יתואר באותה לשון.
  */
-function whatHappenedOptions(ctx, plan, exec) {
+function whatHappenedOptions(ctx, plan, exec, calendar = null) {
   const diff = plannedMinusPerformed(ctx, plan, exec);
+  // בתכנון לבד הסבב שבמקומו הוא זה שביומן (`askCalendarChanges`), והוא עוד לא בוצע.
+  const other = exec ?? calendar;
+  const performed = ctx.hasExec ? 'הטיסה שבוצעה' : 'הטיסה שביומן';
   const shortfall = ctx.rulesWithLogic('higher_of_planned_performed')[0]?.logic?.params?.shortfall_column ?? 'COM';
   const higher = 'מגיע הגבוה מבין שתי הטיסות' + (diff == null ? ''
     : diff > 0 ? `: ${amountWord(shortfall)} של ${minToHhmm(diff)}`
@@ -1212,14 +1216,14 @@ function whatHappenedOptions(ctx, plan, exec) {
     // אותה טיסה, עם נחיתה ביעד שלא תוכנן: רק מול הסבב שבוצע באותם ימים, ולכן בלי קישור. משלמת כמו
     // שינוי ביוזמת החברה, ומוצגת בשמה בשינויים (בעל המוצר, 05/10/2026). רק כשלפחות אחד ממספרי הטיסה
     // המתוכננים נמצא במה שבוצע: בלי אף אחד זו טיסה אחרת, ולא סטיה (04/06/2024: SKG → WAW).
-    ...(exec && sharesFlight(plan, exec) ? [{ value: 'diversion', label: 'סטיה לשדה משנה', hint: higher }] : []),
+    ...(other && sharesFlight(plan, other) ? [{ value: 'diversion', label: 'סטיה לשדה משנה', hint: higher }] : []),
     // זכייה במכרז משלמת כמו שינוי ביוזמת החברה, אבל אינה "ביוזמת החברה" לעניין 2024 ס' 34–37 ו-39
     // (ס' 40): נחיתות לילה, שבתות ברצף וטיסות סבב לילה עוקבות (בעל המוצר, 05/10/2026).
     { value: 'bid', label: 'זכייה במכרז', hint: higher, needsLink: true },
-    { value: 'voluntary_swap', label: 'החלפה מרצוני', hint: 'רק הקרדיט של הטיסה שבוצעה', needsLink: true },
+    { value: 'voluntary_swap', label: 'החלפה מרצוני', hint: `רק הקרדיט של ${performed}`, needsLink: true },
     { value: 'cancelled', label: 'הטיסה המקורית בוטלה ללא קרדיט',
-      hint: exec ? 'מגיע פיצוי של קריאה מיוחדת על הטיסה שבוצעה' : 'לא מגיע כלום' },
-    ...lostHoursOptions(ctx, plan, exec ? 'בנוסף לקרדיט של הטיסה שבוצעה' : undefined),
+      hint: other ? `מגיע פיצוי של קריאה מיוחדת על ${performed}` : 'לא מגיע כלום' },
+    ...lostHoursOptions(ctx, plan, other ? `בנוסף לקרדיט של ${performed}` : undefined),
   ];
 }
 
@@ -1247,6 +1251,50 @@ function askWhatHappened(ctx, match, rule) {
     ],
     ruleId: rule.id,
   });
+}
+
+/**
+ * בתכנון לבד, כשהיומן מראה שסבב מתוכנן השתנה – ביומן סבב אחר באותם ימים, או שהסבב אינו ביומן –
+ * נשאלת כבר עכשיו הסיבה (בעל המוצר, 06/10/2026), באותה שאלה ובאותו מזהה כמו מול הרומה
+ * (`cancelled:`), עם הסבבים שביומן במקום אלה שבוצעו. הקרדיט והפיצויים נשארים לפי התכנון: התשובה
+ * נשמרת, מוצגת מתחת לשינוי (`answerNote`), וחלה כשהרומה מועלית, אם הסבב באמת לא בוצע כמתוכנן
+ * (`linksToExec` ב-js/rules/evaluate.js). כוננות במקום הסבב אינה נשאלת: מול הרומה היא "בוטל והוצבת
+ * לכוננות", בלי שאלה.
+ */
+function askCalendarChanges(ctx, rule) {
+  for (const c of ctx.calendarChanges ?? []) {
+    if (!c.planPairing || c.how === 'cal_standby') continue;
+    const plan = c.planPairing;
+    const cal = c.calPairings[0] ?? null;
+    const answer = ctx.answerFor({ plan, exec: null, how: 'cancelled' });
+    if (answer) {
+      c.answerNote = calendarAnswerNote(ctx, plan, cal, answer);
+      continue;
+    }
+    ctx.ask({
+      id: `cancelled:${plan.id}`,
+      date: plan.from,
+      execId: cal?.id ?? null,
+      title: cal
+        ? ['סבב מתוכנן שביומן רשום במקומו סבב אחר:\n', { bold: true, text: 'תוכנן ' }, describePairing(plan),
+            { bold: true, text: ', ביומן ' }, c.calPairings.map(describePairing).join(', ')]
+        : `סבב מתוכנן שאינו ביומן: ${describePairing(plan)}`,
+      body: 'הסיבה אינה בקבצים, והיא תקבע מה מגיע כשתועלה הרומה. מה קרה?',
+      options: [...whatHappenedOptions(ctx, plan, null, cal), otherOption()],
+      ruleId: rule.id,
+    });
+  }
+}
+
+/** התשובה על סיבת השינוי, בלשון האפשרות שנבחרה, עם הטיסה שבקישור. */
+function calendarAnswerNote(ctx, plan, cal, answer) {
+  const opt = whatHappenedOptions(ctx, plan, null, cal).find((o) => o.value === answer.value);
+  const label = answer.value === 'other' ? `סיבה אחרת${answer.text ? `: ${answer.text}` : ''}` : opt?.label ?? answer.value;
+  if (!opt?.needsLink || answer.link === undefined) return `${label}.`;
+  const linked = answer.link === 'none' ? 'מסירת הטיסה ללא חלופה'
+    : answer.link ? (ctx.calendarPairingById(answer.link) ? describePairing(ctx.calendarPairingById(answer.link)) : answer.link)
+    : 'טיסה בחודש אחר';
+  return `${label}: ${linked}.`;
 }
 
 // ---------- שינויים בפעילות שאינה טיסה ----------

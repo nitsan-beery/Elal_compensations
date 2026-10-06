@@ -350,7 +350,10 @@ function renderCalendarBar() {
     const answered = Object.keys(state.record?.answers ?? {}).some((id) => /^(crew|night_crew|white):/.test(id));
     notices.push(`<div class="notice warn">לא נמצאו ביומן טיסות של החודש הזה.${answered ? ' הרכבי הצוותים נלקחו מהתשובות שנתת.' : ''} ודא שבוצע סנכרון של היומן מהאורגנייזר.</div>`);
   }
-  const gaps = state.calGaps && state.calGaps.key === state.record?.key ? state.calGaps.items : [];
+  // בתכנון לבד, טיסה שירדה מהיומן היא שינוי בסבב, והוא נשאל בשאלה עליו; הרכב הצוות שלה נשמר
+  // (`keepRemovedFlights`). לכן אין עליה הודעה (בעל המוצר, 06/10/2026).
+  const gaps = (state.calGaps && state.calGaps.key === state.record?.key ? state.calGaps.items : [])
+    .filter((g) => g.kind !== 'removed' || state.result?.mode !== 'plan');
   if (gaps.length) {
     notices.push(`<div class="notice warn">היומן המעודכן שונה ממה שנשמר בחודש הזה:<ul>${gaps.map((g) => `<li>${esc(describeGap(g))}</li>`).join('')}</ul></div>`);
   }
@@ -1013,8 +1016,8 @@ function renderChanges(res) {
 }
 
 /**
- * בתכנון לבד, כשיש ביומן נתונים מהחודש: השינויים בין התכנון ליומן, למידע בלבד (בעל המוצר, 04/10/2026).
- * הפיצויים עליהם ייבדקו כשתועלה הרומה.
+ * בתכנון לבד, כשיש ביומן נתונים מהחודש: השינויים בין התכנון ליומן (בעל המוצר, 04/10/2026). הפיצויים
+ * עליהם ייבדקו כשתועלה הרומה. מתחת לסבב מתוכנן שהשתנה – התשובה על הסיבה, או שהיא ממתינה (06/10/2026).
  */
 function renderCalendarChanges(res) {
   const changes = res.calendarChanges;
@@ -1025,6 +1028,7 @@ function renderCalendarChanges(res) {
     ${changes.length ? `<ul class="list">${changes.map((c) => `<li>
       <strong class="num">${ddmm(c.date)}</strong> ${esc(c.label)}
       <div class="small"><span class="side-plan">תכנון: ${esc(datesFirst(c.plan ?? '—'))}</span> · <span class="side-exec">יומן: ${esc(datesFirst(c.calendar ?? '—'))}</span></div>
+      ${(c.notes ?? []).map((n) => `<div class="explain">${esc(datesFirst(n.message))}${n.byUser ? ' <span class="muted">לפי תשובת המשתמש</span>' : ''}</div>`).join('')}
     </li>`).join('')}</ul>` : '<p class="muted">היומן תואם את התכנון.</p>'}
   </details>`;
 }
