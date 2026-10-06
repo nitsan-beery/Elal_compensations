@@ -308,10 +308,11 @@ const samePairing = (p, c) => pairingFlights(c) === pairingFlights(p) || (overla
 /**
  * שינויים בין התכנון ליומן, כשאין רומה (בעל המוצר, 04/10/2026). הקרדיט והפיצויים נשארים לפי
  * התכנון עד שהרומה מועלית, אבל על סבב מתוכנן שהשתנה ביומן נשאלת הסיבה, והתשובה חלה כשהרומה
- * מועלית (בעל המוצר, 06/10/2026; `cancelled_no_compensation`). סבב מתוכנן זהה לסבב ביומן כשמספרי
- * הטיסות (בלי DH) זהים, ביום לכל כיוון, או כשהיעדים זהים והתאריכים חופפים, כמו בהתאמה לרומה
- * (`matchPairings`). קודם מתאימים את כל הזהים, ורק אז סבב מתוכנן שאין לו זהה מושווה לסבבי היומן
- * שנשארו וחופפים לו בתאריכים.
+ * מועלית (בעל המוצר, 06/10/2026; `cancelled_no_compensation`). סבב מתוכנן זהה לסבב ביומן כשהתאריכים
+ * חופפים, ומספרי הטיסות (בלי DH) או היעדים זהים, כמו בהתאמה לרומה (`matchPairings`). קודם מתאימים
+ * את כל הזהים. סבב מתוכנן שאין לו זהה ושמספרי הטיסות שלו ביומן בתאריך אחר – "ביומן הסבב בתאריך
+ * אחר" (20/10/2026 → 21/10, בעל המוצר, 06/10/2026). ורק אז השאר מושווים לסבבי היומן שנשארו וחופפים
+ * להם בתאריכים.
  * רק בטווח שהיומן מכסה בחודש, כדי שסבב שהיומן עוד לא מגיע אליו לא ייראה כמבוטל.
  * `planPairing` ו-`calPairings` (הסבבים ביומן באותם ימים, או הסבב שאינו בתכנון) – לחוקים, ואינם בפלט.
  */
@@ -321,11 +322,23 @@ function calendarChanges(planPairings, view) {
   const used = new Set();
   const inRange = planPairings.filter((p) => pairingFlights(p) && p.to >= first && p.from <= last);
   const open = inRange.filter((p) => {
-    const twin = calPairings.find((c) => !used.has(c) && overlapDays(p, c, 1) && samePairing(p, c));
+    const twin = calPairings.find((c) => !used.has(c) && overlapDays(p, c) && samePairing(p, c));
     if (twin) used.add(twin);
     return !twin;
   });
+  const gap = (p, c) => Math.abs(Date.parse(c.from) - Date.parse(p.from));
+  const moved = new Map(open.map((p) => {
+    const c = calPairings.filter((x) => !used.has(x) && pairingFlights(x) === pairingFlights(p)).sort((a, b) => gap(p, a) - gap(p, b))[0];
+    if (c) used.add(c);
+    return [p, c];
+  }));
   for (const p of open) {
+    const m = moved.get(p);
+    if (m) {
+      out.push({ date: p.from, plan: describePairing(p), planId: p.id, planPairing: p, calPairings: [m],
+        how: 'cal_moved', label: 'ביומן הסבב בתאריך אחר', calendar: describePairing(m) });
+      continue;
+    }
     const hits = calPairings.filter((c) => !used.has(c) && overlapDays(p, c));
     hits.forEach((c) => used.add(c));
     const sby = standby.filter((x) => x.date >= p.from && x.date <= p.to);

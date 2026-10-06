@@ -1216,7 +1216,7 @@ function whatHappenedOptions(ctx, plan, exec, calendar = null) {
     // אותה טיסה, עם נחיתה ביעד שלא תוכנן: רק מול הסבב שבוצע באותם ימים, ולכן בלי קישור. משלמת כמו
     // שינוי ביוזמת החברה, ומוצגת בשמה בשינויים (בעל המוצר, 05/10/2026). רק כשלפחות אחד ממספרי הטיסה
     // המתוכננים נמצא במה שבוצע: בלי אף אחד זו טיסה אחרת, ולא סטיה (04/06/2024: SKG → WAW).
-    ...(other && sharesFlight(plan, other) ? [{ value: 'diversion', label: 'סטיה לשדה משנה', hint: higher }] : []),
+    ...(other && sharesFlight(plan, other) && other.destinations.join() !== plan.destinations.join() ? [{ value: 'diversion', label: 'סטיה לשדה משנה', hint: higher }] : []),
     // זכייה במכרז משלמת כמו שינוי ביוזמת החברה, אבל אינה "ביוזמת החברה" לעניין 2024 ס' 34–37 ו-39
     // (ס' 40): נחיתות לילה, שבתות ברצף וטיסות סבב לילה עוקבות (בעל המוצר, 05/10/2026).
     { value: 'bid', label: 'זכייה במכרז', hint: higher, needsLink: true },
@@ -1254,7 +1254,8 @@ function askWhatHappened(ctx, match, rule) {
 }
 
 /**
- * בתכנון לבד, כשהיומן מראה שסבב מתוכנן השתנה – ביומן סבב אחר באותם ימים, או שהסבב אינו ביומן –
+ * בתכנון לבד, כשהיומן מראה שסבב מתוכנן השתנה – ביומן סבב אחר באותם ימים, הסבב ביומן בתאריך אחר
+ * (`cal_moved`), או שהסבב אינו ביומן –
  * נשאלת כבר עכשיו הסיבה (בעל המוצר, 06/10/2026), באותה שאלה ובאותו מזהה כמו מול הרומה
  * (`cancelled:`), עם הסבבים שביומן במקום אלה שבוצעו. הקרדיט והפיצויים נשארים לפי התכנון: התשובה
  * נשמרת, מוצגת מתחת לשינוי (`answerNote`), וחלה כשהרומה מועלית, אם הסבב באמת לא בוצע כמתוכנן
@@ -1275,7 +1276,10 @@ function askCalendarChanges(ctx, rule) {
       id: `cancelled:${plan.id}`,
       date: plan.from,
       execId: cal?.id ?? null,
-      title: cal
+      title: c.how === 'cal_moved'
+        ? ['סבב מתוכנן שביומן הוא בתאריך אחר:\n', { bold: true, text: 'תוכנן ' }, describePairing(plan),
+            { bold: true, text: ', ביומן ' }, describePairing(cal)]
+        : cal
         ? ['סבב מתוכנן שביומן רשום במקומו סבב אחר:\n', { bold: true, text: 'תוכנן ' }, describePairing(plan),
             { bold: true, text: ', ביומן ' }, c.calPairings.map(describePairing).join(', ')]
         : `סבב מתוכנן שאינו ביומן: ${describePairing(plan)}`,
