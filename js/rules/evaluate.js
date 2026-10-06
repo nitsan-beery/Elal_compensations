@@ -331,7 +331,16 @@ function applyRootChain(ch, { ctx, matches, execPairings, answers, toExec, credi
   if (eff.open) ctx.journalOpen.push(eff.open);
   // השלב הראשון עוד פתוח: השאלה עליו נשאלת על הסבב שביומן (`askChainOpen`), ובינתיים אין מה להשוות.
   if (eff.open?.id === ch.plan.id) return;
-  addAsPlanned(matches, ch.plan, execPairings.includes(eff.endsAt) ? eff.endsAt : null);
+  const e = execPairings.includes(eff.endsAt) ? eff.endsAt : null;
+  // זכייה במכרז שהחברה העבירה ליום אחר: הטיסה שבוצעה היא בעצמה פעילות ביום שלא תוכננה בו פעילות, ומגיעה
+  // עליה קריאה מיוחדת; ימי הזכייה עצמם, בלי פעילות, אינם מזכים (בעל המוצר, 06/10/2026). לכן הזכייה אינה
+  // נכנסת להשוואה, והשרשרת מוצגת מתחת לטיסה שבוצעה (`movedTo`, `chainNotes`).
+  if (e && answers[`unplanned:${ch.plan.id}`]?.value === 'bid' && ['replaced', 'bid', 'diversion'].includes(eff.value) && !overlapDays(ch.plan, e)) {
+    answers[`unplanned:${e.id}`] ??= { value: 'special_call' };
+    ch.movedTo = e.id;
+    return;
+  }
+  addAsPlanned(matches, ch.plan, e);
   answers[`cancelled:${ch.plan.id}`] = eff;
 }
 
@@ -353,10 +362,14 @@ function addAsPlanned(matches, pairing, exec) {
  */
 function chainNotes(out, journal, answers) {
   for (const c of out.changes) {
-    const ch = c.planId && journal.chains.find((x) => x.plan.id === c.planId);
-    const eff = ch && answers[`cancelled:${c.planId}`];
+    // זכייה במכרז שעברה ליום אחר (`applyRootChain`): השרשרת מתחת לטיסה שבוצעה.
+    const moved = !c.planId && c.execId && journal.chains.find((x) => x.movedTo === c.execId);
+    const ch = moved || (c.planId && journal.chains.find((x) => x.plan.id === c.planId));
+    const eff = moved ? { chain: true } : ch && answers[`cancelled:${c.planId}`];
     if (!eff?.chain) continue;
-    const lines = ch.steps.filter((s) => s.note).map((s) => ({ message: `${s.note}.`, byUser: !!s.answer }));
+    const root = ch.root && journal.unplanned.find((n) => n.id === ch.plan.id);
+    const lines = [...(root?.note ? [{ message: `${describePairing(ch.plan)}: ${root.note}.`, byUser: true }] : []),
+      ...ch.steps.filter((s) => s.note).map((s) => ({ message: `${s.note}.`, byUser: !!s.answer }))];
     c.notes = eff.value === 'chain_open' ? [...lines, { message: 'ממתין לתשובה בשאלה על הסבב.', byUser: false }] : [...lines, ...(c.notes ?? [])];
   }
 }
