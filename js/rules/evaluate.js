@@ -332,10 +332,11 @@ function applyRootChain(ch, { ctx, matches, execPairings, answers, toExec, credi
   // השלב הראשון עוד פתוח: השאלה עליו נשאלת על הסבב שביומן (`askChainOpen`), ובינתיים אין מה להשוות.
   if (eff.open?.id === ch.plan.id) return;
   const e = execPairings.includes(eff.endsAt) ? eff.endsAt : null;
-  // זכייה במכרז שהחברה העבירה ליום אחר: הטיסה שבוצעה היא בעצמה פעילות ביום שלא תוכננה בו פעילות, ומגיעה
-  // עליה קריאה מיוחדת; ימי הזכייה עצמם, בלי פעילות, אינם מזכים (בעל המוצר, 06/10/2026). לכן הזכייה אינה
-  // נכנסת להשוואה, והשרשרת מוצגת מתחת לטיסה שבוצעה (`movedTo`, `chainNotes`).
-  if (e && answers[`unplanned:${ch.plan.id}`]?.value === 'bid' && ['replaced', 'bid', 'diversion'].includes(eff.value) && !overlapDays(ch.plan, e)) {
+  // זכייה במכרז שהשרשרת שלה נגמרה בטיסה שבוצעה ביום שלא תוכננה בו פעילות במקור: מגיעה עליה קריאה
+  // מיוחדת, באותם ימים או ביום אחר. רק הוספה בהסכמה היא כאילו הייתה בתכנון. ימי הזכייה, בלי פעילות,
+  // אינם מזכים (בעל המוצר, 06/10/2026). לכן הזכייה אינה נכנסת להשוואה, והשרשרת מוצגת מתחת לטיסה
+  // שבוצעה (`movedTo`, `chainNotes`).
+  if (e && answers[`unplanned:${ch.plan.id}`]?.value === 'bid' && matches.some((x) => x.exec === e && x.how === 'unplanned')) {
     answers[`unplanned:${e.id}`] ??= { value: 'special_call' };
     ch.movedTo = e.id;
     return;
