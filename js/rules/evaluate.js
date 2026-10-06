@@ -103,6 +103,8 @@ function evaluateOnce({ rulesData, plan = null, exec = null, answers = {}, histo
   const fdp = slip?.legal_rest_hours != null
     ? { legalRestMin: slip.legal_rest_hours * 60, reportMin: slip.report_minutes_before_std ?? 0, postMin: legalRest?.postMin ?? 0 } : null;
   const execPairings = exec ? buildPairings(timeline, domicile, (d) => d.exec?.legs, fdp) : [];
+  // תשובה על סיבת השינוי שניתנה בתכנון לבד, מול היומן: הקישור שלה עובר לסבב שבוצע (`linksToExec`).
+  if (exec) answers = linksToExec(answers, execPairings, calendar, domicile, period);
   const dependentAnswers = {};
   const matches = mode === 'full'
     ? splitSwappedElsewhere(matchPairings(planPairings, execPairings), answers, dependentAnswers)
@@ -155,6 +157,11 @@ function evaluateOnce({ rulesData, plan = null, exec = null, answers = {}, histo
     // בלי דוח ביצוע, הסבבים המתוכננים משמשים לחישוב הקרדיט והרי"ג הצפויים.
     execPairings: exec ? execPairings : planPairings });
   ctx.legalRest = legalRest;
+  // בתכנון לבד: מה שהיומן מראה אחרת מהתכנון. על סבב מתוכנן שהשתנה נשאלת הסיבה (`cancelled_no_compensation`;
+  // בעל המוצר, 06/10/2026).
+  const calView = mode === 'plan' ? calendarView(calendar, domicile, period) : null;
+  ctx.calendarChanges = calView ? calendarChanges(planPairings, calView) : null;
+  ctx.calendarPairingById = (id) => calView?.pairings.find((c) => c.id === id) ?? null;
   // טיסות שהרכב הצוות שלהן משנה את בדיקת מגבלות החוק או את הזכאות לפיצוי, "date|flight": רק עליהן
   // ההודעה על הרכב צוות שחסר ביומן (`calendarMissing`; בעל המוצר, 04/10/2026).
   const crewMatters = new Set();
@@ -219,7 +226,7 @@ function evaluateOnce({ rulesData, plan = null, exec = null, answers = {}, histo
     }
   }
 
-  attachLinkCandidates(out.questions, matches, ctx);
+  attachLinkCandidates(out.questions, matches, ctx, ctx.calendarChanges);
   showSwaps(out, answers, assumed);
   splitChangesByFdp(out, matches, ctx, fdp);
   explainChanges(out, supported);
@@ -239,8 +246,12 @@ function evaluateOnce({ rulesData, plan = null, exec = null, answers = {}, histo
   const opLegs = (legs) => (legs ?? []).filter((l) => l.flight && !l.dh && !l.dhd && l.type !== 'DHO' && l.type !== 'DHX');
   const monthKeys = new Set(timeline.flatMap((d) => opLegs(exec ? d.exec?.legs : d.plan?.legs).map((l) => `${d.date}|${l.flight}`)));
   out.monthFlights = monthKeys.size;
-  // בתכנון לבד: מה שהיומן מראה אחרת מהתכנון, למידע בלבד (בעל המוצר, 04/10/2026).
-  out.calendarChanges = mode === 'plan' ? calendarChanges(planPairings, calendar, domicile, period) : null;
+  // בתכנון לבד: מה שהיומן מראה אחרת מהתכנון (בעל המוצר, 04/10/2026). מתחת לכל סבב שהשתנה – התשובה על
+  // הסיבה, או שהיא ממתינה (בעל המוצר, 06/10/2026).
+  out.calendarChanges = ctx.calendarChanges?.map(({ planPairing, calPairings, answerNote, ...c }) => ({ ...c,
+    notes: answerNote ? [{ message: answerNote, byUser: true }]
+      : out.questions.some((q) => q.id === `cancelled:${c.planId}`) ? [{ message: 'ממתין לתשובה בשאלה על הסבב.', byUser: false }] : [],
+  })) ?? null;
   out.calendarCrew = [...monthKeys].filter((k) => cal.has(k.slice(0, 10), k.slice(11))).length;
   // טיסות שבוצעו ואין ביומן הרכב הצוות שלהן, כשביומן יש טיסות מהחודש: כנראה שהיומן לא מעודכן.
   // רק טיסות שהרכב הצוות שלהן נדרש לבדיקת מגבלות החוק או הזכאות לפיצוי (`crewMatters`), ולא
@@ -264,15 +275,11 @@ function evaluateOnce({ rulesData, plan = null, exec = null, answers = {}, histo
 }
 
 /**
- * שינויים בין התכנון ליומן, כשאין רומה (בעל המוצר, 04/10/2026). למידע בלבד: הפיצויים והשאלות
- * נשארים לפי התכנון, עד שהרומה מועלית. סבבי היומן נבנים מהטיסות שבו כמו סבבי התכנון, וסבב
- * מתוכנן זהה לסבב ביומן כשמספרי הטיסות (בלי DH) זהים, ביום לכל כיוון, או כשהיעדים זהים והתאריכים
- * חופפים, כמו בהתאמה לרומה (`matchPairings`). קודם מתאימים את כל הזהים, ורק אז סבב מתוכנן שאין לו
- * זהה מושווה לסבבי היומן שנשארו וחופפים לו בתאריכים.
- * רק בטווח שהיומן מכסה בחודש (מהטיסה או הכוננות הראשונה בו ועד האחרונה), כדי שסבב שהיומן עוד לא
- * מגיע אליו לא ייראה כמבוטל. null – אין ביומן נתונים מהחודש.
+ * סבבי היומן בחודש, שנבנים מהטיסות שבו כמו סבבי התכנון, והכוננויות שבו. `first`–`last`: הטווח
+ * שהיומן מכסה בחודש (מהטיסה או הכוננות הראשונה בו ועד האחרונה). null – אין ביומן נתונים מהחודש.
+ * טיסות שירדו מהיומן (`kept`) אינן בו.
  */
-function calendarChanges(planPairings, calendar, domicile, period) {
+function calendarView(calendar, domicile, period) {
   if (!calendar || !domicile) return null;
   const month = `${period.year}-${String(period.month).padStart(2, '0')}`;
   const byDate = new Map();
@@ -286,34 +293,74 @@ function calendarChanges(planPairings, calendar, domicile, period) {
     .filter((x) => x.date?.slice(0, 7) === month);
   const covered = [...byDate.keys(), ...standby.map((x) => x.date)].sort();
   if (!covered.length) return null;
-  const [first, last] = [covered[0], covered.at(-1)];
-  const calPairings = buildPairings([...byDate.keys()].sort().map((date) => ({ date, legs: byDate.get(date) })), domicile, (d) => d.legs);
-  const shift = (date, k) => new Date(Date.parse(date) + k * 864e5).toISOString().slice(0, 10);
-  const overlap = (a, b, k = 0) => shift(a.from, -k) <= b.to && b.from <= shift(a.to, k);
-  const flights = (p) => p.legs.filter((l) => !l.dh && l.flight).map((l) => l.flight).sort().join('/');
-  const same = (p, c) => flights(c) === flights(p) || (overlap(p, c) && c.destinations.join('-') === p.destinations.join('-'));
+  const pairings = buildPairings([...byDate.keys()].sort().map((date) => ({ date, legs: byDate.get(date) })), domicile, (d) => d.legs);
+  return { pairings, standby, first: covered[0], last: covered.at(-1) };
+}
+
+const shiftDate = (date, k) => new Date(Date.parse(date) + k * 864e5).toISOString().slice(0, 10);
+const overlapDays = (a, b, k = 0) => shiftDate(a.from, -k) <= b.to && b.from <= shiftDate(a.to, k);
+/** מספרי הטיסות של סבב, בלי DH: בתכנון `dh`, ברומה `dhd` או DHO/DHX. */
+const pairingFlights = (p) => p.legs.filter((l) => !l.dh && !l.dhd && l.type !== 'DHO' && l.type !== 'DHX' && l.flight)
+  .map((l) => l.flight).sort().join('/');
+/** אותו סבב: מספרי הטיסות זהים, או שהיעדים זהים והתאריכים חופפים, כמו בהתאמה לרומה. */
+const samePairing = (p, c) => pairingFlights(c) === pairingFlights(p) || (overlapDays(p, c) && c.destinations.join('-') === p.destinations.join('-'));
+
+/**
+ * שינויים בין התכנון ליומן, כשאין רומה (בעל המוצר, 04/10/2026). הקרדיט והפיצויים נשארים לפי
+ * התכנון עד שהרומה מועלית, אבל על סבב מתוכנן שהשתנה ביומן נשאלת הסיבה, והתשובה חלה כשהרומה
+ * מועלית (בעל המוצר, 06/10/2026; `cancelled_no_compensation`). סבב מתוכנן זהה לסבב ביומן כשמספרי
+ * הטיסות (בלי DH) זהים, ביום לכל כיוון, או כשהיעדים זהים והתאריכים חופפים, כמו בהתאמה לרומה
+ * (`matchPairings`). קודם מתאימים את כל הזהים, ורק אז סבב מתוכנן שאין לו זהה מושווה לסבבי היומן
+ * שנשארו וחופפים לו בתאריכים.
+ * רק בטווח שהיומן מכסה בחודש, כדי שסבב שהיומן עוד לא מגיע אליו לא ייראה כמבוטל.
+ * `planPairing` ו-`calPairings` (הסבבים ביומן באותם ימים, או הסבב שאינו בתכנון) – לחוקים, ואינם בפלט.
+ */
+function calendarChanges(planPairings, view) {
+  const { pairings: calPairings, standby, first, last } = view;
   const out = [];
   const used = new Set();
-  const inRange = planPairings.filter((p) => flights(p) && p.to >= first && p.from <= last);
+  const inRange = planPairings.filter((p) => pairingFlights(p) && p.to >= first && p.from <= last);
   const open = inRange.filter((p) => {
-    const twin = calPairings.find((c) => !used.has(c) && overlap(p, c, 1) && same(p, c));
+    const twin = calPairings.find((c) => !used.has(c) && overlapDays(p, c, 1) && samePairing(p, c));
     if (twin) used.add(twin);
     return !twin;
   });
   for (const p of open) {
-    const hits = calPairings.filter((c) => !used.has(c) && overlap(p, c));
+    const hits = calPairings.filter((c) => !used.has(c) && overlapDays(p, c));
     hits.forEach((c) => used.add(c));
     const sby = standby.filter((x) => x.date >= p.from && x.date <= p.to);
-    const base = { date: p.from, plan: describePairing(p) };
+    const base = { date: p.from, plan: describePairing(p), planId: p.id, planPairing: p, calPairings: hits };
     if (hits.length) out.push({ ...base, how: 'cal_changed', label: 'ביומן רשום סבב אחר', calendar: hits.map(describePairing).join(', ') });
     else if (sby.length) out.push({ ...base, how: 'cal_standby', label: 'ביומן רשומה כוננות במקום הסבב', calendar: sby.map((x) => `${x.code} ${x.date.slice(8, 10)}/${x.date.slice(5, 7)}`).join(', ') });
     else out.push({ ...base, how: 'cal_missing', label: 'הסבב אינו ביומן', calendar: null });
   }
   for (const c of calPairings) {
     if (used.has(c)) continue;
-    out.push({ how: 'cal_unplanned', label: 'ביומן סבב שאינו בתכנון', date: c.from, plan: null, calendar: describePairing(c) });
+    out.push({ how: 'cal_unplanned', label: 'ביומן סבב שאינו בתכנון', date: c.from, plan: null, planId: null, calendar: describePairing(c),
+      planPairing: null, calPairings: [c] });
   }
   return out.sort((a, b) => a.date.localeCompare(b.date));
+}
+
+/**
+ * תשובה על סיבת השינוי שניתנה בתכנון לבד (`cancelled:`), כשהיומן הראה סבב אחר: הקישור שלה הוא לסבב
+ * ביומן. כשהרומה מועלית, התשובה חלה (בעל המוצר, 06/10/2026), והקישור עובר לסבב שבוצע שהוא אותו סבב
+ * (`samePairing`, בימים חופפים, ביום לכל כיוון). בלי סבב כזה, מה שבוצע שונה ממה שהיה ביומן: התשובה
+ * אינה חלה, והשאלה נשאלת שוב מול הרומה. תשובה שניתנה מול הרומה כבר מקשרת לסבב שבה, ואינה משתנה.
+ */
+function linksToExec(answers, execPairings, calendar, domicile, period) {
+  const ids = new Set(execPairings.map((p) => p.id));
+  const stale = Object.entries(answers).filter(([id, a]) => id.startsWith('cancelled:') && a?.link && a.link !== GAVE_AWAY && !ids.has(a.link));
+  if (!stale.length) return answers;
+  const calPairings = calendarView(calendar, domicile, period)?.pairings ?? [];
+  const out = { ...answers };
+  for (const [id, a] of stale) {
+    const c = calPairings.find((p) => p.id === a.link);
+    const e = c && execPairings.find((p) => overlapDays(c, p, 1) && samePairing(c, p));
+    if (e) out[id] = { ...a, link: e.id };
+    else delete out[id];
+  }
+  return out;
 }
 
 /**
@@ -1103,15 +1150,19 @@ const CANCELLED_OUTCOME = {
  * כלל: החלפה ביוזמת החברה בלי טיסה אחרת מכוסה באפשרות "הורדתי מהטיסה המקורית"
  * (בעל המוצר, 23/09/2026).
  */
-function attachLinkCandidates(questions, matches, ctx) {
+function attachLinkCandidates(questions, matches, ctx, calChanges = null) {
   const cancelled = matches.filter((m) => m.how === 'cancelled').map((m) => ({ id: m.plan.id, label: describePairing(m.plan) }));
   // פעילות שזוהתה כקריאה מיוחדת (S/C בדוח), או טיסה בסוף כוננות, אינה החלפה.
   const notSwap = ['special_call', 'standby_bid_pending', 'standby_bid', 'standby_activated'];
-  const unplanned = matches.filter((m) => m.how === 'unplanned' && !notSwap.some((t) => ctx.pairingHandledBy(m.exec, t)))
-    .map((m) => ({ id: m.exec.id, label: describePairing(m.exec) }));
+  // בתכנון לבד, מול היומן: הסבבים ביומן שאינם בתכנון (בעל המוצר, 06/10/2026).
+  const unplanned = calChanges
+    ? calChanges.filter((c) => c.how === 'cal_unplanned').map((c) => ({ id: c.calPairings[0].id, label: describePairing(c.calPairings[0]) }))
+    : matches.filter((m) => m.how === 'unplanned' && !notSwap.some((t) => ctx.pairingHandledBy(m.exec, t)))
+      .map((m) => ({ id: m.exec.id, label: describePairing(m.exec) }));
   const otherMonth = { id: null, label: 'טיסה בחודש אחר' };
   const gaveAway = { id: GAVE_AWAY, label: GAVE_AWAY_LABEL };
-  const execLabel = new Map(matches.filter((m) => m.exec).map((m) => [m.exec.id, describePairing(m.exec)]));
+  const execLabel = new Map([...matches.filter((m) => m.exec).map((m) => [m.exec.id, describePairing(m.exec)]),
+    ...(calChanges ?? []).flatMap((c) => c.calPairings).map((c) => [c.id, describePairing(c)])]);
   for (const q of questions) {
     const onCancelled = q.id.startsWith('cancelled:');
     const own = onCancelled && q.execId ? [{ id: q.execId, label: execLabel.get(q.execId) ?? q.execId }] : [];
