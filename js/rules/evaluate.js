@@ -184,6 +184,8 @@ export function evaluate({ rulesData, plan = null, exec = null, answers = {}, hi
       const later = ch.steps.slice(i + 1).map((x) => x.id);
       if (later.length) dependentAnswers[s.id] = [...(dependentAnswers[s.id] ?? []), ...later];
     });
+    // סבב שנוסף כאילו היה בתכנון: השלבים בשרשרת שלו נשאלו בזכות התשובה עליו.
+    if (ch.root) dependentAnswers[`unplanned:${ch.plan.id}`] = [...(dependentAnswers[`unplanned:${ch.plan.id}`] ?? []), ...ch.steps.map((s) => s.id)];
   }
   if (journal && mode === 'full') applyJournal(journal, { ctx, matches, execPairings, answers });
   if (mode === 'full') matches.splice(0, matches.length, ...splitSwappedElsewhere(matches, answers, dependentAnswers));
@@ -292,6 +294,7 @@ function applyJournal(journal, { ctx, matches, execPairings, answers }) {
   const credit = (p) => sumSkd(p.legs) || null;
   const execAnswer = (id) => answers[`cancelled:${id}`] ?? null;
   for (const ch of journal.chains) {
+    if (ch.root) { applyRootChain(ch, { ctx, matches, execPairings, answers, toExec, credit, execAnswer, byExecId }); continue; }
     const m = matches.find((x) => x.plan?.id === ch.plan.id);
     if (!m || m.how === 'exact' || m.how === 'air_return') continue;
     const eff = reduceChain(ch, { toExec, credit, execAnswer, byExecId });
@@ -303,11 +306,44 @@ function applyJournal(journal, { ctx, matches, execPairings, answers }) {
     for (const s of ch.steps) if (!s.node.plan && !(eff.open && s.node.id === eff.open.id)) delete answers[s.id];
     if (ch.last && !eff.open) delete answers[`cancelled:${ch.last.id}`];
   }
+  // סבב שהשתנה אחרי שנוסף כאילו היה בתכנון: השרשרת שלו היא התשובה, והוא עצמו עובר לשינויים.
   for (const n of journal.unplanned) {
+    if (n.step) continue;
     const a = answers[`unplanned:${n.id}`];
     const e = a && toExec(n.pairing);
     if (e && !answers[`unplanned:${e.id}`]) answers[`unplanned:${e.id}`] = a;
+    // נוסף כאילו היה בתכנון ואינו ברומה: כמו סבב מתוכנן שלא בוצע, והשאלה הרגילה נשאלת עליו.
+    if (n.root && !e) addAsPlanned(matches, { ...n.origin, id: n.id }, execPairings.find((x) => overlapDays(n.pairing, x)) ?? null);
   }
+}
+
+/**
+ * עם הרומה, סבב שנוסף ביומן כאילו היה בתכנון (הוספה בהסכמה או זכייה במכרז) והשתנה אחר כך (בעל המוצר,
+ * 06/10/2026): הוא נכנס להשוואה כאילו היה בתכנון – במקום הפעילות הלא מתוכננת שבה השרשרת נגמרת, או
+ * כסבב שלא בוצע – והשרשרת שלו היא התשובה עליו, כמו בסבב מתוכנן (`addedInCalendar`).
+ */
+function applyRootChain(ch, { ctx, matches, execPairings, answers, toExec, credit, execAnswer, byExecId }) {
+  const eff = reduceChain(ch, { toExec, credit, execAnswer, byExecId });
+  for (const s of ch.steps) if (!(eff?.open && s.node.id === eff.open.id)) delete answers[s.id];
+  if (ch.last && !eff?.open) delete answers[`cancelled:${ch.last.id}`];
+  if (!eff) return;
+  if (eff.open) ctx.journalOpen.push(eff.open);
+  // השלב הראשון עוד פתוח: השאלה עליו נשאלת על הסבב שביומן (`askChainOpen`), ובינתיים אין מה להשוות.
+  if (eff.open?.id === ch.plan.id) return;
+  addAsPlanned(matches, ch.plan, execPairings.includes(eff.endsAt) ? eff.endsAt : null);
+  answers[`cancelled:${ch.plan.id}`] = eff;
+}
+
+/**
+ * סבב שנוסף ביומן כאילו היה בתכנון, בהשוואה לרומה: במקום הפעילות הלא מתוכננת `exec` כשהיא כזאת,
+ * ובלעדיה כסבב שלא בוצע.
+ */
+function addAsPlanned(matches, pairing, exec) {
+  const plan = { ...pairing, addedInCalendar: true };
+  const i = exec ? matches.findIndex((x) => x.exec === exec && x.how === 'unplanned') : -1;
+  if (i >= 0) matches[i] = { plan, exec, how: 'dates' };
+  else matches.push({ plan, exec: null, how: 'cancelled' });
+  matches.sort((a, b) => (a.plan ?? a.exec).from.localeCompare((b.plan ?? b.exec).from));
 }
 
 /**
@@ -345,16 +381,20 @@ function journalRows(journal, out) {
   const sby = (s) => s.standby?.map((x) => `${x.code} ${x.date.slice(8, 10)}/${x.date.slice(5, 7)}`).join(', ') ?? null;
   for (const ch of journal.chains) {
     const tail = ch.steps.at(-1);
+    // סבב שנוסף כאילו היה בתכנון: בצד התכנון אין כלום, והתשובה על ההוספה היא השורה הראשונה מתחתיו.
+    const root = ch.root ? journal.unplanned.find((n) => n.id === ch.plan.id) : null;
     const calendar = ch.last ? describePairing(ch.last.pairing)
       : tail.answer ? null
         : tail.how === 'standby' ? sby(tail)
           : tail.candidates.length ? tail.candidates.map(describePairing).join(', ') : null;
     const notes = ch.steps.filter((s) => s.note).map((s) => ({ message: `${s.note}.`, byUser: !!s.answer }));
+    if (root?.note) notes.unshift({ message: `${describePairing(ch.plan)}: ${root.note}.`, byUser: true });
     if (ch.steps.some((s) => pending(s.id))) notes.push({ message: 'ממתין לתשובה בשאלה על הסבב.', byUser: false });
-    rows.push({ date: ch.plan.from, how: `cal_${tail.how}`, label: ch.steps.length > 1 ? 'כמה שינויים ביומן' : STEP_LABEL[tail.how],
-      plan: describePairing(ch.plan), planId: ch.plan.id, calendar, notes });
+    rows.push({ date: ch.plan.from, how: `cal_${tail.how}`, label: ch.root ? 'ביומן סבב שאינו בתכנון, ושהשתנה' : ch.steps.length > 1 ? 'כמה שינויים ביומן' : STEP_LABEL[tail.how],
+      plan: ch.root ? null : describePairing(ch.plan), planId: ch.root ? null : ch.plan.id, calendar, notes });
   }
   for (const n of journal.unplanned) {
+    if (n.step) continue;
     const id = `unplanned:${n.id}`;
     rows.push({ date: n.pairing.from, how: 'cal_unplanned', label: 'ביומן סבב שאינו בתכנון', plan: null, planId: null,
       calendar: describePairing(n.pairing),
@@ -879,9 +919,11 @@ function describeMatch(m) {
     replaced_by_standby: 'סבב מתוכנן שבוטל והוצבת לכוננות',
     replaced_by_sick_standby: 'סבב מתוכנן שבוטל עקב מחלה והוצבת לכוננות',
   };
+  // סבב שנוסף ביומן כאילו היה בתכנון (`applyRootChain`).
+  const added = m.plan?.addedInCalendar ? (m.exec ? 'סבב שנוסף ביומן, ובמקומו בוצע סבב אחר' : 'סבב שנוסף ביומן ולא בוצע') : null;
   return {
     how: m.how,
-    label: labels[m.how] ?? m.how,
+    label: added ?? labels[m.how] ?? m.how,
     date: (m.plan ?? m.exec).from,
     planId: m.plan?.id ?? null,
     execId: m.exec?.id ?? null,

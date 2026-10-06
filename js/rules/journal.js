@@ -4,7 +4,8 @@
 // ברמת הסבבים (`appendSnapshot`). השרשרת נבנית מהן מחדש בכל הרצה (`buildJournal`): מקובץ התכנון,
 // דרך כל תמונה לפי הסדר. סבב שנעלם הוא שלב, והסיבה נשאלת עליו (`cancelled:<מזהה הסבב>`); תשובה
 // עם קישור קובעת לאיזה סבב הוא עבר, וממנו השרשרת ממשיכה. סבב חדש שאינו המשך של שלב הוא פעילות
-// שלא תוכננה (`unplanned:`). שינוי שחזר למצב שלפניו יוצא מהשרשרת, יחד עם התשובה עליו (`obsolete`).
+// שלא תוכננה (`unplanned:`). סבב כזה שנוסף בהסכמה או בזכייה במכרז הוא כאילו היה בתכנון: שינוי בו
+// אחר כך הוא שלב בשרשרת משלו (`ROOT`). שינוי שחזר למצב שלפניו יוצא מהשרשרת, יחד עם התשובה עליו (`obsolete`).
 // כשהרומה מועלית, ההשוואה היא בין התכנון המקורי לרומה, והשרשרת מסבירה כל שינוי (`reduceChain`).
 
 import { buildPairings } from '../model.js';
@@ -22,6 +23,11 @@ export const samePairing = (p, c) => pairingFlights(c) === pairingFlights(p) || 
 /** תשובות שמקשרות סבב לסבב אחר. */
 const LINKED = ['voluntary_swap', 'replaced', 'bid'];
 const GAVE_AWAY = 'none';
+/**
+ * תשובות על סבב חדש ביומן (`unplanned:`) שהופכות אותו לבסיס, כאילו היה בתכנון: הוספת טיסה בהסכמה
+ * וזכייה במכרז, בלי זכאות לפיצוי על ההוספה עצמה (בעל המוצר, 06/10/2026).
+ */
+export const ROOT = ['added', 'bid'];
 
 /**
  * סבבי היומן בחודש, שנבנים מהטיסות שבו כמו סבבי התכנון, והכוננויות שבו. `first`–`last`: הטווח
@@ -109,8 +115,9 @@ export function sameAssignment(a, b, delayFits) {
  * - `steps`: השלבים, כל אחד {id, node, fromPairing, how, candidates, answer, to, end, waiting}.
  *   `how`: moved (אותן טיסות בתאריך אחר), retimed (אותן טיסות בשעה אחרת), changed (סבב אחר באותם ימים), standby, missing.
  * - `open`: שלבים שעוד אין עליהם תשובה, או שהסבב שבקישור עוד לא ביומן.
- * - `unplanned`: סבבים ביומן שאינם המשך של שלב, עם הסבב הנוכחי שלהם.
- * - `chains`: לכל סבב מתוכנן שהשתנה – השלבים לפי הסדר, והסבב שבו השרשרת נמצאת עכשיו (`last`).
+ * - `unplanned`: סבבים ביומן שאינם המשך של שלב, עם הסבב הנוכחי שלהם. `root`: נוסף כאילו היה בתכנון (`ROOT`).
+ * - `chains`: לכל סבב מתוכנן שהשתנה, ולכל סבב שנוסף כאילו היה בתכנון ושהשתנה (`root`) – השלבים לפי
+ *   הסדר, והסבב שבו השרשרת נמצאת עכשיו (`last`).
  * - `obsolete`: מזהי שאלות של שלבים שחזרו למצב שלפניהם.
  * - `latest`: התמונה האחרונה.
  */
@@ -121,6 +128,7 @@ export function buildJournal({ planPairings, views, answers, same }) {
   let live = [...planNodes];
   let open = [];
   let unplanned = [];
+  const roots = [];
   // החלפה מרצון שנענתה על הסבב שביומן (`unplanned:`) וקושרה לסבב שנעלם, עונה גם על השלב שלו.
   const linkedFrom = (nodeId) => {
     const hit = Object.entries(answers).find(([id, a]) => id.startsWith('unplanned:') && LINKED.includes(a?.value) && a.link === nodeId);
@@ -154,8 +162,8 @@ export function buildJournal({ planPairings, views, answers, same }) {
     });
     for (const n of gone) {
       live = live.filter((x) => x !== n);
-      // סבב שהופיע ביומן ונעלם, בלי שהיה המשך של שלב: לא בוצע, ואין על מה לשאול.
-      if (!n.plan && !n.from) {
+      // סבב שהופיע ביומן ונעלם, בלי שהיה המשך של שלב ובלי שנוסף כאילו היה בתכנון: לא בוצע, ואין על מה לשאול.
+      if (!n.plan && !n.from && !n.root) {
         unplanned = unplanned.filter((x) => x !== n);
         continue;
       }
@@ -202,7 +210,7 @@ export function buildJournal({ planPairings, views, answers, same }) {
       s.answer = a;
       if (!LINKED.includes(a.value) || !a.link || a.link === GAVE_AWAY) { s.end = a.value; s.done = true; continue; }
       // הסבב שבקישור: סבב חדש בתמונה הזאת, או סבב שכבר נרשם כפעילות שלא תוכננה.
-      const known = unplanned.find((n) => n.id === a.link || n.pairing.id === a.link);
+      const known = unplanned.find((n) => !n.root && (n.id === a.link || n.pairing.id === a.link));
       if (known) {
         unplanned = unplanned.filter((n) => n !== known);
         known.from = s;
@@ -221,13 +229,15 @@ export function buildJournal({ planPairings, views, answers, same }) {
     open = open.filter((s) => !s.done);
     for (const x of v.pairings) {
       if (used.has(x)) continue;
-      const node = { id: x.id, pairing: x, plan: false, from: null, step: null };
+      const root = ROOT.includes(answers[`unplanned:${x.id}`]?.value);
+      const node = { id: x.id, pairing: x, plan: false, from: null, step: null, ...(root && { root, origin: x }) };
       live.push(node);
       unplanned.push(node);
+      if (root) roots.push(node);
     }
   }
 
-  const chains = planNodes.filter((n) => n.step).map((n) => {
+  const chains = [...planNodes, ...roots].filter((n) => n.step).map((n) => {
     const list = [];
     let node = n;
     while (node.step) {
@@ -235,7 +245,7 @@ export function buildJournal({ planPairings, views, answers, same }) {
       if (!node.step.to) break;
       node = node.step.to;
     }
-    return { plan: planPairings.find((p) => p.id === n.id), steps: list, last: list.at(-1).to ? node : null };
+    return { plan: n.root ? n.origin : planPairings.find((p) => p.id === n.id), ...(n.root && { root: true }), steps: list, last: list.at(-1).to ? node : null };
   });
   return { steps, open, unplanned, chains, obsolete: [...obsolete].filter((id) => !steps.some((s) => s.id === id)), latest: views.at(-1) ?? null };
 }

@@ -1246,11 +1246,17 @@ function askWhatHappened(ctx, match, rule) {
     id: `cancelled:${plan.id}`,
     date: plan.from,
     execId: exec?.id ?? null,
-    // תוכנן/בוצע בבולד, פרטי הטיסות והתאריכים לא (בעל המוצר, 27/09/2026).
-    title: exec
-      ? ['סבב מתוכנן שבמקומו בוצע סבב אחר באותם ימים:\n', { bold: true, text: 'תוכנן ' }, describePairing(plan),
-          { bold: true, text: ', בוצע ' }, describePairing(exec)]
-      : `סבב מתוכנן שלא בוצע: ${describePairing(plan)}`,
+    // תוכנן/בוצע בבולד, פרטי הטיסות והתאריכים לא (בעל המוצר, 27/09/2026). סבב שנוסף ביומן כאילו היה
+    // בתכנון (`addedInCalendar`, js/rules/evaluate.js) מתואר כך.
+    title: plan.addedInCalendar
+      ? (exec
+        ? ['סבב שנוסף ביומן, ובמקומו בוצע סבב אחר באותם ימים:\n', { bold: true, text: 'ביומן ' }, describePairing(plan),
+            { bold: true, text: ', בוצע ' }, describePairing(exec)]
+        : `סבב שנוסף ביומן ולא בוצע: ${describePairing(plan)}`)
+      : exec
+        ? ['סבב מתוכנן שבמקומו בוצע סבב אחר באותם ימים:\n', { bold: true, text: 'תוכנן ' }, describePairing(plan),
+            { bold: true, text: ', בוצע ' }, describePairing(exec)]
+        : `סבב מתוכנן שלא בוצע: ${describePairing(plan)}`,
     body: (diff != null && diff > 0 ? `המתוכנן ארוך ממה שבוצע ב-${minToHhmm(diff)}. ` : '') +
       'הסיבה אינה בקבצים, והיא קובעת מה מגיע. מה קרה?',
     options: [
@@ -1280,7 +1286,8 @@ function askJournal(ctx, rule) {
     return;
   }
   const label = (p) => ({ id: p.id, label: describePairing(p) });
-  const newOnes = j.unplanned.map((n) => ({ ...label(n.pairing), id: n.id }));
+  // סבב חדש ביומן שכבר נענה (למשל נוסף בהסכמה) אינו מה שבא במקום סבב אחר.
+  const newOnes = j.unplanned.filter((n) => !ctx.answer(`unplanned:${n.id}`)).map((n) => ({ ...label(n.pairing), id: n.id }));
   for (const st of j.open) {
     if (st.answer) continue;
     const p = st.fromPairing;
@@ -1309,6 +1316,9 @@ function askJournal(ctx, rule) {
     });
   }
   const gone = j.open.filter((st) => !st.answer).map((st) => ({ id: st.node.id, label: describePairing(st.fromPairing) }));
+  // בתכנון לבד אין פיצויים, ולכן אין כאן "קריאה מיוחדת": השאלה היא איך הסבב נכנס לשיבוץ. החלפה, מרצוני
+  // או ביוזמת החברה – מול הסבב שיצא; זכייה במכרז והוספה בהסכמה – כאילו היה בתכנון, בלי פיצוי על
+  // ההוספה, ושינוי בו אחר כך הוא שלב בשרשרת (`ROOT` ב-js/rules/journal.js; בעל המוצר, 06/10/2026).
   for (const n of j.unplanned) {
     ctx.ask({
       id: `unplanned:${n.id}`,
@@ -1316,8 +1326,10 @@ function askJournal(ctx, rule) {
       title: `ביומן סבב שאינו בתכנון: ${describePairing(n.pairing)}`,
       body: 'הסיבה אינה בקבצים, והיא תקבע מה מגיע כשתועלה הרומה. מה קרה?',
       options: [
-        { value: 'special_call', label: 'קריאה מיוחדת' },
+        { value: 'bid', label: 'זכייה במכרז' },
         { value: 'voluntary_swap', label: 'החלפה מרצוני', needsLink: true },
+        { value: 'replaced', label: 'שינוי ביוזמת החברה', needsLink: true },
+        { value: 'added', label: 'הוספת טיסה בהסכמה' },
         otherOption(),
       ],
       linkPool: gone,
@@ -1365,11 +1377,13 @@ function stepNote(ctx, st) {
 function unplannedNote(ctx, n) {
   const a = ctx.answer(`unplanned:${n.id}`);
   if (!a) return null;
-  if (a.value === 'special_call') return 'קריאה מיוחדת';
+  const simple = { special_call: 'קריאה מיוחדת', bid: 'זכייה במכרז', added: 'הוספת טיסה בהסכמה' };
+  if (simple[a.value]) return simple[a.value];
   if (a.value === 'other') return `סיבה אחרת${a.text ? `: ${a.text}` : ''}`;
-  if (a.value !== 'voluntary_swap') return a.value;
+  const what = { voluntary_swap: 'החלפה מרצוני', replaced: 'שינוי ביוזמת החברה' }[a.value];
+  if (!what) return a.value;
   const gone = ctx.journal.steps.find((st) => st.node.id === a.link);
-  return `החלפה מרצוני: ${gone ? describePairing(gone.fromPairing) : a.link ? a.link : 'טיסה בחודש אחר'}`;
+  return `${what}: ${gone ? describePairing(gone.fromPairing) : a.link ? a.link : 'טיסה בחודש אחר'}`;
 }
 
 // ---------- שינויים בפעילות שאינה טיסה ----------

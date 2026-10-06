@@ -42,7 +42,7 @@ const dayCounts = (expectations) => DAY_KINDS.map((k) => {
 const ANSWER_LABEL = {
   special_call: 'קריאה מיוחדת', voluntary_swap: 'החלפה מרצוני', replaced: 'שינוי ביוזמת החברה', bid: 'זכייה במכרז', diversion: 'סטיה לשדה משנה',
   wet_lease: 'הורדה מהטיסה המקורית', trainee: 'הורדה מהטיסה המקורית', swap_777: 'הטיסה עברה ל-777 (לא כשיר MFF)',
-  cancelled: 'הטיסה המקורית בוטלה ללא קרדיט', other: 'סיבה אחרת',
+  cancelled: 'הטיסה המקורית בוטלה ללא קרדיט', added: 'הוספת טיסה בהסכמה', other: 'סיבה אחרת',
   yes: 'כן', no: 'לא',
   company: 'לבקשת החברה', own: 'ויתור מרצון',
   standby_bid: 'סיום כוננות בגלל זכייה במכרז', standby_activated: 'הפעלת הכוננות', regular_standby: 'מצב הכן רגיל',
