@@ -225,6 +225,7 @@ export function evaluate({ rulesData, plan = null, exec = null, answers = {}, hi
   splitChangesByFdp(out, matches, ctx, fdp);
   explainChanges(out, supported);
   if (journal && mode === 'full') chainNotes(out, journal, answers);
+  if (mode === 'full') addedNotes(out, answers);
   explainCompensations(out);
   if (exec) {
     out.comparison = compare({ out, timeline, execPairings, domicile, codes, fdp });
@@ -332,9 +333,13 @@ function applyRootChain(ch, { ctx, matches, execPairings, answers, toExec, credi
   for (const s of ch.steps) if (!(eff?.open && s.node.id === eff.open.id)) delete answers[s.id];
   if (ch.last && !eff?.open) delete answers[`cancelled:${ch.last.id}`];
   if (!eff) return;
+  // השלב הראשון עוד פתוח: הסבב נכנס להשוואה כאילו היה בתכנון, והשאלה הרגילה נשאלת עליו, כמו על סבב
+  // מתוכנן. כך גם לפני התשובה הוא בטבלת השינויים (בעל המוצר, 06/10/2026).
+  if (eff.open?.id === ch.plan.id) {
+    addAsPlanned(matches, ch.plan, execPairings.find((x) => overlapDays(ch.plan, x) && matches.some((m) => m.exec === x && m.how === 'unplanned')) ?? null);
+    return;
+  }
   if (eff.open) ctx.journalOpen.push(eff.open);
-  // השלב הראשון עוד פתוח: השאלה עליו נשאלת על הסבב שביומן (`askChainOpen`), ובינתיים אין מה להשוות.
-  if (eff.open?.id === ch.plan.id) return;
   const e = execPairings.includes(eff.endsAt) ? eff.endsAt : null;
   // זכייה במכרז שהשרשרת שלה נגמרה בטיסה שבוצעה ביום שלא תוכננה בו פעילות במקור: מגיעה עליה קריאה
   // מיוחדת, באותם ימים או ביום אחר. רק הוספה בהסכמה היא כאילו הייתה בתכנון. ימי הזכייה, בלי פעילות,
@@ -372,6 +377,7 @@ function addAsPlanned(matches, pairing, exec) {
  * (`note`, `askJournal` ב-js/rules/logic.js). כשהשלב האחרון עוד פתוח – "ממתין לתשובה".
  */
 function chainNotes(out, journal, answers) {
+  const chained = new Set();
   for (const c of out.changes) {
     // זכייה במכרז שעברה ליום אחר (`applyRootChain`): השרשרת מתחת לטיסה שבוצעה.
     // שורת "במקום סבב שתוכנן בימים אחרים" (`showSwaps`): השרשרת כבר מתחת לסבב שלא בוצע.
@@ -387,11 +393,33 @@ function chainNotes(out, journal, answers) {
     const path = ch.steps.map((s) => describePairing(s.fromPairing));
     const end = ch.last?.pairing ? describePairing(ch.last.pairing) : null;
     if (end && end !== c.exec) path.push(end);
-    if (!ch.root && !moved) c.plan = path.join(' → ');
+    if (!moved) c.plan = path.join(' → ');
     if (view.steps.length > 1 || path.length > 1 || root || moved) c.steps = view.steps;
     // מתחת לשורה רק הסיבה, ומה שמגיע עליה; כשהיא כבר הכותרת של השורה – רק מה שמגיע.
     const reason = view.reason && view.reason !== `${c.label}.` ? [{ message: view.reason, byUser: true }] : [];
     c.notes = eff.value === 'chain_open' ? [...reason, { message: 'ממתין לתשובה בשאלה על הסבב.', byUser: false }] : [...reason, ...(c.notes ?? [])];
+    chained.add(c);
+  }
+  // סבב שנוסף ביומן אינו בתכנון, גם כשהוא נכנס להשוואה כאילו היה בו (בעל המוצר, 06/10/2026): בצד
+  // התכנון "—" לפניו, ומתחת לשורה התשובה על ההוספה, לפני מה שמגיע.
+  for (const c of out.changes) {
+    const root = c.planId && journal.unplanned.find((n) => n.root && n.id === c.planId);
+    if (!root || !c.plan) continue;
+    c.plan = `— → ${c.plan}`;
+    if (!chained.has(c) && root.note) c.notes = [{ message: `${root.note}.`, byUser: true }, ...(c.notes ?? [])];
+  }
+}
+
+/**
+ * פעילות לא מתוכננת שנענתה "הוספת טיסה בהסכמה": שינוי מהתכנון, גם כשאין עליה קריאה מיוחדת, ולכן
+ * התשובה בראש מה שמתחת לשורה (בעל המוצר, 06/10/2026; 26/08/2026 ATH).
+ */
+function addedNotes(out, answers) {
+  for (const c of out.changes) {
+    if (c.how !== 'unplanned' || answers[`unplanned:${c.execId}`]?.value !== 'added' || !c.notes?.length) continue;
+    const [first, ...rest] = c.notes;
+    if (first.message.startsWith('הוספת טיסה בהסכמה')) continue;
+    c.notes = [{ ...first, message: `הוספת טיסה בהסכמה: ${first.message}`, byUser: true }, ...rest];
   }
 }
 
@@ -430,7 +458,7 @@ function journalRows(journal, out) {
   const sby = (s) => s.standby?.map((x) => `${x.code} ${x.date.slice(8, 10)}/${x.date.slice(5, 7)}`).join(', ') ?? null;
   for (const ch of journal.chains) {
     const tail = ch.steps.at(-1);
-    // סבב שנוסף כאילו היה בתכנון: בצד התכנון אין כלום, והתשובה על ההוספה היא השורה הראשונה מתחתיו.
+    // סבב שנוסף כאילו היה בתכנון: בצד התכנון "—" לפני השרשרת, והתשובה על ההוספה היא הסיבה הראשונה מתחתיו.
     const root = ch.root ? journal.unplanned.find((n) => n.id === ch.plan.id) : null;
     const calendar = ch.last ? describePairing(ch.last.pairing)
       : tail.answer ? null
@@ -442,7 +470,7 @@ function journalRows(journal, out) {
     const notes = view.reason ? [{ message: view.reason, byUser: true }] : [];
     if (ch.steps.some((s) => pending(s.id))) notes.push({ message: 'ממתין לתשובה בשאלה על הסבב.', byUser: false });
     rows.push({ date: ch.plan.from, how: `cal_${tail.how}`, label: ch.root ? 'ביומן סבב שאינו בתכנון, ושהשתנה' : ch.steps.length > 1 ? 'כמה שינויים ביומן' : STEP_LABEL[tail.how],
-      plan: ch.root ? null : ch.steps.map((s) => describePairing(s.fromPairing)).join(' → '), planId: ch.root ? null : ch.plan.id, calendar, notes,
+      plan: [...(ch.root ? ['—'] : []), ...ch.steps.map((s) => describePairing(s.fromPairing))].join(' → '), planId: ch.root ? null : ch.plan.id, calendar, notes,
       ...((ch.steps.length > 1 || root) && { steps: view.steps }) });
   }
   for (const n of journal.unplanned) {
