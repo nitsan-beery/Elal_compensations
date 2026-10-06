@@ -77,8 +77,9 @@ export function planSpan(pairing, domicile, monthFirst) {
   let end = null;
   if (home && !pairing.cutAtEnd) {
     // נחיתה שנראית מוקדמת מההמראה היא ביום שאחרי. ביום הראשון בחודש, רגל שיצאה בחודש
-    // הקודם רשומה ביום הנחיתה (LY388 ב-01/06/2026).
-    const carriedIn = home.date === monthFirst && home.org !== domicile;
+    // הקודם רשומה ביום הנחיתה (LY388 ב-01/06/2026) – אבל לא בסבב שיצא מהבסיס באותו יום
+    // (01/09/2024 LY2373/LY2374 ל-BER, נחיתה ב-03:15 ב-02/09).
+    const carriedIn = home.date === monthFirst && home.org !== domicile && pairing.legs[0].org !== domicile;
     const nextDay = !carriedIn && home.dep && home.arr.min < home.dep.min;
     end = at(home.date, home.arr.min) + (nextDay ? 1440 : 0);
   }
@@ -179,6 +180,31 @@ function same_fdp_rounds(ctx, params, rule) {
 // ---------- פעילות שנייה לא מתוכננת (2024 ס' 42.6–42.7) ----------
 
 /**
+ * סבב מתוכנן שבוצע גם ביום שהסבב המתוכנן לא נגע בו (בעל המוצר, 06/10/2026): מההמראה ועד הנחיתה בבסיס
+ * בפועל, כולל נחיתה באיחור אחרי חצות – בלי הסף של היממה השנייה בקריאה מיוחדת (`countSpecialCallDays`),
+ * שהוא לטיסה שלא תוכננה כלל. `free` – יום שלא תוכנן בו כלום (`ctx.planFreeDay`): קריאה מיוחדת
+ * (`special_call`). `second` – יום שתוכננה בו פעילות ובוצעו בו גם טיסה אחרת או סימולטור: פעילות שנייה לא
+ * מתוכננת (`second_unplanned_activity`, 2024 ס' 42.6; פעילות קרקע אינה נספרת). null כשאין יום כזה.
+ */
+export function extensionDays(ctx, match) {
+  if (!match.plan || !match.exec || match.exec.cutAtStart || match.exec.cutAtEnd || match.plan.cutAtStart || match.plan.cutAtEnd) return null;
+  const e = execSpan(match.exec, ctx.domicile, false);
+  const p = planSpan(match.plan, ctx.domicile, ctx.monthFirst);
+  if (e.start == null || e.end == null || p.start == null || p.end == null) return null;
+  const days = [];
+  for (let d = dateOf(e.start); at(d, 0) < e.end; d = addDays(d, 1)) {
+    if (p.start < at(d, 1440) && p.end > at(d, 0)) continue;
+    if (ctx.timeline.some((x) => x.date === d)) days.push(d);
+  }
+  if (!days.length) return null;
+  const free = days.filter((d) => ctx.planFreeDay(d));
+  const sims = ctx.rulesWithLogic('second_unplanned_activity')[0]?.logic.params?.sim_report_codes;
+  const second = !sims ? [] : days.filter((d) => !free.includes(d) &&
+    (ctx.execPairings.some((x) => x !== match.exec && x.dates.includes(d)) || ctx.execCodes(ctx.timeline.find((x) => x.date === d)).some((c) => sims.includes(c))));
+  return { days, free, second };
+}
+
+/**
  * טיסה או סימולטור שלא היו בתכנון, באותה יממה שבה אצ"א ביצע טיסה או סימולטור אחרים.
  * לא כולל פעילות קרקע, ולא שתי פעילויות באותו FDP (פחות ממנוחה חוקית ביניהן).
  */
@@ -240,6 +266,43 @@ function second_unplanned_activity(ctx, params, rule) {
     if (!a) askRest(id, day, `${describePairing(u)} לא הייתה בתכנון, ובאותה יממה היה סימולטור. האם הייתה מנוחה ביניהם?`);
     else if (a.value === 'separate') ctx.expectPairing(u, key, H(params.hours), rule, `${describePairing(u)} לא הייתה בתכנון, ובאותה יממה היה סימולטור ` +
       `(${answered ? 'לפי תשובתך, עם מנוחה חוקית ביניהם' : `הרומה מזכה את הפיצוי`})`);
+  }
+
+  // סבב מתוכנן שהתארך ליום שתוכננו בו טיסה או סימולטור (`extensionDays`; בעל המוצר, 06/10/2026): ההארכה
+  // היא הפעילות השנייה ביום הזה. הסיבה נשאלת ב-`special_call` (`extended:`), והסכמה – אין פיצוי.
+  for (const m of ctx.matches) {
+    const ans = ctx.answerFor(m);
+    if (['voluntary_swap', 'added'].includes(ans?.value) || (m.how === 'dates' && !ans)) continue;
+    if (m.plan && ctx.pairingHandledBy(m.plan, 'cancelled_no_compensation')) continue;
+    const ext = extensionDays(ctx, m);
+    if (!ext?.second.length) continue;
+    const reason = `extended:${m.exec.id}`;
+    if (ctx.isAsked(reason) || ctx.answer(reason)?.value === 'agreed') continue;
+    const span = execSpan(m.exec, ctx.domicile, false);
+    for (const d of ext.second) {
+      const what = `${describePairing(m.exec)} התארך ל-${ddmm(d)}`;
+      const others = ctx.execPairings.filter((x) => x !== m.exec && x.dates.includes(d));
+      const separate = others.find((o) => {
+        const so = execSpan(o, ctx.domicile, false);
+        const [first, second] = (so.start ?? 0) < span.start ? [so, span] : [span, so];
+        return first.end != null && second.start != null && legalRestBetween(first, second, report, ctx.legalRest?.postMin) >= legal;
+      });
+      if (separate) {
+        ctx.expectPairing(m.exec, key, H(params.hours), rule, `${what}, ובאותה יממה בוצעה גם ${describePairing(separate)} עם מנוחה חוקית ביניהן`,
+          { date: d, dates: [d], explain: `הסבב התארך ל-${ddmm(d)}, ובאותה יממה בוצעה גם ${describePairing(separate)}.` });
+        continue;
+      }
+      if (others.length) {
+        ctx.note(d, `${what}, באותו FDP עם ${others.map(describePairing).join(', ')}. אין פיצוי על פעילות שנייה (2024 ס' 42.7).`, rule, { pairingId: m.exec.id });
+        continue;
+      }
+      const id = `second_activity:${m.exec.id}:${d}`;
+      const answered = ctx.answer(id);
+      const a = answered ?? (ctx.paidOn(m.exec, params.report_column, key, H(params.hours), own) ? { value: 'separate' } : null);
+      if (!a) askRest(id, d, `${what}, ובאותה יממה היה סימולטור. האם הייתה מנוחה ביניהם?`);
+      else if (a.value === 'separate') ctx.expectPairing(m.exec, key, H(params.hours), rule, `${what}, ובאותה יממה היה סימולטור ` +
+        `(${answered ? 'לפי תשובתך, עם מנוחה חוקית ביניהם' : 'הרומה מזכה את הפיצוי'})`, { date: d, dates: [d], explain: `הסבב התארך ל-${ddmm(d)}, ובאותה יממה היה סימולטור.` });
+    }
   }
 
   // סימולטור לא מתוכנן ביום טיסה

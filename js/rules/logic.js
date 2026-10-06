@@ -7,7 +7,7 @@
 import { hoursToMin, minToHhmm } from '../time.js';
 import { describePairing, describeRoute, fdpParts } from '../model.js';
 import { stationOffset } from '../airports.js';
-import { DUTY_LOGIC, DUTY_PARAMS, execFdpGroups, amountWord, otherOption, applyOtherReason } from './duty.js';
+import { DUTY_LOGIC, DUTY_PARAMS, execFdpGroups, amountWord, otherOption, applyOtherReason, extensionDays } from './duty.js';
 import { overlapDays } from './journal.js';
 
 const H = (hours) => hoursToMin(hours) ?? 0;
@@ -671,33 +671,37 @@ function companySwapToFreeDay(match, answer) {
 }
 
 /**
- * סבב שהתארך ליום שלא תוכנן בו כלום (בעל המוצר, 06/10/2026): זו אותה טיסה, עם הפסקה בין הרגליים, ולכן
- * אין "הגבוה מבין השתיים" – הקרדיט הוא אותו קרדיט – אבל על כל יממה שנוספה מגיעה קריאה מיוחדת, אלא אם
- * ההארכה הייתה בהסכמה. היממות לפי הספירה של הקריאה המיוחדת (`countSpecialCallDays`), כך שנחיתה
- * מאוחרת אחרי חצות אינה יממה, ורק יום שלא תוכנן בו כלום (`ctx.planFreeDay`). מעל `over_hours` זו
- * הארכת שהייה (`stay_extension`), שאינה מגיעה לכאן. הסיבה אינה בקבצים, ולכן נשאלת כשהרומה לא זיכתה.
- * סבב שהוחלף באותם ימים (`dates`) – רק אחרי התשובה עליו, וגם אז בנוסף לגבוה מבין השתיים.
- * מחזירה true כשהסבב טופל כאן.
+ * סבב שהתארך ליום שהסבב המתוכנן לא נגע בו (`extensionDays` ב-js/rules/duty.js; בעל המוצר, 06/10/2026): זו
+ * אותה טיסה, עם הפסקה בין הרגליים או נחיתה באיחור אחרי חצות, ולכן אין "הגבוה מבין השתיים" – הקרדיט הוא
+ * אותו קרדיט. על כל יום שלא תוכנן בו כלום מגיעה קריאה מיוחדת, בלי הסף של היממה השנייה, ועל יום שתוכננו
+ * בו טיסה או סימולטור – פעילות שנייה לא מתוכננת (`second_unplanned_activity`, שקוראת את התשובה כאן);
+ * בשניהם רק אם ההארכה לא הייתה בהסכמה. מעל `over_hours` זו הארכת שהייה (`stay_extension`), שאינה מגיעה
+ * לכאן. הסיבה אינה בקבצים, ולכן נשאלת כשהרומה לא זיכתה. סבב שהוחלף באותם ימים (`dates`) – רק אחרי
+ * התשובה עליו, וגם אז בנוסף לגבוה מבין השתיים. מחזירה true כשהסבב טופל כאן.
  */
 function extendedPairing(ctx, params, rule, match, answer) {
+  const ext = extensionDays(ctx, match);
+  if (!ext) return false;
+  const { plan, exec } = match;
+  if (match.how === 'exact') ctx.markPairing(exec, 'extended');
   if (['voluntary_swap', 'added'].includes(answer?.value)) return false;
   if (match.how === 'dates' && !answer) return false;
-  const { plan, exec } = match;
-  const stay = awayFromBase(exec, ctx.domicile, ctx.timeline.at(-1).date);
-  if (stay.error) return false;
-  const days = countSpecialCallDays(stay, params, exec, ctx.fdp).counted
-    .filter((d) => (d < plan.from || d > plan.to) && ctx.planFreeDay(d));
-  if (!days.length) return false;
+  const days = ext.free;
+  if (!days.length && !ext.second.length) return false;
   const id = `extended:${exec.id}`;
-  const a = ctx.answer(id) ?? (ctx.paidOn(exec, params.report_column ?? 'S/C', 'sc', days.length * H(params.hours)) ? { value: 'company' } : null);
-  const list = days.map(dayOf).join(', ');
+  const second = ctx.rulesWithLogic('second_unplanned_activity')[0]?.logic.params;
+  const paid = (!days.length || ctx.paidOn(exec, params.report_column ?? 'S/C', 'sc', days.length * H(params.hours))) &&
+    (!ext.second.length || ctx.paidOn(exec, second.report_column ?? 'COM', 'com', ext.second.length * H(second.hours)));
+  const a = ctx.answer(id) ?? (paid ? { value: 'company' } : null);
+  const list = ext.days.map(dayOf).join(', ');
   if (!a) {
+    const due = [days.length ? 'קריאה מיוחדת' : null, ext.second.length ? 'פיצוי על פעילות שנייה באותה יממה' : null].filter(Boolean);
     ctx.ask({
       id,
       date: exec.from,
       title: `סבב שהתארך: ${describePairing(exec)}`,
-      body: `הסבב תוכנן ${describePairing(plan)}, והתארך ל-${list}, ${days.length === 1 ? 'יום שלא תוכננה בו' : 'ימים שלא תוכננה בהם'} פעילות. ` +
-        'הרומה לא מזכה קריאה מיוחדת, והיא מגיעה רק כשההארכה לא הייתה בהסכמתך. מה קרה?',
+      body: `הסבב תוכנן ${describePairing(plan)}, והתארך ל-${list}. הרומה לא מזכה ${due.join(' ו')}, ` +
+        `${due.length > 1 ? 'והם מגיעים' : days.length ? 'והיא מגיעה' : 'והוא מגיע'} רק כשההארכה לא הייתה בהסכמתך. מה קרה?`,
       options: [
         { value: 'company', label: 'הסבב הוארך ביוזמת החברה' },
         { value: 'agreed', label: 'הסבב הוארך בהסכמתי' },
@@ -707,7 +711,7 @@ function extendedPairing(ctx, params, rule, match, answer) {
     return true;
   }
   if (a.value === 'agreed') {
-    ctx.note(days[0], `הסבב התארך: בהסכמתך, ולכן אין קריאה מיוחדת על ${list}.`, rule, { pairingId: exec.id });
+    ctx.note(ext.days[0], `הסבב התארך: בהסכמתך, ולכן אין פיצוי על ההארכה ל-${list}.`, rule, { pairingId: exec.id });
     return true;
   }
   for (const d of days) {

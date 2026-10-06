@@ -216,6 +216,10 @@ export function evaluate({ rulesData, plan = null, exec = null, answers = {}, hi
     }
   }
 
+  // אותו סבב, ביום שהסבב המתוכנן לא נגע בו (`extendedPairing` ב-js/rules/logic.js): שינוי, ולא "בוצע כמתוכנן".
+  for (const c of out.changes) {
+    if (c.how === 'exact' && ctx.pairingHandledBy({ id: c.execId }, 'extended')) Object.assign(c, { how: 'extended', label: 'הסבב התארך' });
+  }
   attachLinkCandidates(out.questions, matches, ctx);
   showSwaps(out, answers, assumed);
   splitChangesByFdp(out, matches, ctx, fdp);
@@ -958,11 +962,9 @@ function describeMatch(m) {
   };
   // סבב שנוסף ביומן כאילו היה בתכנון (`applyRootChain`).
   const added = m.plan?.addedInCalendar ? (m.exec ? 'סבב שנוסף ביומן, ובמקומו בוצע סבב אחר' : 'סבב שנוסף ביומן ולא בוצע') : null;
-  // אותו סבב, בימים שלא תוכננו (`extendedPairing` ב-js/rules/logic.js): שינוי, ולא "בוצע כמתוכנן".
-  const longer = m.how === 'exact' && (m.exec.from < m.plan.from || m.exec.to > m.plan.to);
   return {
-    how: longer ? 'extended' : m.how,
-    label: added ?? (longer ? 'הסבב התארך' : labels[m.how] ?? m.how),
+    how: m.how,
+    label: added ?? labels[m.how] ?? m.how,
     date: (m.plan ?? m.exec).from,
     planId: m.plan?.id ?? null,
     execId: m.exec?.id ?? null,
@@ -1047,7 +1049,7 @@ function splitChangesByFdp(out, matches, ctx, fdp) {
 const CHANGE_LOGIC = new Set(['credit_from_scheduled', 'cancelled_no_compensation', 'voluntary_swap', 'higher_of_planned_performed',
   'lost_hours_credit', 'special_call', 'training_cancelled_flight', 'standby_end_for_bid', 'standby_activation', 'vacation_recall', 'dh_activated']);
 /** לוגיקות שהזיכוי שלהן הוא חלק ממה שמגיע על השינוי עצמו (ולא, למשל, נחיתה מאוחרת). */
-const CHANGE_DUE_LOGIC = new Set([...CHANGE_LOGIC, 'absence_day_credit', 'min_slip_credit']);
+const CHANGE_DUE_LOGIC = new Set([...CHANGE_LOGIC, 'absence_day_credit', 'min_slip_credit', 'second_unplanned_activity']);
 /** ניסוח קצר של מה שמגיע בהערה על שינוי, במקום שם החוק. */
 const DUE_WORDING = {
   credit_from_scheduled: 'קרדיט הטיסה',
@@ -1055,6 +1057,7 @@ const DUE_WORDING = {
   special_call: 'קריאה מיוחדת',
   min_slip_credit: 'השלמה לסליפ קצר',
   higher_of_planned_performed: 'קרדיט נוסף (הגבוה מבין השתיים)',
+  second_unplanned_activity: 'פיצוי על פעילות שנייה באותה יממה',
 };
 
 /**
