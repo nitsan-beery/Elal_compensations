@@ -474,15 +474,24 @@ function night_landings(ctx, params, rule) {
   } else {
     for (const n of night) { n.target = n.pairing; n.status = 'done'; }
   }
+  // הרגל שהרכב הצוות שלה קובע: הטיסה שבוצעה (בזכייה במכרז – זו שזכה בה). טיסה שלא בוצעה אין
+  // את מי לשאול עליה: הצוות החוזי לפי ה-FDP המתוכנן (בעל המוצר, 06/10/2026).
+  for (const n of night) {
+    n.crewLeg = !ctx.hasExec ? n.leg : n.target ? n.bid?.landing?.leg ?? n.leg : null;
+    if (!n.crewLeg) n.contract = contractCrewOf(ctx, n.leg);
+  }
   // הרכב הצוות משנה רק כשבלעדיו נספרות לפחות `min` טיסות.
   const live = night.filter((n) => n.status === 'done' || n.status === 'company');
-  if (live.length >= min) for (const n of live) ctx.crewMatters?.(n.leg.date, n.leg.flight);
+  if (live.length >= min) for (const n of live) if (n.crewLeg) ctx.crewMatters?.(n.crewLeg.date, n.crewLeg.flight);
   const threshold = params.paid_from_count;
   const key = keyFor(params.report_column);
   const hours = H(params.hours);
   // הרכב הצוות נשאל גם בבדיקת מגבלות החוק, על ה-FDP כולו: תשובה אחת משמשת את שתיהן.
-  const crewAnswer = (n) => ctx.answer(`night_crew:${n.leg.date}:${n.leg.flight}`) ?? ctx.legalCrewAnswer(n.leg);
+  const crewAnswer = (n) => (n.crewLeg
+    ? ctx.answer(`night_crew:${n.crewLeg.date}:${n.crewLeg.flight}`) ?? ctx.legalCrewAnswer(n.crewLeg)
+    : n.contract && { value: n.contract, source: 'contract' });
   const crewOf = (n) => crewAnswer(n)?.value;
+  const byContract = (n) => crewAnswer(n)?.source === 'contract';
 
   // נספרות רק טיסות בהרכב צוות מ-`counted_crews` (2024 ס' 39–40: בודד או מוגבר). ההרכב אינו
   // בקבצים, ולכן מניחים תחילה שכל טיסה שלא נענתה נספרת: ההרכב יכול רק להוריד את המספר, וזאת
@@ -502,7 +511,8 @@ function night_landings(ctx, params, rule) {
   // אילו טיסות אינן נספרות בגלל הרכב הצוות שלהן (בעל המוצר, 04/10/2026).
   if (crews && pool.length < min) {
     const out = night.filter((n) => !pool.includes(n));
-    const each = out.map((n) => `${ddmm(n.leg.date)} ${n.leg.flight} בצוות ${CREW_LABEL[crewOf(n)] ?? crewOf(n)}`);
+    const each = out.map((n) => `${ddmm(n.leg.date)} ${n.leg.flight} ${byContract(n) ? `לא בוצעה, והצוות החוזי בה ${CREW_LABEL[crewOf(n)]}`
+      : `בצוות ${CREW_LABEL[crewOf(n)] ?? crewOf(n)}`}`);
     const which = each.length > 1 ? `${each.slice(0, -1).join(', ')} ו-${each.at(-1)}` : each[0];
     ctx.note(null, `תוכננו ${night.length} טיסות לילה ${landing}, אבל ${which}, ו${out.length === 1 ? 'אינה נספרת' : 'אינן נספרות'}. ` +
       `${pool.length === 1 ? 'נשארה אחת' : pool.length ? `נשארו ${pool.length}` : 'לא נשארה אף אחת'}, ולכן אין פיצוי.`, rule);
@@ -553,7 +563,8 @@ function night_landings(ctx, params, rule) {
 
   counted.sort((a, b) => a.leg.date.localeCompare(b.leg.date) || a.clock - b.clock);
   const paying = counted.slice(threshold - 1);
-  const open = crews ? pool.filter((n) => crewOf(n) == null) : [];
+  // טיסה שלא בוצעה ואין לה צוות חוזי (FDP שאינו עומד באף הרכב) אינה נשאלת, ונשארת בהנחה שהיא נספרת.
+  const open = crews ? pool.filter((n) => crewOf(n) == null && n.crewLeg) : [];
   // בתכנון לבד הרכב הצוות אינו נשאל (בעל המוצר, 03/10/2026): ייתכן שמגיע פיצוי, וזה ייבדק אחרי
   // שתועלה הרומה (בעל המוצר, 04/10/2026).
   if (open.length && !ctx.hasExec) {
@@ -573,17 +584,19 @@ function night_landings(ctx, params, rule) {
     } else {
       // שואלים אחת בכל פעם, מהטיסה הארוכה ביותר (בקשת בעל המוצר, 23/09/2026): תשובה שאינה
       // נספרת מורידה את המספר ומייתרת את השאר, והסיכוי לכך גדול יותר בטיסה ארוכה.
-      const next = [...open].sort((a, b) => (plannedBlock(ctx, b.leg) ?? 0) - (plannedBlock(ctx, a.leg) ?? 0) ||
-        a.leg.date.localeCompare(b.leg.date))[0];
+      const block = (n) => plannedBlock(ctx, n.crewLeg) ?? n.crewLeg.skdDur ?? 0;
+      const next = [...open].sort((a, b) => block(b) - block(a) || a.crewLeg.date.localeCompare(b.crewLeg.date))[0];
+      const leg = next.crewLeg;
+      const clock = next.bid?.landing?.clock ?? next.clock;
       // השאלה על הרכב הצוות כבר נשאלה בבדיקת מגבלות החוק, על ה-FDP של הטיסה הזאת.
-      const pendingLegal = ctx.legalCrewAsked(next.leg);
+      const pendingLegal = ctx.legalCrewAsked(leg);
       ctx.note(null, `${planned}. תחת ההנחה שכל טיסה שעדיין לא נענתה היא בצוות ` +
         `${crewNames}, מגיע פיצוי של ${minToHhmm(hours)}.`, rule);
       // בתכנון לבד הרכב הצוות אינו נשאל (בעל המוצר, 03/10/2026): ההערה כבר אומרת תחת איזו הנחה מגיע פיצוי.
       if (!pendingLegal && ctx.hasExec) ctx.ask({
-        id: `night_crew:${next.leg.date}:${next.leg.flight}`,
-        date: next.leg.date,
-        title: `נחיתת לילה: באיזה צוות מתוכננת ${next.leg.flight} ב-${ddmm(next.leg.date)} (נחיתה ${minToHhmm(next.clock)} שעון ישראל)?`,
+        id: `night_crew:${leg.date}:${leg.flight}`,
+        date: leg.date,
+        title: `נחיתת לילה: באיזה צוות בוצעה ${leg.flight} ב-${ddmm(leg.date)} (נחיתה ${minToHhmm(clock)} שעון ישראל)?`,
         body: `${planned}. על מנת לחשב אם מגיע פיצוי נדרשת תשובה על הרכב הצוות בכל אחת מהטיסות.`,
         options: Object.entries(CREW_LABEL).map(([value, label]) => ({
           value, label: `${label} (${CREW_PILOTS[value]} טייסים)`, hint: crews.includes(value) ? 'נספרת' : 'לא נספרת',
@@ -598,8 +611,12 @@ function night_landings(ctx, params, rule) {
   const counts = counted.length === base.length
     ? `תוכננו ונספרות ${base.length} ${known ? nightWord : 'טיסות לילה'} ${landing}`
     : `${planned}, ונספרות ${counted.length}`;
+  // טיסות שלא בוצעו: הרכב הצוות הוא הצוות החוזי, וההערה אומרת זאת.
+  const byPlan = counted.filter(byContract);
+  const contractNote = !byPlan.length ? '' : ` הרכב הצוות ב-${names(byPlan)}, ${byPlan.length === 1 ? 'שלא בוצעה, הוא' : 'שלא בוצעו, הוא'} ` +
+    `הצוות החוזי (${[...new Set(byPlan.map((n) => CREW_LABEL[crewOf(n)]))].join(' או ')}).`;
   ctx.note(null, `${counts} (${list(counted)}). הפיצוי הוא מהטיסה ה-${threshold} שבוצעה, ` +
-    `ולכן מגיע פיצוי של ${minToHhmm(hours)} על ${names(paying)}.`, rule);
+    `ולכן מגיע פיצוי של ${minToHhmm(hours)} על ${names(paying)}.${contractNote}`, rule);
   paying.forEach((n) => {
     const why = `${ddmm(n.leg.date)} ${n.leg.flight}, נחיתה ${minToHhmm(n.clock)} שעון ישראל: הטיסה ה-${counted.indexOf(n) + 1} מתוך ` +
       `${base.length} מתוכננות עם נחיתת לילה${known ? ` בצוות ${crewNames}` : ''}` +
@@ -1257,6 +1274,19 @@ function contractLimits(fdp, params, domicile) {
 }
 
 /**
+ * הצוות החוזי של רגל מהתכנון, לפי ה-FDP המתוכנן שלה (`ctx.planFdps`): ההרכב הקטן ביותר שהוא עומד
+ * במגבלות ההסכם שלו. null – אין חוק צוות חוזי בתוקף, הרגל אינה ב-FDP, או שאינו עומד באף הרכב.
+ */
+function contractCrewOf(ctx, leg) {
+  const params = ctx.rulesWithLogic('legal_crew_composition')[0]?.logic?.params;
+  const fdp = params && ctx.planFdps?.().find((f) => f.flights.some((x) => x.flight === leg.flight &&
+    Math.abs(Date.parse(x.date) - Date.parse(leg.date)) <= dayMs));
+  if (!fdp) return null;
+  const lim = contractLimits(fdp, params, ctx.domicile);
+  return CREWS.find((c) => lim[c] && fdp.ft <= lim[c].ft && fdp.fdp <= lim[c].fdp && fdp.seg <= lim[c].seg) ?? null;
+}
+
+/**
  * צוות חוקי ולא חוזי (2024 ס' 36): טיסה בהרכב קטן מהצוות החוזי מזכה כל מי שביצע אותה ב-`hours`.
  * הצוות החוזי הוא ההרכב הקטן ביותר שה-FDP המתוכנן עומד במגבלות ההסכם שלו (`contractLimits`).
  * ההסכם מגביל את הפיצוי ל"יעדים או טיסות כפי שיוסכם מעת לעת מול ועד אצ"א", והרשימה אינה בקבצים:
@@ -1337,6 +1367,8 @@ function legal_crew_composition(ctx, params, rule) {
         { explain: `הרומה מזכה את הפיצוי, ו${contract}. האפליקציה מניחה שהטיסה בוצעה בצוות קטן ממנו.` });
     } else if (ctx.hasExec) {
       pending.push(fdp);
+      // נחיתות הלילה כבר שואלות על הרכב הצוות בטיסה מה-FDP הזה, והתשובה עונה גם כאן.
+      if (fdp.flights.some((f) => [0, -1, 1].some((k) => ctx.isAsked(`night_crew:${addDays(f.date, k)}:${f.flight}`)))) continue;
       // מה חורג בהרכב הקטן ממנו: למה זה הצוות החוזי.
       const smaller = CREWS[CREWS.indexOf(need) - 1];
       const l = lim[smaller];

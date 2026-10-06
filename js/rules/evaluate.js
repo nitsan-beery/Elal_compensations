@@ -180,31 +180,32 @@ function evaluateOnce({ rulesData, plan = null, exec = null, answers = {}, histo
   if ((plan || exec) && domicile && rulesData.legal_limits) {
     const leave = new Set(codes.leave ?? []);
     const activity = new Set([...(codes.relevant ?? []).filter((c) => !leave.has(c)), ...(codes.ground_activity ?? [])]);
-    const legal = checkLegalLimits({
-      limits: rulesData.legal_limits, period, plan, exec, history, domicile, fleet,
+    const common = {
+      limits: rulesData.legal_limits, period, plan, history, domicile, fleet,
       offsetAt: (station, date) => stationOffsetAt(ctx, station, date),
       classify: {
         notDuty: (c) => isLeaveCode(c, leave, codes) || isIgnoredPlanCode(c, codes),
         isActivity: (c) => !isLeaveCode(c, leave, codes) && (activity.has(c) || activity.has(expandCode(c, codes)) || c.startsWith('SIM')),
         execCodes: (day) => execCodesOf({ exec: day }, codes),
       },
-      answer: ctx.answer,
-      ask: ctx.ask,
-      crewMatters: ctx.crewMatters,
-      whiteCrew: whiteCrewOf,
       calendarStandby: cal.standby,
-    });
+    };
+    const legal = checkLegalLimits({ ...common, exec, answer: ctx.answer, ask: ctx.ask, crewMatters: ctx.crewMatters, whiteCrew: whiteCrewOf });
     out.legal = legal.result;
     crewIdOf = legal.crewIdOf;
     out.crewIdOf = Object.fromEntries(crewIdOf);
     // ה-FDP בזמנים המתוכננים, לצוות החוזי (`legal_crew_composition`).
     ctx.legalFdps = legal.fdps;
+    // ה-FDP של התכנון, גם כשיש רומה: לצוות החוזי של טיסה שלא בוצעה (נחיתות לילה; בעל המוצר, 06/10/2026).
+    let planFdps = exec ? null : legal.fdps;
+    ctx.planFdps = () => (plan ? planFdps ??= checkLegalLimits({ ...common, exec: null, answer: () => null, ask: () => {} }).fdps : null);
   }
   // מזהה השאלה לפי הרגל בקובץ שנבדק; הרגל מהקובץ השני יכולה להיות רשומה ביום שלידו.
   const near = (date, k) => new Date(Date.parse(date) + k * 864e5).toISOString().slice(0, 10);
   const crewKey = (leg) => [0, -1, 1].map((k) => crewIdOf.get(`${near(leg.date, k)}:${leg.flight}`)).find(Boolean);
   ctx.legalCrewAnswer = (leg) => (crewKey(leg) ? ctx.answer(crewKey(leg)) : null);
   ctx.legalCrewAsked = (leg) => !!crewKey(leg) && out.questions.some((q) => q.id === crewKey(leg));
+  ctx.isAsked = (id) => out.questions.some((q) => q.id === id);
 
   for (const logicId of LOGIC_ORDER) {
     for (const rule of rulesByLogic(supported, logicId)) {

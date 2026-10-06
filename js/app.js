@@ -350,7 +350,7 @@ function renderCalendarBar() {
     const answered = Object.keys(state.record?.answers ?? {}).some((id) => /^(crew|night_crew|white):/.test(id));
     notices.push(`<div class="notice warn">לא נמצאו ביומן טיסות של החודש הזה.${answered ? ' הרכבי הצוותים נלקחו מהתשובות שנתת.' : ''} ודא שבוצע סנכרון של היומן מהאורגנייזר.</div>`);
   }
-  const gaps = state.calGaps?.key === state.record?.key ? state.calGaps.items : [];
+  const gaps = state.calGaps && state.calGaps.key === state.record?.key ? state.calGaps.items : [];
   if (gaps.length) {
     notices.push(`<div class="notice warn">היומן המעודכן שונה ממה שנשמר בחודש הזה:<ul>${gaps.map((g) => `<li>${esc(describeGap(g))}</li>`).join('')}</ul></div>`);
   }
@@ -1029,8 +1029,13 @@ function renderCalendarChanges(res) {
   </details>`;
 }
 
+// לפי תאריך הטיסה או היום שבמזהה, ולא לפי סדר השאלות (בעל המוצר, 06/10/2026). בלי תאריך במזהה – התאריך
+// שנבחר בתשובה (פתיחת שנת הלימודים), ובלי שניהם – בסוף.
+const ISO_DATE = /\d{4}-\d{2}-\d{2}/;
+const answerDate = ([id, a]) => id.match(ISO_DATE)?.[0] ?? String(a?.value ?? '').match(ISO_DATE)?.[0] ?? '9999';
+
 function renderAnswered() {
-  const answers = Object.entries(state.record?.answers ?? {});
+  const answers = Object.entries(state.record?.answers ?? {}).sort((a, b) => answerDate(a).localeCompare(answerDate(b)));
   if (!answers.length) return '';
   return `<details class="card" data-section="answered">
     <summary><h2 style="display:inline">תשובות שנשמרו <span class="count">${answers.length}</span></h2></summary>
