@@ -690,6 +690,15 @@ function cancelStatus(ctx, planPairing) {
   if (!m) return 'unknown';
   if (m.byLeave) return 'no'; // היעדרות ומחלה אינן ביוזמת החברה
   if (m.how === 'replaced_by_ground' || m.how === 'replaced_by_standby') return 'company'; // החברה הציבה אותו לפעילות קרקע או לכוננות
+  // שרשרת מהיומן: השלב הראשון, זה שהוציא את הסבב מהשיבוץ, קובע (`reduceChain`; בעל המוצר, 06/10/2026).
+  const count = ctx.answerFor(m)?.count;
+  if (count) {
+    if (count === 'voluntary_swap') return 'no';
+    if (count === 'bid') return 'bid';
+    if (count === 'other') return 'review';
+    if (count === 'chain_open') return 'unknown';
+    return 'company';
+  }
   const by = (tag) => ctx.pairingHandledBy(planPairing, tag);
   if (by('lost_hours_credit') || by('cancelled_no_compensation')) return 'company';
   if (by('voluntary_swap')) return 'no';
@@ -712,6 +721,8 @@ function bidTarget(ctx, planPairing) {
   const m = ctx.matches.find((x) => x.plan === planPairing);
   const a = m && ctx.answerFor(m);
   if (!a) return null;
+  // שרשרת מהיומן: הסבב שזכה בו בשלב הראשון.
+  if ('countLink' in a) return a.countLink ? ctx.pairingById(a.countLink) : null;
   if ('link' in a) return a.link ? ctx.pairingById(a.link) : null;
   return m.exec ?? null;
 }
@@ -1277,7 +1288,7 @@ function contractLimits(fdp, params, domicile) {
  * הצוות החוזי של רגל מהתכנון, לפי ה-FDP המתוכנן שלה (`ctx.planFdps`): ההרכב הקטן ביותר שהוא עומד
  * במגבלות ההסכם שלו. null – אין חוק צוות חוזי בתוקף, הרגל אינה ב-FDP, או שאינו עומד באף הרכב.
  */
-function contractCrewOf(ctx, leg) {
+export function contractCrewOf(ctx, leg) {
   const params = ctx.rulesWithLogic('legal_crew_composition')[0]?.logic?.params;
   const fdp = params && ctx.planFdps?.().find((f) => f.flights.some((x) => x.flight === leg.flight &&
     Math.abs(Date.parse(x.date) - Date.parse(leg.date)) <= dayMs));

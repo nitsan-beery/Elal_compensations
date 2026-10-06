@@ -170,7 +170,7 @@ export async function fetchFacts(token, calendarIds, timeMin, timeMax) {
 
 /**
  * מאירועי האורגנייזר רק מה שהאפליקציה צריכה, בלי שמות ובלי טלפונים:
- * - flights: לכל רגל בסבב {flight, org, dst, std (UTC), pilots}. `pilots` הוא מספר אנשי הצוות
+ * - flights: לכל רגל בסבב {flight, org, dst, std, sta (UTC), pilots}. `pilots` הוא מספר אנשי הצוות
  *   הפעילים (OPR) ברשימת ה-Cockpit של הסבב; DHD אינו נספר. null כשאין רשימה.
  * - standby: אירוע כוננות (SBY…) {code, start, end}, ב-UTC.
  * פורמט האירוע (03/10/2026): בתיאור "Cockpit:" ושורה לכל איש צוות ("OPR 012345 CAP …"), ואחר כך
@@ -189,12 +189,14 @@ export function parseEvents(items) {
       const y0 = Number(start.slice(0, 4));
       const m0 = Number(start.slice(5, 7));
       for (const line of lines) {
-        const m = line.match(/^\s*\d+\)\s+(\d{1,4})\s+\S+\s+([A-Z]{3})-([A-Z]{3})\s+\[(\d\d)\.(\d\d)\s+(\d\d):(\d\d)/);
+        const m = line.match(/^\s*\d+\)\s+(\d{1,4})\s+\S+\s+([A-Z]{3})-([A-Z]{3})\s+\[(\d\d)\.(\d\d)\s+(\d\d):(\d\d)(?:\s*-\s*(\d\d)\.(\d\d)\s+(\d\d):(\d\d))?/);
         if (!m) continue;
-        const [, num, org, dst, dd, mm, hh, mi] = m;
+        const [, num, org, dst, dd, mm, hh, mi, ed, em, eh, emi] = m;
         // השנה מהאירוע; סבב שחוצה את סוף השנה.
-        const year = Number(mm) < m0 - 6 ? y0 + 1 : Number(mm) > m0 + 6 ? y0 - 1 : y0;
-        flights.push({ flight: `LY${Number(num)}`, org, dst, std: `${year}-${mm}-${dd}T${hh}:${mi}:00.000Z`, pilots });
+        const yearOf = (mon) => (Number(mon) < m0 - 6 ? y0 + 1 : Number(mon) > m0 + 6 ? y0 - 1 : y0);
+        // שעת הנחיתה: לקרדיט ולזמני ה-FDP של סבב שהשתנה ביומן (js/rules/journal.js; בעל המוצר, 06/10/2026).
+        const sta = ed ? `${yearOf(em)}-${em}-${ed}T${eh}:${emi}:00.000Z` : null;
+        flights.push({ flight: `LY${Number(num)}`, org, dst, std: `${yearOf(mm)}-${mm}-${dd}T${hh}:${mi}:00.000Z`, ...(sta && { sta }), pilots });
       }
     } else if (/^SBY/.test(ev.summary ?? '')) {
       const s = utc(ev.start?.dateTime);

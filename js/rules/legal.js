@@ -395,6 +395,31 @@ function limitsFor(crew, ch, limits) {
   return { ft: H(limits.flight_time_augmented[String(pilots)]), fdp: H(row[`class${cls}`][pilots - 3]) - red, seg: limits.augmented_max_segments ?? Infinity };
 }
 
+/**
+ * האם טיסה שנדחתה עדיין ב-FDP המקורי (בעל המוצר, 06/10/2026; `sameAssignment` ב-js/rules/journal.js):
+ * החברה יכולה להעביר לכוננות קצרה מההתייצבות המקורית (7.2.9), והיא אינה ביומן. הכוננות עד
+ * `max_rap_hours`, ה-FDP מההתייצבות החדשה עד המגבלה של הרכב הצוות, בלי הארכה (7.2.10), והכוננות
+ * וה-FDP יחד עד טבלה B ועוד `rap_fdp_extra_hours`, ולא יותר מ-`rap_fdp_max_hours` (7.2.12), כמו
+ * ב-`checkReserve`; בצוות מוגבר או כפול – לפחות המגבלה שלו. כל הזמנים בדקות, בשעון הבסיס.
+ */
+export function delayFitsFdp(limits, { crew = 'single', ac = null, oldReport, newReport, end, segments }) {
+  const ch = { fdpStart: newReport, acc: 0, notAcclimated: false, flights: Array.from({ length: Math.max(segments, 1) }, () => ({ ac })) };
+  const lim = (crew !== 'single' && limitsFor(crew, ch, limits)) || limitsFor('single', ch, limits);
+  if (end - newReport > lim.fdp) return false;
+  const rap = newReport - oldReport;
+  if (rap <= 0) return true;
+  if (rap > H(limits.max_rap_hours)) return false;
+  const row = tableRow(limits.fdp_unaugmented, clockOf(newReport));
+  const combined = Math.min(H(row.hours[Math.min(ch.flights.length, row.hours.length) - 1] + limits.rap_fdp_extra_hours), H(limits.rap_fdp_max_hours));
+  return end - oldReport <= Math.max(combined, lim.fdp);
+}
+
+/** זמן ההתייצבות בבסיס לפני STD, לפי הצי (`report_minutes_base`). */
+export function baseReportMinutes(limits, ac) {
+  const byFleet = Object.entries(limits.report_minutes_base ?? {}).find(([k]) => k !== 'default' && (ac ?? '').startsWith(k));
+  return byFleet ? byFleet[1] : limits.report_minutes_base?.default ?? 0;
+}
+
 // קטעים לועזיים מבודדים (⁦…⁩), כמו `describePairing`, כדי שבמשפט עברי לא יתערבב סדרם עם מה שסביבם.
 function describeChain(ch) {
   const f = ch.flights;

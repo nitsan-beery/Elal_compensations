@@ -6,6 +6,7 @@ import { parseExec } from './pdf/exec.js';
 import { xlsxBlob } from './xlsx.js';
 import { evaluate, monthCalendar, calendarGaps, crewAnswersInCalendar, relatedCrewIds } from './rules/evaluate.js';
 import { loadRules, partitionRules } from './rules/catalog.js';
+import { appendSnapshot } from './rules/journal.js';
 import { minToHhmm } from './time.js';
 import * as store from './store.js';
 import * as calendar from './calendar.js';
@@ -269,9 +270,16 @@ async function runAndSave() {
   // ההשלמות מהיומן נשמרות בחודש, ונשארות בו גם אחרי ניתוק (בעל המוצר, 04/10/2026). יומן שאין בו
   // דבר מהחודש אינו מוחק את מה שנשמר. טיסה שירדה מהיומן אינה נשמרת (בעל המוצר, 06/10/2026).
   const fresh = monthCalendar(calendarFacts(), r.period);
-  if (fresh?.flights.length || fresh?.standby.length) r.calendar = fresh;
+  if (fresh?.flights.length || fresh?.standby.length) {
+    // לפני הרומה: תמונה של החודש מהיומן, לשרשרת השינויים (`appendSnapshot`; בעל המוצר, 06/10/2026). חודש
+    // שנשמר לפני כן מתחיל מהיומן ששמור בו.
+    if (!r.exec) r.calendarHistory = appendSnapshot(r.calendarHistory ?? (r.calendar ? [r.calendar] : []), fresh);
+    r.calendar = fresh;
+  }
   state.result = evaluate({ rulesData: state.rulesData, plan: r.plan, exec: r.exec, answers: r.answers ?? {}, history: historyFor(r.key, months), calendar: r.calendar ?? null,
-    reopen: r.calendarIgnored ?? [] });
+    reopen: r.calendarIgnored ?? [], calendarHistory: r.calendarHistory ?? null });
+  // שלב שחזר למצב שלפניו יוצא מהשרשרת, יחד עם התשובה עליו (בעל המוצר, 06/10/2026).
+  for (const id of state.result.obsoleteAnswers ?? []) delete r.answers?.[id];
   r.rulesVersion = state.result.rulesVersion;
   r.summary = summarize(state.result);
   await safe(() => store.putMonth(r));
@@ -1209,7 +1217,7 @@ function bindResults(root) {
 function currentSummary(m, months) {
   if (!state.rulesData || !(m.plan || m.exec)) return m.summary ?? {};
   try {
-    return summarize(evaluate({ rulesData: state.rulesData, plan: m.plan, exec: m.exec, answers: m.answers ?? {}, history: historyFor(m.key, months), calendar: m.calendar ?? monthCalendar(calendarFacts(), m.period), reopen: m.calendarIgnored ?? [] }));
+    return summarize(evaluate({ rulesData: state.rulesData, plan: m.plan, exec: m.exec, answers: m.answers ?? {}, history: historyFor(m.key, months), calendar: m.calendar ?? monthCalendar(calendarFacts(), m.period), reopen: m.calendarIgnored ?? [], calendarHistory: m.calendarHistory ?? null }));
   } catch {
     return m.summary ?? {};
   }

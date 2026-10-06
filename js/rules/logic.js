@@ -8,6 +8,7 @@ import { hoursToMin, minToHhmm } from '../time.js';
 import { describePairing, describeRoute, fdpParts } from '../model.js';
 import { stationOffset } from '../airports.js';
 import { DUTY_LOGIC, DUTY_PARAMS, execFdpGroups, amountWord, otherOption, applyOtherReason } from './duty.js';
+import { overlapDays } from './journal.js';
 
 const H = (hours) => hoursToMin(hours) ?? 0;
 
@@ -778,7 +779,9 @@ function higher_of_planned_performed(ctx, params, rule) {
     }
     if (params.excluded_when_special_call && ctx.pairingHandledBy(exec, 'special_call')) continue;
 
-    const diff = plannedMinusPerformed(ctx, match.plan, exec);
+    // בשרשרת מהיומן: הגבוה מבין הסבבים שלא בוצעו (`reduceChain`; בעל המוצר, 06/10/2026).
+    const planned0 = answer?.basis ?? match.plan;
+    const diff = plannedMinusPerformed(ctx, planned0, exec);
     if (diff == null) continue;
 
     // "הגבוה מבין השתיים" הוא סך הכול, לא תוספת על ההשלמה למינימום שהסבב שבוצע מקבל בזכות
@@ -789,7 +792,7 @@ function higher_of_planned_performed(ctx, params, rule) {
     const extra = diff - alreadyMinSlip;
 
     // הערה בכל החלפה ביוזמת החברה, גם כשהטיסה שבוצעה ארוכה יותר ואין הפרש (בעל המוצר, 29/09/2026).
-    const planned = ctx.plannedCredit(match.plan);
+    const planned = ctx.plannedCredit(planned0);
     const performed = planned - diff;
     // ההערה היא כותרת בלבד, בלי סכומים: ההשוואה והתוספת בטבלת הפירוט, בשורה של התוספת. רק כשאין
     // שורה כזאת ההערה אומרת למה: הטיסה שבוצעה היא הארוכה, או שההפרש כבר בהשלמה לסליפ קצר
@@ -820,7 +823,7 @@ function higher_of_planned_performed(ctx, params, rule) {
       (alreadyMinSlip ? ` מתוך ההפרש, ${minToHhmm(alreadyMinSlip)} כבר בהשלמה לסליפ קצר.` : '') +
       (moved ? ` הקרדיט הזה מופיע ברומה ב-${dayOf(moved.from)}.` : '');
     ctx.expectPairing(paidOn ?? exec, column, extra, rule,
-      `המתוכנן (${describePairing(match.plan)}) גבוה מהמבוצע. ${why}${where}.`, { explain, ...(moved ? { forPlan: match.plan.id, showOn: exec.id } : {}) });
+      `המתוכנן (${describePairing(planned0)}) גבוה מהמבוצע. ${why}${where}.`, { explain, ...(moved ? { forPlan: match.plan.id, showOn: exec.id } : {}) });
   }
 }
 
@@ -865,23 +868,28 @@ function lost_hours_credit(ctx, params, rule) {
       continue;
     }
 
-    const lost = lostHours(ctx, match.plan, params);
-    if (lost == null) { ctx.review(`${describePairing(match.plan)}: אין שעות מתוכננות בקובץ, לא ניתן לחשב את השעות שהפסיד.`, rule); continue; }
+    // בשרשרת מהיומן: השעות של הגבוה מבין הסבבים, ביום של הסבב שממנו הורד (`reduceChain`; בעל המוצר, 06/10/2026).
+    const from = answer?.basis ?? match.plan;
+    const removed = answer?.lostOn ?? match.plan;
+    const lost = lostHours(ctx, from, params);
+    if (lost == null) { ctx.review(`${describePairing(from)}: אין שעות מתוכננות, לא ניתן לחשב את השעות שהפסיד.`, rule); continue; }
     const key = params.credit_column === 'Rig' ? 'rig' : 'credit';
     const why = assumed
       ? `הרומה מזכה את השעות שהפסיד, והסיבה אינה בקבצים (${assumed.labels})`
       : params.answer_label;
-    const note = `${describePairing(match.plan)}: ${why}. השעות שהפסיד` +
+    const note = `${describePairing(removed)}: ${why}. השעות שהפסיד` +
       (match.exec ? `, בנוסף לקרדיט של ${describePairing(match.exec)}.` : '.');
     // ההסבר בשורת הפירוט קצר (בעל המוצר, 01/10/2026). כשהרומה זיכתה בלי שנשאלה שאלה: "…האפליקציה מניחה:"
     // ושם החוק, שאינו כתוב עוד בתגית (04/10/2026); כשכמה חוקים מתאימים, כולם בשמם.
     // אחרי תשובה: בלי הסבר, ועל טיסה שבוצעה במקום – של איזו טיסה השעות.
     const explain = assumed
       ? `הרומה מזכה את השעות והסיבה אינה בקבצים. האפליקציה מניחה${assumed.titles.length > 1 ? ` אחת מאלה: ${assumed.titles.join(' או ')}` : `: ${assumed.titles[0]}`}.`
-      : match.exec ? `השעות של ${describePairing(match.plan)}.` : '';
+      : match.exec ? `השעות של ${describePairing(from)}.` : from !== removed ? `השעות של ${describePairing(from)}.` : '';
     if (match.exec) ctx.expectPairing(match.exec, key, lost, rule, note, { explain });
     // בלי טיסה שבוצעה, שורת הפירוט מציגה את הטיסה שתוכננה (בעל המוצר, 29/09/2026).
-    else ctx.expect(assumed?.date ?? match.plan.from, key, lost, rule, note, { plannedRoute: describeRoute(match.plan), explain });
+    // `chainFor`: ביום של שלב אחר בשרשרת, אבל שייך לשינוי של הסבב המתוכנן (`explainChanges`).
+    else ctx.expect(assumed?.date ?? removed.from, key, lost, rule, note, { plannedRoute: describeRoute(removed), explain,
+      ...(removed !== match.plan && { chainFor: match.plan.id }) });
     ctx.markPairing(match.plan, 'lost_hours_credit');
     for (const v of assumed?.values ?? []) ctx.assumeAnswer(match.plan, v);
   }
@@ -992,7 +1000,7 @@ function voluntary_swap(ctx, params, rule) {
  * בשאלה.
  */
 function cancelled_no_compensation(ctx, params, rule) {
-  askCalendarChanges(ctx, rule);
+  askJournal(ctx, rule);
   checkLinkConflicts(ctx, rule);
   for (const match of ctx.matches) {
     if (!match.plan || (match.how !== 'cancelled' && match.how !== 'dates')) continue;
@@ -1204,7 +1212,7 @@ function noteCancelled(ctx, match, rule, why) {
  */
 function whatHappenedOptions(ctx, plan, exec, calendar = null) {
   const diff = plannedMinusPerformed(ctx, plan, exec);
-  // בתכנון לבד הסבב שבמקומו הוא זה שביומן (`askCalendarChanges`), והוא עוד לא בוצע.
+  // בתכנון לבד הסבב שבמקומו הוא זה שביומן (`askJournal`), והוא עוד לא בוצע.
   const other = exec ?? calendar;
   const performed = ctx.hasExec ? 'הטיסה שבוצעה' : 'הטיסה שביומן';
   const shortfall = ctx.rulesWithLogic('higher_of_planned_performed')[0]?.logic?.params?.shortfall_column ?? 'COM';
@@ -1254,51 +1262,114 @@ function askWhatHappened(ctx, match, rule) {
 }
 
 /**
- * בתכנון לבד, כשהיומן מראה שסבב מתוכנן השתנה – ביומן סבב אחר באותם ימים, הסבב ביומן בתאריך אחר
- * (`cal_moved`), או שהסבב אינו ביומן –
- * נשאלת כבר עכשיו הסיבה (בעל המוצר, 06/10/2026), באותה שאלה ובאותו מזהה כמו מול הרומה
- * (`cancelled:`), עם הסבבים שביומן במקום אלה שבוצעו. הקרדיט והפיצויים נשארים לפי התכנון: התשובה
- * נשמרת, מוצגת מתחת לשינוי (`answerNote`), וחלה כשהרומה מועלית, אם הסבב באמת לא בוצע כמתוכנן
- * (`linksToExec` ב-js/rules/evaluate.js). כוננות במקום הסבב אינה נשאלת: מול הרומה היא "בוטל והוצבת
- * לכוננות", בלי שאלה.
+ * יומן השינויים מהיומן המחובר (`ctx.journal`, js/rules/journal.js; בעל המוצר, 06/10/2026).
+ * בתכנון לבד: על כל שלב בלי תשובה – סבב שנעלם מהיומן, ביומן במקומו סבב אחר או אותו סבב בתאריך אחר –
+ * נשאלת הסיבה, באותה שאלה ובאותו מזהה כמו מול הרומה (`cancelled:`), עם הסבבים שביומן במקום אלה
+ * שבוצעו; ועל כל סבב ביומן שאינו המשך של שלב – אותה שאלה כמו על פעילות שלא תוכננה (`unplanned:`).
+ * כוננות במקום הסבב אינה נשאלת: מול הרומה היא "בוטל והוצבת לכוננות", בלי שאלה. הקרדיט והפיצויים
+ * נשארים לפי התכנון עד שהרומה מועלית. עם הרומה: על סבב ביומן שהשרשרת נעצרה בו נשאלת השאלה מול
+ * הרומה (`ctx.journalOpen`). בשני המקרים לכל שלב שנענה נבנה התיאור שמתחת לשינוי (`note`).
  */
-function askCalendarChanges(ctx, rule) {
-  for (const c of ctx.calendarChanges ?? []) {
-    if (!c.planPairing || c.how === 'cal_standby') continue;
-    const plan = c.planPairing;
-    const cal = c.calPairings[0] ?? null;
-    const answer = ctx.answerFor({ plan, exec: null, how: 'cancelled' });
-    if (answer) {
-      c.answerNote = calendarAnswerNote(ctx, plan, cal, answer);
-      continue;
-    }
+function askJournal(ctx, rule) {
+  const j = ctx.journal;
+  if (!j) return;
+  for (const st of j.steps) st.note = stepNote(ctx, st);
+  for (const n of j.unplanned) n.note = unplannedNote(ctx, n);
+  if (ctx.hasExec) {
+    for (const o of ctx.journalOpen ?? []) askChainOpen(ctx, o, rule);
+    return;
+  }
+  const label = (p) => ({ id: p.id, label: describePairing(p) });
+  const newOnes = j.unplanned.map((n) => ({ ...label(n.pairing), id: n.id }));
+  for (const st of j.open) {
+    if (st.answer) continue;
+    const p = st.fromPairing;
+    const cal = st.candidates[0] ?? null;
+    // סבב מתוכנן, או סבב שהשרשרת כבר עברה אליו ביומן.
+    const planned = st.node.plan;
+    const was = planned ? 'תוכנן ' : 'היה ביומן ';
+    const now = planned ? ', ביומן ' : ', עכשיו ביומן ';
+    const plan = { ...p, id: st.node.id };
     ctx.ask({
-      id: `cancelled:${plan.id}`,
-      date: plan.from,
+      id: st.id,
+      date: p.from,
       execId: cal?.id ?? null,
-      title: c.how === 'cal_moved'
-        ? ['סבב מתוכנן שביומן הוא בתאריך אחר:\n', { bold: true, text: 'תוכנן ' }, describePairing(plan),
-            { bold: true, text: ', ביומן ' }, describePairing(cal)]
+      title: st.how === 'moved' || st.how === 'retimed'
+        ? [`${planned ? `סבב מתוכנן שביומן הוא ${st.how === 'moved' ? 'בתאריך אחר' : 'בשעה אחרת, מחוץ ל-FDP המקורי'}`
+            : `סבב שביומן עבר ${st.how === 'moved' ? 'לתאריך אחר' : 'לשעה אחרת, מחוץ ל-FDP המקורי'}`}:\n`,
+            { bold: true, text: was }, describePairing(p), { bold: true, text: now }, describePairing(cal)]
         : cal
-        ? ['סבב מתוכנן שביומן רשום במקומו סבב אחר:\n', { bold: true, text: 'תוכנן ' }, describePairing(plan),
-            { bold: true, text: ', ביומן ' }, c.calPairings.map(describePairing).join(', ')]
-        : `סבב מתוכנן שאינו ביומן: ${describePairing(plan)}`,
+          ? [planned ? 'סבב מתוכנן שביומן רשום במקומו סבב אחר:\n' : 'סבב שביומן, ועכשיו רשום במקומו סבב אחר:\n', { bold: true, text: was },
+              describePairing(p), { bold: true, text: now }, st.candidates.map(describePairing).join(', ')]
+          : planned ? `סבב מתוכנן שאינו ביומן: ${describePairing(p)}` : `סבב שירד מהיומן: ${describePairing(p)}`,
       body: 'הסיבה אינה בקבצים, והיא תקבע מה מגיע כשתועלה הרומה. מה קרה?',
       options: [...whatHappenedOptions(ctx, plan, null, cal), otherOption()],
+      linkPool: [...st.candidates.map(label), ...newOnes.filter((x) => !st.candidates.some((c) => c.id === x.id))],
+      ruleId: rule.id,
+    });
+  }
+  const gone = j.open.filter((st) => !st.answer).map((st) => ({ id: st.node.id, label: describePairing(st.fromPairing) }));
+  for (const n of j.unplanned) {
+    ctx.ask({
+      id: `unplanned:${n.id}`,
+      date: n.pairing.from,
+      title: `ביומן סבב שאינו בתכנון: ${describePairing(n.pairing)}`,
+      body: 'הסיבה אינה בקבצים, והיא תקבע מה מגיע כשתועלה הרומה. מה קרה?',
+      options: [
+        { value: 'special_call', label: 'קריאה מיוחדת' },
+        { value: 'voluntary_swap', label: 'החלפה מרצוני', needsLink: true },
+        otherOption(),
+      ],
+      linkPool: gone,
       ruleId: rule.id,
     });
   }
 }
 
-/** התשובה על סיבת השינוי, בלשון האפשרות שנבחרה, עם הטיסה שבקישור. */
-function calendarAnswerNote(ctx, plan, cal, answer) {
-  const opt = whatHappenedOptions(ctx, plan, null, cal).find((o) => o.value === answer.value);
-  const label = answer.value === 'other' ? `סיבה אחרת${answer.text ? `: ${answer.text}` : ''}` : opt?.label ?? answer.value;
-  if (!opt?.needsLink || answer.link === undefined) return `${label}.`;
-  const linked = answer.link === 'none' ? 'מסירת הטיסה ללא חלופה'
-    : answer.link ? (ctx.calendarPairingById(answer.link) ? describePairing(ctx.calendarPairingById(answer.link)) : answer.link)
-    : 'טיסה בחודש אחר';
-  return `${label}: ${linked}.`;
+/**
+ * עם הרומה, כשהשרשרת מהיומן נעצרה בסבב שביומן ולא ידוע מה קרה בו: אותה שאלה כמו על סבב מתוכנן
+ * שלא בוצע, על הסבב שביומן (בעל המוצר, 06/10/2026). התשובה היא השלב האחרון בשרשרת.
+ */
+function askChainOpen(ctx, open, rule) {
+  const p = { ...open.pairing, id: open.id };
+  const exec = ctx.execPairings.find((e) => overlapDays(p, e)) ?? null;
+  const diff = plannedMinusPerformed(ctx, p, exec);
+  ctx.ask({
+    id: `cancelled:${open.id}`,
+    date: p.from,
+    execId: exec?.id ?? null,
+    title: exec
+      ? ['סבב שביומן, ובמקומו בוצע סבב אחר באותם ימים:\n', { bold: true, text: 'ביומן ' }, describePairing(p),
+          { bold: true, text: ', בוצע ' }, describePairing(exec)]
+      : `סבב שביומן ולא בוצע: ${describePairing(p)}`,
+    body: 'הסבב הוא שלב בשינויים שהיומן הראה מהתכנון. ' + (diff != null && diff > 0 ? `הוא ארוך ממה שבוצע ב-${minToHhmm(diff)}. ` : '') +
+      'הסיבה אינה בקבצים, והיא קובעת מה מגיע. מה קרה?',
+    options: [...whatHappenedOptions(ctx, p, exec), otherOption()],
+    ruleId: rule.id,
+  });
+}
+
+/** שלב בשרשרת לטבלת השינויים: מה היה, לאן עבר, ובלשון האפשרות שנבחרה. */
+function stepNote(ctx, st) {
+  const from = describePairing(st.fromPairing);
+  if (!st.answer) return st.end === 'standby' ? `${from}: ביומן רשומה כוננות במקום הסבב` : null;
+  const a = st.answer;
+  const to = st.to?.pairing ?? (a.link && a.link !== 'none' ? ctx.pairingById(a.link) : null);
+  const opt = whatHappenedOptions(ctx, { ...st.fromPairing, id: st.node.id }, null, st.candidates[0] ?? null).find((o) => o.value === a.value);
+  const label = a.value === 'other' ? `סיבה אחרת${a.text ? `: ${a.text}` : ''}` : opt?.label ?? a.value;
+  const where = to ? describePairing(to) : opt?.needsLink ? (a.link === 'none' ? 'מסירת הטיסה ללא חלופה' : 'טיסה בחודש אחר') : null;
+  return `${from}${where ? ` → ${where}` : ''}: ${label}`;
+}
+
+/** התשובה על סבב ביומן שאינו בתכנון, לטבלת השינויים. */
+function unplannedNote(ctx, n) {
+  const a = ctx.answer(`unplanned:${n.id}`);
+  if (!a) return null;
+  if (a.value === 'special_call') return 'קריאה מיוחדת';
+  if (a.value === 'other') return `סיבה אחרת${a.text ? `: ${a.text}` : ''}`;
+  if (a.value !== 'voluntary_swap') return a.value;
+  const gone = ctx.journal.steps.find((st) => st.node.id === a.link);
+  return `החלפה מרצוני: ${gone ? describePairing(gone.fromPairing) : a.link ? a.link : 'טיסה בחודש אחר'}`;
 }
 
 // ---------- שינויים בפעילות שאינה טיסה ----------

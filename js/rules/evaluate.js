@@ -11,8 +11,9 @@ import { rulesInEffect, partitionRules, rulesByLogic, classifyCode } from './cat
 import { buildTimeline, buildPairings, markCarryIn, matchPairings, describePairing, describeRoute, pairingParts, fdpParts } from '../model.js';
 import { hoursToMin, minToHhmm } from '../time.js';
 import { OPTIONAL_COLUMNS } from '../pdf/exec.js';
-import { checkLegalLimits, restDefinition } from './legal.js';
-import { stationOffsetAt, whiteFlightLegs, whiteCrew } from './duty.js';
+import { checkLegalLimits, restDefinition, delayFitsFdp, baseReportMinutes } from './legal.js';
+import { stationOffsetAt, whiteFlightLegs, whiteCrew, contractCrewOf } from './duty.js';
+import { calendarView, buildJournal, reduceChain, sameAssignment, firstFdpLegs, overlapDays, samePairing } from './journal.js';
 import { baseTime } from '../airports.js';
 
 /** עמודות הדוח שכל סוג ציפייה נבדק מולן. */
@@ -43,9 +44,13 @@ const CREDIT_LABEL_COLUMNS = ['Credit', 'FLT+DH', 'Rig'];
  *        אותו (`parseEvents` ב-js/calendar.js): הרכב הצוות ושעות הכוננות. תשובה של המשתמש קודמת להן.
  * @param {string[]} [input.reopen]  שאלות שהיומן אינו עונה עליהן, כי המשתמש החליט בהן בעצמו
  *        (`calendarIgnored` ברשומת החודש; בעל המוצר, 04/10/2026).
+ * @param {Array<{flights, standby}>} [input.calendarHistory]  התמונות של החודש מהיומן לפני הרומה,
+ *        לפי הסדר (`appendSnapshot` ב-js/rules/journal.js). בלעדיהן – היומן עצמו כתמונה אחת.
  */
-export function evaluate({ rulesData, plan = null, exec = null, answers = {}, history = [], calendar = null, reopen = [] }) {
+export function evaluate({ rulesData, plan = null, exec = null, answers = {}, history = [], calendar = null, reopen = [], calendarHistory = null }) {
   calendar = withoutKept(calendar);
+  // התשובות שהשרשרת מהיומן קובעת נוספות לכאן (`applyJournal`).
+  answers = { ...answers };
   if (!plan && !exec) throw new Error('לא הועלה אף קובץ.');
   const period = (exec ?? plan).period;
   const mode = plan && exec ? 'full' : plan ? 'plan' : 'exec';
@@ -77,13 +82,11 @@ export function evaluate({ rulesData, plan = null, exec = null, answers = {}, hi
   const fdp = slip?.legal_rest_hours != null
     ? { legalRestMin: slip.legal_rest_hours * 60, reportMin: slip.report_minutes_before_std ?? 0, postMin: legalRest?.postMin ?? 0 } : null;
   const execPairings = exec ? buildPairings(timeline, domicile, (d) => d.exec?.legs, fdp) : [];
-  // תשובה על סיבת השינוי שניתנה בתכנון לבד, מול היומן: הקישור שלה עובר לסבב שבוצע (`linksToExec`).
-  if (exec) answers = linksToExec(answers, execPairings, calendar, domicile, period);
   const dependentAnswers = {};
-  const matches = mode === 'full'
-    ? splitSwappedElsewhere(matchPairings(planPairings, execPairings), answers, dependentAnswers)
+  // ההחלפות עם טיסה אחרת (`splitSwappedElsewhere`) והפעילות במקום סבב (`explainByActivity`) – אחרי
+  // שהשרשרת מהיומן הוסיפה את התשובות שלה, לפני החוקים.
+  const matches = mode === 'full' ? matchPairings(planPairings, execPairings)
     : mode === 'exec' ? execPairings.map((e) => ({ plan: null, exec: e, how: 'noplan' })) : [];
-  explainByActivity(matches, timeline, codes, sickCodeTest(supported), movableCodeTest(supported));
 
   const out = {
     period,
@@ -96,7 +99,7 @@ export function evaluate({ rulesData, plan = null, exec = null, answers = {}, hi
       unsupported: unsupported.map(({ rule, reason }) => ({ id: rule.id, title: rule.title, category: rule.category, reason })),
     },
     warnings,
-    changes: matches.map(describeMatch),
+    changes: [],
     expectations: [],
     flags: [],
     tabs: [],
@@ -112,30 +115,12 @@ export function evaluate({ rulesData, plan = null, exec = null, answers = {}, hi
     legal: null,
   };
 
-  // פעילות קרקע במקום סבב: הזיכוי עליה בא מחוק הקוד שלה. קוד שאף חוק נתמך לא מכסה – לבדיקה ידנית.
-  const covered = new Set(supported.flatMap((r) => [...(r.logic.params?.plan_codes ?? []), ...(r.logic.params?.report_codes ?? [])]));
-  const coveredPrefixes = supported.flatMap((r) => [...(r.logic.params?.plan_code_prefixes ?? []), ...(r.logic.params?.report_code_prefixes ?? [])]);
-  const isCovered = (c) => covered.has(c) || coveredPrefixes.some((p) => c.startsWith(p));
-  for (const m of matches) {
-    if (m.how !== 'replaced_by_ground') continue;
-    const uncovered = [...new Set(m.replacedBy.map((r) => r.code))].filter((c) => !isCovered(c));
-    if (!uncovered.length) continue;
-    out.reviews.push({ ruleId: null, ruleTitle: null,
-      message: `${describePairing(m.plan)} הוחלף בפעילות קרקע (${uncovered.join(', ')}). ` +
-        'אין חוק נתמך שקובע מה מגיע במקרה הזה. דורש בדיקה ידנית.' });
-  }
-
   const assumed = new Map(); // planId → ערכי התשובה שהאפליקציה הניחה בלי לשאול
   const ctx = makeContext({ out, timeline, domicile, codes, holidays: rulesData.holidays ?? {}, answers, plan, exec, supported, matches, planPairings,
     period, fleet, fdp, assumed, calendarAnswer: (id) => (reopen.includes(id) ? null : cal.answer(id)), calendarFirstDay: cal.firstDay,
     // בלי דוח ביצוע, הסבבים המתוכננים משמשים לחישוב הקרדיט והרי"ג הצפויים.
     execPairings: exec ? execPairings : planPairings });
   ctx.legalRest = legalRest;
-  // בתכנון לבד: מה שהיומן מראה אחרת מהתכנון. על סבב מתוכנן שהשתנה נשאלת הסיבה (`cancelled_no_compensation`;
-  // בעל המוצר, 06/10/2026).
-  const calView = mode === 'plan' ? calendarView(calendar, domicile, period) : null;
-  ctx.calendarChanges = calView ? calendarChanges(planPairings, calView) : null;
-  ctx.calendarPairingById = (id) => calView?.pairings.find((c) => c.id === id) ?? null;
   // טיסות שהרכב הצוות שלהן משנה את בדיקת מגבלות החוק או את הזכאות לפיצוי, "date|flight": רק עליהן
   // ההודעה על הרכב צוות שחסר ביומן (`calendarMissing`; בעל המוצר, 04/10/2026).
   const crewMatters = new Set();
@@ -188,6 +173,35 @@ export function evaluate({ rulesData, plan = null, exec = null, answers = {}, hi
   ctx.legalCrewAsked = (leg) => !!crewKey(leg) && out.questions.some((q) => q.id === crewKey(leg));
   ctx.isAsked = (id) => out.questions.some((q) => q.id === id);
 
+  // יומן השינויים מהיומן המחובר (בעל המוצר, 06/10/2026; js/rules/journal.js): בתכנון לבד – השאלות על
+  // השינויים (`cancelled_no_compensation`); עם הרומה – השרשרת כתשובה אחת על כל סבב מתוכנן.
+  const journal = plan && domicile ? makeJournal({ ctx, rulesData, planPairings, calendar, calendarHistory, answers, period, domicile, fleet }) : null;
+  ctx.journal = journal;
+  ctx.journalOpen = [];
+  // שינוי תשובה על שלב מוחק גם את התשובות על השלבים שאחריו בשרשרת: הם נשאלו בזכותה.
+  for (const ch of journal?.chains ?? []) {
+    ch.steps.forEach((s, i) => {
+      const later = ch.steps.slice(i + 1).map((x) => x.id);
+      if (later.length) dependentAnswers[s.id] = [...(dependentAnswers[s.id] ?? []), ...later];
+    });
+  }
+  if (journal && mode === 'full') applyJournal(journal, { ctx, matches, execPairings, answers });
+  if (mode === 'full') matches.splice(0, matches.length, ...splitSwappedElsewhere(matches, answers, dependentAnswers));
+  explainByActivity(matches, timeline, codes, sickCodeTest(supported), movableCodeTest(supported));
+  out.changes = matches.map(describeMatch);
+  // פעילות קרקע במקום סבב: הזיכוי עליה בא מחוק הקוד שלה. קוד שאף חוק נתמך לא מכסה – לבדיקה ידנית.
+  const covered = new Set(supported.flatMap((r) => [...(r.logic.params?.plan_codes ?? []), ...(r.logic.params?.report_codes ?? [])]));
+  const coveredPrefixes = supported.flatMap((r) => [...(r.logic.params?.plan_code_prefixes ?? []), ...(r.logic.params?.report_code_prefixes ?? [])]);
+  const isCovered = (c) => covered.has(c) || coveredPrefixes.some((p) => c.startsWith(p));
+  for (const m of matches) {
+    if (m.how !== 'replaced_by_ground') continue;
+    const uncovered = [...new Set(m.replacedBy.map((r) => r.code))].filter((c) => !isCovered(c));
+    if (!uncovered.length) continue;
+    out.reviews.push({ ruleId: null, ruleTitle: null,
+      message: `${describePairing(m.plan)} הוחלף בפעילות קרקע (${uncovered.join(', ')}). ` +
+        'אין חוק נתמך שקובע מה מגיע במקרה הזה. דורש בדיקה ידנית.' });
+  }
+
   for (const logicId of LOGIC_ORDER) {
     for (const rule of rulesByLogic(supported, logicId)) {
       LOGIC[logicId](ctx, rule.logic.params ?? {}, rule);
@@ -200,10 +214,11 @@ export function evaluate({ rulesData, plan = null, exec = null, answers = {}, hi
     }
   }
 
-  attachLinkCandidates(out.questions, matches, ctx, ctx.calendarChanges);
+  attachLinkCandidates(out.questions, matches, ctx);
   showSwaps(out, answers, assumed);
   splitChangesByFdp(out, matches, ctx, fdp);
   explainChanges(out, supported);
+  if (journal && mode === 'full') chainNotes(out, journal, answers);
   explainCompensations(out);
   if (exec) {
     out.comparison = compare({ out, timeline, execPairings, domicile, codes, fdp });
@@ -220,12 +235,10 @@ export function evaluate({ rulesData, plan = null, exec = null, answers = {}, hi
   const opLegs = (legs) => (legs ?? []).filter((l) => l.flight && !l.dh && !l.dhd && l.type !== 'DHO' && l.type !== 'DHX');
   const monthKeys = new Set(timeline.flatMap((d) => opLegs(exec ? d.exec?.legs : d.plan?.legs).map((l) => `${d.date}|${l.flight}`)));
   out.monthFlights = monthKeys.size;
-  // בתכנון לבד: מה שהיומן מראה אחרת מהתכנון (בעל המוצר, 04/10/2026). מתחת לכל סבב שהשתנה – התשובה על
-  // הסיבה, או שהיא ממתינה (בעל המוצר, 06/10/2026).
-  out.calendarChanges = ctx.calendarChanges?.map(({ planPairing, calPairings, answerNote, ...c }) => ({ ...c,
-    notes: answerNote ? [{ message: answerNote, byUser: true }]
-      : out.questions.some((q) => q.id === `cancelled:${c.planId}`) ? [{ message: 'ממתין לתשובה בשאלה על הסבב.', byUser: false }] : [],
-  })) ?? null;
+  // בתכנון לבד: מה שהיומן מראה אחרת מהתכנון (בעל המוצר, 04/10/2026), עם השרשרת מתחת לכל שינוי (06/10/2026).
+  out.calendarChanges = journal && mode === 'plan' ? journalRows(journal, out) : null;
+  // שלבים שחזרו למצב שלפניהם: התשובות עליהם נמחקות מהחודש (בעל המוצר, 06/10/2026).
+  out.obsoleteAnswers = journal?.obsolete ?? [];
   out.calendarCrew = [...monthKeys].filter((k) => cal.has(k.slice(0, 10), k.slice(11))).length;
   // טיסות שבוצעו ואין ביומן הרכב הצוות שלהן, כשביומן יש טיסות מהחודש: כנראה שהיומן לא מעודכן.
   // רק טיסות שהרכב הצוות שלהן נדרש לבדיקת מגבלות החוק או הזכאות לפיצוי (`crewMatters`), ולא
@@ -243,104 +256,111 @@ export function evaluate({ rulesData, plan = null, exec = null, answers = {}, hi
 }
 
 /**
- * סבבי היומן בחודש, שנבנים מהטיסות שבו כמו סבבי התכנון, והכוננויות שבו. `first`–`last`: הטווח
- * שהיומן מכסה בחודש (מהטיסה או הכוננות הראשונה בו ועד האחרונה). null – אין ביומן נתונים מהחודש.
+ * יומן השינויים של החודש (בעל המוצר, 06/10/2026; js/rules/journal.js): מהתמונות שנשמרו מהיומן לפני
+ * הרומה, ובלעדיהן מהיומן עצמו. אותו סבב בין שתי תמונות – אותן טיסות, והזמן החדש עדיין ב-FDP המקורי:
+ * כוננות קצרה מההתייצבות המקורית אפשרית, בלי הארכה, ולפי הצוות החוזי של ה-FDP המתוכנן (`delayFitsFdp`).
+ * null – אין ביומן נתונים מהחודש.
  */
-function calendarView(calendar, domicile, period) {
-  if (!calendar || !domicile) return null;
-  const month = `${period.year}-${String(period.month).padStart(2, '0')}`;
-  const byDate = new Map();
-  for (const f of [...(calendar.flights ?? [])].sort((a, b) => a.std.localeCompare(b.std))) {
-    const t = baseTime(f.std, domicile);
-    if (!t || t.date.slice(0, 7) !== month) continue;
-    if (!byDate.has(t.date)) byDate.set(t.date, []);
-    byDate.get(t.date).push({ flight: f.flight, org: f.org, dst: f.dst });
-  }
-  const standby = (calendar.standby ?? []).map((x) => ({ code: x.code, date: baseTime(x.start, domicile)?.date }))
-    .filter((x) => x.date?.slice(0, 7) === month);
-  const covered = [...byDate.keys(), ...standby.map((x) => x.date)].sort();
-  if (!covered.length) return null;
-  const pairings = buildPairings([...byDate.keys()].sort().map((date) => ({ date, legs: byDate.get(date) })), domicile, (d) => d.legs);
-  return { pairings, standby, first: covered[0], last: covered.at(-1) };
-}
-
-const shiftDate = (date, k) => new Date(Date.parse(date) + k * 864e5).toISOString().slice(0, 10);
-const overlapDays = (a, b, k = 0) => shiftDate(a.from, -k) <= b.to && b.from <= shiftDate(a.to, k);
-/** מספרי הטיסות של סבב, בלי DH: בתכנון `dh`, ברומה `dhd` או DHO/DHX. */
-const pairingFlights = (p) => p.legs.filter((l) => !l.dh && !l.dhd && l.type !== 'DHO' && l.type !== 'DHX' && l.flight)
-  .map((l) => l.flight).sort().join('/');
-/** אותו סבב: מספרי הטיסות זהים, או שהיעדים זהים והתאריכים חופפים, כמו בהתאמה לרומה. */
-const samePairing = (p, c) => pairingFlights(c) === pairingFlights(p) || (overlapDays(p, c) && c.destinations.join('-') === p.destinations.join('-'));
-
-/**
- * שינויים בין התכנון ליומן, כשאין רומה (בעל המוצר, 04/10/2026). הקרדיט והפיצויים נשארים לפי
- * התכנון עד שהרומה מועלית, אבל על סבב מתוכנן שהשתנה ביומן נשאלת הסיבה, והתשובה חלה כשהרומה
- * מועלית (בעל המוצר, 06/10/2026; `cancelled_no_compensation`). סבב מתוכנן זהה לסבב ביומן כשהתאריכים
- * חופפים, ומספרי הטיסות (בלי DH) או היעדים זהים, כמו בהתאמה לרומה (`matchPairings`). קודם מתאימים
- * את כל הזהים. סבב מתוכנן שאין לו זהה ושמספרי הטיסות שלו ביומן בתאריך אחר – "ביומן הסבב בתאריך
- * אחר" (20/10/2026 → 21/10, בעל המוצר, 06/10/2026). ורק אז השאר מושווים לסבבי היומן שנשארו וחופפים
- * להם בתאריכים.
- * רק בטווח שהיומן מכסה בחודש, כדי שסבב שהיומן עוד לא מגיע אליו לא ייראה כמבוטל.
- * `planPairing` ו-`calPairings` (הסבבים ביומן באותם ימים, או הסבב שאינו בתכנון) – לחוקים, ואינם בפלט.
- */
-function calendarChanges(planPairings, view) {
-  const { pairings: calPairings, standby, first, last } = view;
-  const out = [];
-  const used = new Set();
-  const inRange = planPairings.filter((p) => pairingFlights(p) && p.to >= first && p.from <= last);
-  const open = inRange.filter((p) => {
-    const twin = calPairings.find((c) => !used.has(c) && overlapDays(p, c) && samePairing(p, c));
-    if (twin) used.add(twin);
-    return !twin;
-  });
-  const gap = (p, c) => Math.abs(Date.parse(c.from) - Date.parse(p.from));
-  const moved = new Map(open.map((p) => {
-    const c = calPairings.filter((x) => !used.has(x) && pairingFlights(x) === pairingFlights(p)).sort((a, b) => gap(p, a) - gap(p, b))[0];
-    if (c) used.add(c);
-    return [p, c];
-  }));
-  for (const p of open) {
-    const m = moved.get(p);
-    if (m) {
-      out.push({ date: p.from, plan: describePairing(p), planId: p.id, planPairing: p, calPairings: [m],
-        how: 'cal_moved', label: 'ביומן הסבב בתאריך אחר', calendar: describePairing(m) });
-      continue;
-    }
-    const hits = calPairings.filter((c) => !used.has(c) && overlapDays(p, c));
-    hits.forEach((c) => used.add(c));
-    const sby = standby.filter((x) => x.date >= p.from && x.date <= p.to);
-    const base = { date: p.from, plan: describePairing(p), planId: p.id, planPairing: p, calPairings: hits };
-    if (hits.length) out.push({ ...base, how: 'cal_changed', label: 'ביומן רשום סבב אחר', calendar: hits.map(describePairing).join(', ') });
-    else if (sby.length) out.push({ ...base, how: 'cal_standby', label: 'ביומן רשומה כוננות במקום הסבב', calendar: sby.map((x) => `${x.code} ${x.date.slice(8, 10)}/${x.date.slice(5, 7)}`).join(', ') });
-    else out.push({ ...base, how: 'cal_missing', label: 'הסבב אינו ביומן', calendar: null });
-  }
-  for (const c of calPairings) {
-    if (used.has(c)) continue;
-    out.push({ how: 'cal_unplanned', label: 'ביומן סבב שאינו בתכנון', date: c.from, plan: null, planId: null, calendar: describePairing(c),
-      planPairing: null, calPairings: [c] });
-  }
-  return out.sort((a, b) => a.date.localeCompare(b.date));
+function makeJournal({ ctx, rulesData, planPairings, calendar, calendarHistory, answers, period, domicile, fleet }) {
+  const snapshots = (calendarHistory?.length ? calendarHistory : calendar ? [calendar] : []).map(withoutKept);
+  const views = snapshots.map((s) => calendarView(s, domicile, period)).filter(Boolean);
+  if (!views.length) return null;
+  const limits = rulesData.legal_limits;
+  const restMin = hoursToMin(limits?.rest_hours ?? 10);
+  const delayFits = (a, b, s0, s1) => {
+    const legs = firstFdpLegs(b, restMin);
+    const end = legs.at(-1)?.staAbs;
+    if (!limits || end == null) return overlapDays(a, b);
+    const ac = a.legs.find((l) => l.ac)?.ac ?? fleet;
+    const report = baseReportMinutes(limits, ac);
+    const crew = (a.legs[0] && contractCrewOf(ctx, a.legs[0])) ?? 'single';
+    return delayFitsFdp(limits, { crew, ac, oldReport: s0 - report, newReport: s1 - report,
+      end: end + (limits.post_flight_minutes ?? 0), segments: legs.length });
+  };
+  return buildJournal({ planPairings, views, answers, same: (a, b) => sameAssignment(a, b, delayFits) });
 }
 
 /**
- * תשובה על סיבת השינוי שניתנה בתכנון לבד (`cancelled:`), כשהיומן הראה סבב אחר: הקישור שלה הוא לסבב
- * ביומן. כשהרומה מועלית, התשובה חלה (בעל המוצר, 06/10/2026), והקישור עובר לסבב שבוצע שהוא אותו סבב
- * (`samePairing`, בימים חופפים, ביום לכל כיוון). בלי סבב כזה, מה שבוצע שונה ממה שהיה ביומן: התשובה
- * אינה חלה, והשאלה נשאלת שוב מול הרומה. תשובה שניתנה מול הרומה כבר מקשרת לסבב שבה, ואינה משתנה.
+ * כשהרומה מועלית: השרשרת של כל סבב מתוכנן שלא בוצע כמתוכנן היא התשובה על השאלה עליו (`reduceChain`),
+ * ותשובה על סבב חדש ביומן עוברת לסבב שבוצע שהוא אותו סבב. שרשרת שנעצרה בסבב שביומן ולא ידוע מה קרה
+ * בו – השאלה נשאלת עליו מול הרומה (`ctx.journalOpen`). כשהשאלה הפתוחה היא על הסבב המתוכנן עצמו, השאלה
+ * הרגילה עליו נשאלת, בלי תשובה מהשרשרת.
  */
-function linksToExec(answers, execPairings, calendar, domicile, period) {
-  const ids = new Set(execPairings.map((p) => p.id));
-  const stale = Object.entries(answers).filter(([id, a]) => id.startsWith('cancelled:') && a?.link && a.link !== GAVE_AWAY && !ids.has(a.link));
-  if (!stale.length) return answers;
-  const calPairings = calendarView(calendar, domicile, period)?.pairings ?? [];
-  const out = { ...answers };
-  for (const [id, a] of stale) {
-    const c = calPairings.find((p) => p.id === a.link);
-    const e = c && execPairings.find((p) => overlapDays(c, p, 1) && samePairing(c, p));
-    if (e) out[id] = { ...a, link: e.id };
-    else delete out[id];
+function applyJournal(journal, { ctx, matches, execPairings, answers }) {
+  const byExecId = (id) => execPairings.find((p) => p.id === id) ?? null;
+  const toExec = (p) => execPairings.find((e) => overlapDays(p, e, 1) && samePairing(p, e)) ?? null;
+  const credit = (p) => sumSkd(p.legs) || null;
+  const execAnswer = (id) => answers[`cancelled:${id}`] ?? null;
+  for (const ch of journal.chains) {
+    const m = matches.find((x) => x.plan?.id === ch.plan.id);
+    if (!m || m.how === 'exact' || m.how === 'air_return') continue;
+    const eff = reduceChain(ch, { toExec, credit, execAnswer, byExecId });
+    if (!eff || (eff.open && eff.open.id === ch.plan.id)) continue;
+    answers[`cancelled:${ch.plan.id}`] = eff;
+    if (eff.open) ctx.journalOpen.push(eff.open);
+    // התשובות על השלבים שאחרי הסבב המתוכנן כבר בתוך התשובה עליו. בלעדיהן לחוקים: סבב ביומן יכול
+    // להיות עם אותו מזהה כמו סבב ברומה, ותשובה עליו הייתה נראית כתשובה על הסבב שבוצע.
+    for (const s of ch.steps) if (!s.node.plan && !(eff.open && s.node.id === eff.open.id)) delete answers[s.id];
+    if (ch.last && !eff.open) delete answers[`cancelled:${ch.last.id}`];
   }
-  return out;
+  for (const n of journal.unplanned) {
+    const a = answers[`unplanned:${n.id}`];
+    const e = a && toExec(n.pairing);
+    if (e && !answers[`unplanned:${e.id}`]) answers[`unplanned:${e.id}`] = a;
+  }
+}
+
+/**
+ * עם הרומה: מתחת לשינוי של סבב מתוכנן שהשתנה ביומן – השלבים של השרשרת, כל אחד עם התשובה עליו
+ * (`note`, `askJournal` ב-js/rules/logic.js). כשהשלב האחרון עוד פתוח – "ממתין לתשובה".
+ */
+function chainNotes(out, journal, answers) {
+  for (const c of out.changes) {
+    const ch = c.planId && journal.chains.find((x) => x.plan.id === c.planId);
+    const eff = ch && answers[`cancelled:${c.planId}`];
+    if (!eff?.chain) continue;
+    const lines = ch.steps.filter((s) => s.note).map((s) => ({ message: `${s.note}.`, byUser: !!s.answer }));
+    c.notes = eff.value === 'chain_open' ? [...lines, { message: 'ממתין לתשובה בשאלה על הסבב.', byUser: false }] : [...lines, ...(c.notes ?? [])];
+  }
+}
+
+/** תיאור השלב בטבלת השינויים, כשאין עליו עדיין תשובה. */
+const STEP_LABEL = {
+  moved: 'ביומן הסבב בתאריך אחר',
+  retimed: 'ביומן הסבב בשעה אחרת',
+  changed: 'ביומן רשום סבב אחר',
+  standby: 'ביומן רשומה כוננות במקום הסבב',
+  missing: 'הסבב אינו ביומן',
+};
+
+/**
+ * בתכנון לבד: השינויים בין התכנון ליומן, שורה לכל סבב מתוכנן שהשתנה ולכל סבב ביומן שאינו בתכנון
+ * (בעל המוצר, 04/10/2026). מתחת לשורה – השרשרת, שלב אחרי שלב עם התשובה עליו, ו"ממתין לתשובה" כשיש
+ * שלב בלי תשובה (בעל המוצר, 06/10/2026). בצד היומן – הסבב שבו השרשרת נמצאת עכשיו, או מה שביומן
+ * במקום הסבב כשעוד אין תשובה.
+ */
+function journalRows(journal, out) {
+  const rows = [];
+  const pending = (id) => out.questions.some((q) => q.id === id);
+  const sby = (s) => s.standby?.map((x) => `${x.code} ${x.date.slice(8, 10)}/${x.date.slice(5, 7)}`).join(', ') ?? null;
+  for (const ch of journal.chains) {
+    const tail = ch.steps.at(-1);
+    const calendar = ch.last ? describePairing(ch.last.pairing)
+      : tail.answer ? null
+        : tail.how === 'standby' ? sby(tail)
+          : tail.candidates.length ? tail.candidates.map(describePairing).join(', ') : null;
+    const notes = ch.steps.filter((s) => s.note).map((s) => ({ message: `${s.note}.`, byUser: !!s.answer }));
+    if (ch.steps.some((s) => pending(s.id))) notes.push({ message: 'ממתין לתשובה בשאלה על הסבב.', byUser: false });
+    rows.push({ date: ch.plan.from, how: `cal_${tail.how}`, label: ch.steps.length > 1 ? 'כמה שינויים ביומן' : STEP_LABEL[tail.how],
+      plan: describePairing(ch.plan), planId: ch.plan.id, calendar, notes });
+  }
+  for (const n of journal.unplanned) {
+    const id = `unplanned:${n.id}`;
+    rows.push({ date: n.pairing.from, how: 'cal_unplanned', label: 'ביומן סבב שאינו בתכנון', plan: null, planId: null,
+      calendar: describePairing(n.pairing),
+      notes: n.note ? [{ message: `${n.note}.`, byUser: true }] : pending(id) ? [{ message: 'ממתין לתשובה בשאלה על הסבב.', byUser: false }] : [] });
+  }
+  return rows.sort((a, b) => a.date.localeCompare(b.date));
 }
 
 /**
@@ -495,7 +515,10 @@ function makeContext({ out, timeline, domicile, codes, holidays, answers, plan, 
   const linkedSwap = (prefix, pairingId) => {
     const hit = Object.entries(answers).find(([id, a]) =>
       id.startsWith(prefix) && LINKED_VALUES.includes(a.value) && a.link === pairingId);
-    return hit ? { value: hit[1].value, via: hit[0] } : null;
+    if (!hit) return null;
+    // תשובה מהשרשרת ביומן (`reduceChain`): גם מה שהיא קובעת מעבר לערך – הסבב הגבוה, הספירה לס' 40.
+    const { chain, count, countLink, basis, lostOn, endsAt } = hit[1];
+    return { value: hit[1].value, via: hit[0], ...(chain && { chain, count, ...(countLink !== undefined && { countLink }), basis, lostOn, endsAt }) };
   };
 
   const planRanges = plan ? buildPairings(timeline, domicile, (d) => d.plan?.legs) : [];
@@ -1003,7 +1026,7 @@ function explainChanges(out, supported) {
       for (const e of out.expectations) {
         const logic = logicOf.get(e.ruleId);
         if (!CHANGE_DUE_LOGIC.has(logic)) continue;
-        if (e.pairingId ? !ids.includes(e.pairingId) || !own(e.date) : !within(e.date)) continue;
+        if (e.chainFor ? !ids.includes(e.chainFor) : e.pairingId ? !ids.includes(e.pairingId) || !own(e.date) : !within(e.date)) continue;
         // רשום על הטיסה הזאת, אבל שייך להחלפה של סבב מתוכנן אחר (`forPlan`): לא חלק ממה שמגיע עליה,
         // ובפירוט הוא מוצג על הטיסה שהחליפה (10/06/2026: ה-RIG ‏05:10 של ההחלפה של LTN ב-11/06).
         if (e.forPlan && !ids.includes(e.forPlan)) continue;
@@ -1064,12 +1087,17 @@ const LINKED_VALUES = ['voluntary_swap', 'replaced', 'bid'];
  * עם השאלה עליה (קריאה מיוחדת או לא), והסבב המתוכנן – סבב שלא בוצע (בעל המוצר, 03/10/2026;
  * 06/08/2025: ZRH הוחלפה מרצון בטיסה בחודש אחר, ו-NCE בוצעה באותו יום). השאלה על הטיסה שבוצעה
  * תלויה בתשובה על הסבב המתוכנן, ולכן שינוי שלה מוחק גם את התשובה עליה (`dependents`).
+ * כך גם כשהשרשרת מהיומן (`reduceChain`) נגמרת בסבב שאינו בימים של מה שבוצע: הסבב המתוכנן עבר
+ * לימים אחרים, ומה שבוצע בימיו הוא פעילות חדשה (בעל המוצר, 06/10/2026).
  */
 function splitSwappedElsewhere(matches, answers, dependents) {
   return matches.flatMap((m) => {
     if (m.how !== 'dates') return [m];
     const a = answers[`cancelled:${m.plan.id}`];
-    if (!LINKED_VALUES.includes(a?.value) || a.link === undefined || a.link === m.exec.id) return [m];
+    const linked = LINKED_VALUES.includes(a?.value);
+    const elsewhere = linked ? a.link !== undefined && a.link !== m.exec.id
+      : !!a?.chain && !!a.endsAt && a.endsAt !== m.exec && !overlapDays(a.endsAt, m.exec);
+    if (!elsewhere) return [m];
     dependents[`cancelled:${m.plan.id}`] = [`unplanned:${m.exec.id}`];
     return [{ plan: m.plan, exec: null, how: 'cancelled' }, { plan: null, exec: m.exec, how: 'unplanned' }];
   });
@@ -1090,6 +1118,7 @@ const DATES_OUTCOME = {
   swap_777: 'הועבר ל-777 (לא כשיר MFF)',
   other: 'סיבה אחרת',
   diversion: 'סטיה לשדה משנה', // תשובה, או הנחה מהקבצים (`assumeDiversion`)
+  standby: 'בוטל והוצבת לכוננות', // שלב בשרשרת מהיומן (`reduceChain`)
 };
 
 /** ההנחה בלשון התשובות. כמה חוקים יכולים להסביר את אותו זיכוי, ואז כולם מופיעים. */
@@ -1102,6 +1131,8 @@ const CANCELLED_OUTCOME = {
   trainee: 'הורדה מהטיסה ביוזמת החברה',
   swap_777: 'הועבר ל-777 (לא כשיר MFF)',
   replaced: 'הוחלף בטיסה אחרת', // בלי קישור: תשובה שנשמרה בגרסה ישנה
+  standby: 'בוטל והוצבת לכוננות', // שלב בשרשרת מהיומן (`reduceChain`)
+  chain_open: 'ממתין לתשובה',
 };
 
 /**
@@ -1113,21 +1144,24 @@ const CANCELLED_OUTCOME = {
  * כלל: החלפה ביוזמת החברה בלי טיסה אחרת מכוסה באפשרות "הורדתי מהטיסה המקורית"
  * (בעל המוצר, 23/09/2026).
  */
-function attachLinkCandidates(questions, matches, ctx, calChanges = null) {
+function attachLinkCandidates(questions, matches, ctx) {
   const cancelled = matches.filter((m) => m.how === 'cancelled').map((m) => ({ id: m.plan.id, label: describePairing(m.plan) }));
   // פעילות שזוהתה כקריאה מיוחדת (S/C בדוח), או טיסה בסוף כוננות, אינה החלפה.
   const notSwap = ['special_call', 'standby_bid_pending', 'standby_bid', 'standby_activated'];
-  // בתכנון לבד, מול היומן: הסבבים ביומן שאינם בתכנון (בעל המוצר, 06/10/2026).
-  const unplanned = calChanges
-    ? calChanges.filter((c) => c.how === 'cal_unplanned').map((c) => ({ id: c.calPairings[0].id, label: describePairing(c.calPairings[0]) }))
-    : matches.filter((m) => m.how === 'unplanned' && !notSwap.some((t) => ctx.pairingHandledBy(m.exec, t)))
-      .map((m) => ({ id: m.exec.id, label: describePairing(m.exec) }));
+  const unplanned = matches.filter((m) => m.how === 'unplanned' && !notSwap.some((t) => ctx.pairingHandledBy(m.exec, t)))
+    .map((m) => ({ id: m.exec.id, label: describePairing(m.exec) }));
   const otherMonth = { id: null, label: 'טיסה בחודש אחר' };
   const gaveAway = { id: GAVE_AWAY, label: GAVE_AWAY_LABEL };
-  const execLabel = new Map([...matches.filter((m) => m.exec).map((m) => [m.exec.id, describePairing(m.exec)]),
-    ...(calChanges ?? []).flatMap((c) => c.calPairings).map((c) => [c.id, describePairing(c)])]);
+  const execLabel = new Map(matches.filter((m) => m.exec).map((m) => [m.exec.id, describePairing(m.exec)]));
   for (const q of questions) {
     const onCancelled = q.id.startsWith('cancelled:');
+    // בתכנון לבד, מול היומן: השאלה מביאה את הסבבים שביומן (`askJournal`; בעל המוצר, 06/10/2026).
+    if (q.linkPool) {
+      for (const o of q.options ?? []) {
+        if (o.needsLink) o.linkCandidates = [...q.linkPool, otherMonth, ...(onCancelled && !q.execId && o.value === 'voluntary_swap' ? [gaveAway] : [])];
+      }
+      continue;
+    }
     const own = onCancelled && q.execId ? [{ id: q.execId, label: execLabel.get(q.execId) ?? q.execId }] : [];
     const pool = q.id.startsWith('unplanned:') ? cancelled : onCancelled ? [...own, ...unplanned] : [];
     for (const o of q.options ?? []) {
