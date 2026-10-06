@@ -12,7 +12,7 @@ import { buildTimeline, buildPairings, markCarryIn, matchPairings, describePairi
 import { hoursToMin, minToHhmm } from '../time.js';
 import { OPTIONAL_COLUMNS } from '../pdf/exec.js';
 import { checkLegalLimits, restDefinition, delayFitsFdp, baseReportMinutes } from './legal.js';
-import { stationOffsetAt, whiteFlightLegs, whiteCrew, contractCrewOf } from './duty.js';
+import { stationOffsetAt, whiteFlightLegs, whiteCrew, contractCrewOf, planSpan } from './duty.js';
 import { calendarView, buildJournal, reduceChain, sameAssignment, firstFdpLegs, overlapDays, samePairing } from './journal.js';
 import { baseTime } from '../airports.js';
 
@@ -670,6 +670,20 @@ function makeContext({ out, timeline, domicile, codes, holidays, answers, plan, 
     setFreeDays(v) { out.freeDays = v; },
     /** קודים בתכנון שאינם היעדרות, הערה או DUM: פעילות, וגם קוד לא מוכר (לא מניחים שהוא יום פנוי). */
     planActivityCodes: (day) => (day.plan?.codes ?? []).filter((c) => !isLeaveCode(c, leave, codes) && !isIgnoredPlanCode(c, codes)),
+    /**
+     * יום שלא תוכנן בו כלום: בלי פעילות, היעדרות או סבב – גם לא יום שהייה באמצע סבב, או נחיתה מתוכננת
+     * אחרי חצות (03/08/2026 OPO, נחיתה מתוכננת 03:32 ב-04/08).
+     */
+    planFreeDay(date) {
+      const day = dayOf(timeline, date);
+      if (!day || (day.plan?.codes ?? []).some((c) => isLeaveCode(c, leave, codes) || !isIgnoredPlanCode(c, codes))) return false;
+      const d0 = Date.parse(date) / 60000;
+      return !planPairings.some((p) => {
+        if (p.from <= date && date <= p.to) return true;
+        const s = planSpan(p, domicile, timeline[0].date);
+        return (s.start ?? -Infinity) < d0 + 1440 && (s.end ?? Infinity) > d0;
+      });
+    },
 
     /**
      * האם אצ"א היה מוצב לפעילות ביום. בלי קובץ תכנון – לפי תשובת המשתמש, או null.
@@ -944,9 +958,11 @@ function describeMatch(m) {
   };
   // סבב שנוסף ביומן כאילו היה בתכנון (`applyRootChain`).
   const added = m.plan?.addedInCalendar ? (m.exec ? 'סבב שנוסף ביומן, ובמקומו בוצע סבב אחר' : 'סבב שנוסף ביומן ולא בוצע') : null;
+  // אותו סבב, בימים שלא תוכננו (`extendedPairing` ב-js/rules/logic.js): שינוי, ולא "בוצע כמתוכנן".
+  const longer = m.how === 'exact' && (m.exec.from < m.plan.from || m.exec.to > m.plan.to);
   return {
-    how: m.how,
-    label: added ?? labels[m.how] ?? m.how,
+    how: longer ? 'extended' : m.how,
+    label: added ?? (longer ? 'הסבב התארך' : labels[m.how] ?? m.how),
     date: (m.plan ?? m.exec).from,
     planId: m.plan?.id ?? null,
     execId: m.exec?.id ?? null,

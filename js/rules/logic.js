@@ -612,6 +612,7 @@ function special_call(ctx, params, rule) {
     // מיוחדת, בנוסף לגבוה מבין השתיים (`companySwapToFreeDay`; בעל המוצר, 06/10/2026). רק הוספה בהסכמה
     // והחלפה מרצוני אינן מזכות בקריאה מיוחדת.
     const companyLinked = companySwapToFreeDay(match, answer);
+    if (match.plan && !cancelledPlan && !training && !bid && extendedPairing(ctx, params, rule, match, answer)) continue;
     if (reported > 0 || answer?.value === 'special_call' || companyLinked || training || bid || cancelledPlan) {
       ctx.markPairing(match.exec, 'special_call');
       const stay = awayFromBase(match.exec, ctx.domicile, ctx.timeline.at(-1).date);
@@ -667,6 +668,53 @@ function special_call(ctx, params, rule) {
  */
 function companySwapToFreeDay(match, answer) {
   return match?.how === 'unplanned' && !!answer?.via?.startsWith('cancelled:') && ['replaced', 'bid'].includes(answer.value);
+}
+
+/**
+ * סבב שהתארך ליום שלא תוכנן בו כלום (בעל המוצר, 06/10/2026): זו אותה טיסה, עם הפסקה בין הרגליים, ולכן
+ * אין "הגבוה מבין השתיים" – הקרדיט הוא אותו קרדיט – אבל על כל יממה שנוספה מגיעה קריאה מיוחדת, אלא אם
+ * ההארכה הייתה בהסכמה. היממות לפי הספירה של הקריאה המיוחדת (`countSpecialCallDays`), כך שנחיתה
+ * מאוחרת אחרי חצות אינה יממה, ורק יום שלא תוכנן בו כלום (`ctx.planFreeDay`). מעל `over_hours` זו
+ * הארכת שהייה (`stay_extension`), שאינה מגיעה לכאן. הסיבה אינה בקבצים, ולכן נשאלת כשהרומה לא זיכתה.
+ * סבב שהוחלף באותם ימים (`dates`) – רק אחרי התשובה עליו, וגם אז בנוסף לגבוה מבין השתיים.
+ * מחזירה true כשהסבב טופל כאן.
+ */
+function extendedPairing(ctx, params, rule, match, answer) {
+  if (['voluntary_swap', 'added'].includes(answer?.value)) return false;
+  if (match.how === 'dates' && !answer) return false;
+  const { plan, exec } = match;
+  const stay = awayFromBase(exec, ctx.domicile, ctx.timeline.at(-1).date);
+  if (stay.error) return false;
+  const days = countSpecialCallDays(stay, params, exec, ctx.fdp).counted
+    .filter((d) => (d < plan.from || d > plan.to) && ctx.planFreeDay(d));
+  if (!days.length) return false;
+  const id = `extended:${exec.id}`;
+  const a = ctx.answer(id) ?? (ctx.paidOn(exec, params.report_column ?? 'S/C', 'sc', days.length * H(params.hours)) ? { value: 'company' } : null);
+  const list = days.map(dayOf).join(', ');
+  if (!a) {
+    ctx.ask({
+      id,
+      date: exec.from,
+      title: `סבב שהתארך: ${describePairing(exec)}`,
+      body: `הסבב תוכנן ${describePairing(plan)}, והתארך ל-${list}, ${days.length === 1 ? 'יום שלא תוכננה בו' : 'ימים שלא תוכננה בהם'} פעילות. ` +
+        'הרומה לא מזכה קריאה מיוחדת, והיא מגיעה רק כשההארכה לא הייתה בהסכמתך. מה קרה?',
+      options: [
+        { value: 'company', label: 'הסבב הוארך ביוזמת החברה' },
+        { value: 'agreed', label: 'הסבב הוארך בהסכמתי' },
+      ],
+      ruleId: rule.id,
+    });
+    return true;
+  }
+  if (a.value === 'agreed') {
+    ctx.note(days[0], `הסבב התארך: בהסכמתך, ולכן אין קריאה מיוחדת על ${list}.`, rule, { pairingId: exec.id });
+    return true;
+  }
+  for (const d of days) {
+    ctx.expectPairing(exec, 'sc', H(params.hours), rule, `${flightsOf(exec)}: יממה ${dayOf(d)}.`,
+      { date: d, dates: [d], perDay: true, explain: 'הסבב התארך ליום שלא תוכנן בו כלום.' });
+  }
+  return true;
 }
 
 /**

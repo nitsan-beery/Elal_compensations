@@ -1080,7 +1080,7 @@ const QUESTION_KIND = { cancelled: 'סבב שלא בוצע', unplanned: 'פעי�
   crew: 'הרכב הצוות', night_crew: 'הרכב הצוות', white: 'טיסה לבנה', diversion: 'סטיה לשדה משנה', swap_conflict: 'סבב שהוחלף',
   base_rest: 'מנוחה בבסיס', second_activity: 'פעילות נוספת באותו FDP', occasion: 'תאריך מיוחד', night_rounds: 'טיסות סבב לילה עוקבות',
   stay_extension: 'הארכת שהייה', miami_short_rest: 'קיצור מנוחה במיאמי', miami_delay: 'דחייה במיאמי', las_vegas_rest: 'קיצור מנוחה בלאס וגאס',
-  sim_extension: 'הארכת סימולטור' };
+  sim_extension: 'הארכת סימולטור', extended: 'סבב שהתארך' };
 
 /**
  * "diversion:2024-09-23:LY5104" → "סטיה לשדה משנה 23/09 LY5104". בחלק מהמזהים לפני התאריך יש מילה

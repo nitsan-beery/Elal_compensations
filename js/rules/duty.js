@@ -70,7 +70,7 @@ const planBlock = (l) => {
  * זמני סבב מתוכנן לפי קובץ התכנון: יציאה מהבסיס (Off block), חזרה לבסיס (On block)
  * ושעות הטיסה המתוכננות (FT ורגלי DH). צד שאינו בחודש (סבב חתוך) נשאר null.
  */
-function planSpan(pairing, domicile, monthFirst) {
+export function planSpan(pairing, domicile, monthFirst) {
   const out = pairing.legs.find((l) => l.org === domicile && l.dep && !l.dep.foreign);
   const home = pairing.legs.findLast((l) => l.dst === domicile && l.arr && !l.arr.foreign);
   const start = out && !pairing.cutAtStart ? at(out.date, out.dep.min) : null;
