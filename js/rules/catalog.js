@@ -13,13 +13,19 @@ const CACHE_KEY = 'elal.rules.cache';
 /**
  * טוען את החוקים. מנסה רשת, ונופל לעותק השמור על המכשיר כדי שהאפליקציה
  * תעבוד גם בלי חיבור.
- * @returns {Promise<{data: object, source: 'network'|'cache'}>}
+ * ניסיון שני אחרי כשל קצר: ב-Safari שגיאת רשת רגעית (למשל כש-service worker חדש נכנס לפעולה בזמן הטעינה)
+ * אינה אומרת שאין חיבור.
+ * @returns {Promise<{data: object, source: 'network'|'cache', error?: string}>}
  */
 export async function loadRules() {
   try {
-    const res = await fetch(RULES_URL, { cache: 'no-cache' });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const data = await res.json();
+    let data;
+    try {
+      data = await fetchRules();
+    } catch {
+      await new Promise((r) => setTimeout(r, 400));
+      data = await fetchRules();
+    }
     try {
       localStorage.setItem(CACHE_KEY, JSON.stringify(data));
     } catch {
@@ -29,8 +35,14 @@ export async function loadRules() {
   } catch (err) {
     const cached = safeReadCache();
     if (!cached) throw new Error(`לא ניתן לטעון את קובץ החוקים ואין עותק שמור על המכשיר. ${err.message}`);
-    return { data: cached, source: 'cache' };
+    return { data: cached, source: 'cache', error: err.message };
   }
+}
+
+async function fetchRules() {
+  const res = await fetch(RULES_URL, { cache: 'no-cache' });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
 }
 
 function safeReadCache() {

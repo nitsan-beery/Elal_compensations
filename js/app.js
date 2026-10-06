@@ -4,10 +4,11 @@
 import { parsePlan } from './pdf/plan.js';
 import { parseExec } from './pdf/exec.js';
 import { xlsxBlob } from './xlsx.js';
-import { evaluate } from './rules/evaluate.js';
+import { evaluate, monthCalendar, calendarGaps, crewAnswersInCalendar, relatedCrewIds, keepRemovedFlights } from './rules/evaluate.js';
 import { loadRules, partitionRules } from './rules/catalog.js';
 import { minToHhmm } from './time.js';
 import * as store from './store.js';
+import * as calendar from './calendar.js';
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -36,27 +37,38 @@ const dayCounts = (expectations) => DAY_KINDS.map((k) => {
   const n = new Set(expectations.filter((e) => e.key === 'absence' && k.test(e)).map((e) => e.date)).size;
   return n ? (n === 1 ? k.one : `<span class="num">${n}</span> ${k.many}`) : null;
 }).filter(Boolean);
-// תוויות לתשובות שכבר ניתנו. ערך שאינו כאן מוצג כמות שהוא.
+// תוויות לתשובות שנשמרו לפני שהתווית של האפשרות נשמרה איתן (`answer.label`). ערך שאינו כאן מוצג כמות שהוא.
 const ANSWER_LABEL = {
-  special_call: 'קריאה מיוחדת', voluntary_swap: 'החלפה מרצוני', replaced: 'החלפה ביוזמת החברה (כולל זכיה במכרז או סטיה לשדה משנה)',
+  special_call: 'קריאה מיוחדת', voluntary_swap: 'החלפה מרצוני', replaced: 'שינוי ביוזמת החברה', bid: 'זכייה במכרז', diversion: 'סטיה לשדה משנה',
   wet_lease: 'הורדה מהטיסה המקורית', trainee: 'הורדה מהטיסה המקורית', swap_777: 'הטיסה עברה ל-777 (לא כשיר MFF)',
   cancelled: 'הטיסה המקורית בוטלה ללא קרדיט', other: 'סיבה אחרת',
-  yes: 'כן, הייתי מוצב', no: 'לא הייתי מוצב',
+  yes: 'כן', no: 'לא',
   company: 'לבקשת החברה', own: 'ויתור מרצון',
   standby_bid: 'סיום כוננות בגלל זכייה במכרז', standby_activated: 'הפעלת הכוננות', regular_standby: 'מצב הכן רגיל',
+  single: 'צוות בודד (2 טייסים)', augmented: 'צוות מוגבר (3 טייסים)', double: 'צוות כפול (4 טייסים)',
 };
 
+// "כן" ו"לא" שייכים לשאלה, ולא לערך: בלעדי זה תשובה על סטיה לשדה משנה הוצגה "כן, הייתי מוצב" (23/09/2024).
+const ANSWER_LABEL_BY_KIND = { assigned: { yes: 'כן, הייתי מוצב', no: 'לא הייתי מוצב' } };
+
 /** ערך תשובה לתצוגה. תאריך שנבחר ביומן מוצג כיום/חודש. */
-const answerLabel = (v) => ANSWER_LABEL[v] ?? (/^\d{4}-\d{2}-\d{2}$/.test(v) ? ddmm(v) : v);
+const answerLabel = (v, kind = null) => ANSWER_LABEL_BY_KIND[kind]?.[v] ?? ANSWER_LABEL[v] ?? (/^\d{4}-\d{2}-\d{2}$/.test(v) ? ddmm(v) : v);
 
 const state = {
   rulesData: null,
   rulesSource: null,
+  rulesError: null,
   record: null, // רשומת החודש הפתוח
   result: null,
   filter: 'comp',
   notices: [],
   files: {}, // kind → {id: "2026-07:plan", url} של קובץ ה-PDF השמור, ללחיצה על הקובץ באזור ההעלאה
+  sections: { key: null, open: new Map() }, // אילו חלקים בתוצאות של החודש הפתוח פתוחים ואילו מכווצים
+  calendar: null, // חיבור היומן: {clientId, calendars: [{id, name}], manual, hint, facts, synced}, או null
+  calBusy: false,
+  calInfo: false,
+  calGaps: null, // {key, items}: פערים שהעדכון האחרון מהיומן מצא בחודש הפתוח (`calendarGaps`)
+  calError: null,
 };
 
 // ---------- אתחול ----------
@@ -66,22 +78,28 @@ init();
 async function init() {
   setupTabs();
   setupUploads();
+  setupRuleTips();
   registerServiceWorker();
   try {
-    const { data, source } = await loadRules();
+    const { data, source, error } = await loadRules();
     state.rulesData = data;
     state.rulesSource = source;
+    state.rulesError = error;
   } catch (err) {
     showBanner('bad', esc(err.message));
     return;
   }
   if (state.rulesSource === 'cache') {
-    showBanner('warn', `אין חיבור לרשת. החוקים נטענו מהעותק השמור על המכשיר (גרסה ${esc(state.rulesData.rules_version)}).`);
+    showBanner('warn', `לא ניתן היה לטעון את החוקים מהרשת${state.rulesError ? ` (<bdi dir="ltr">${esc(state.rulesError)}</bdi>)` : ''}. הם נטענו מהעותק השמור על המכשיר (גרסה ${esc(state.rulesData.rules_version)}).`);
   }
+  state.calendar = calendarSetting(await safe(() => store.getSetting(CAL_SETTING), null));
   // החודש האחרון שעבדו עליו נפתח אוטומטית.
   const months = await safe(() => store.listMonths(), []);
   if (months.length) await openMonth(months[0].key, { quiet: true });
   else renderResults();
+  // יומן מחובר: ספריית ההתחברות נטענת מראש, כדי שהחלון של גוגל ייפתח מיד בלחיצה. העדכון עצמו רק
+  // בפעולה של המשתמש (`calendarToken`).
+  if (state.calendar) calendar.preload();
 }
 
 function registerServiceWorker() {
@@ -132,7 +150,7 @@ function setupUploads() {
     });
     $('.drop-pick', zone).addEventListener('click', () => input.click());
     input.addEventListener('change', () => {
-      if (input.files[0]) handleFile(input.files[0], zone.dataset.kind);
+      if (input.files[0]) handleFile(input.files[0], zone.dataset.kind, calendarToken());
       input.value = '';
     });
     zone.addEventListener('dragover', (e) => { e.preventDefault(); zone.classList.add('over'); });
@@ -141,7 +159,7 @@ function setupUploads() {
       e.preventDefault();
       zone.classList.remove('over');
       const file = e.dataTransfer.files[0];
-      if (file) handleFile(file, zone.dataset.kind);
+      if (file) handleFile(file, zone.dataset.kind, calendarToken());
     });
   }
 }
@@ -151,7 +169,8 @@ const PARSERS = { plan: parsePlan, exec: parseExec };
 /**
  * קריאת קובץ. אם הקובץ הועלה לאזור הלא נכון, מזהים אותו לפי התוכן ומעבירים.
  */
-async function handleFile(file, expected) {
+/** `calToken`: ההרשאה ליומן שהתבקשה בבחירת הקובץ (`calendarToken`); היומן מתעדכן אחרי הקריאה. */
+async function handleFile(file, expected, calToken = null) {
   if (!state.rulesData) return;
   const zone = $(`.drop[data-kind="${expected}"]`);
   zone.classList.add('busy');
@@ -196,6 +215,7 @@ async function handleFile(file, expected) {
     zone.classList.remove('busy');
     renderUploadState();
   }
+  if (calToken) syncCalendar(calToken);
 }
 
 function renderUploadState() {
@@ -245,12 +265,315 @@ function dropFileLink(kind) {
 
 async function runAndSave() {
   const r = state.record;
-  state.result = evaluate({ rulesData: state.rulesData, plan: r.plan, exec: r.exec, answers: r.answers ?? {} });
+  const months = await safe(() => store.listMonths(), []);
+  // ההשלמות מהיומן נשמרות בחודש, ונשארות בו גם אחרי ניתוק (בעל המוצר, 04/10/2026). יומן שאין בו
+  // דבר מהחודש אינו מוחק את מה שנשמר, וטיסה שירדה מהיומן שומרת את הרכב הצוות שהיה רשום בה (`keepRemovedFlights`).
+  const fresh = monthCalendar(calendarFacts(), r.period);
+  if (fresh?.flights.length || fresh?.standby.length) r.calendar = keepRemovedFlights(fresh, r.calendar);
+  state.result = evaluate({ rulesData: state.rulesData, plan: r.plan, exec: r.exec, answers: r.answers ?? {}, history: historyFor(r.key, months), calendar: r.calendar ?? null,
+    reopen: r.calendarIgnored ?? [] });
   r.rulesVersion = state.result.rulesVersion;
   r.summary = summarize(state.result);
   await safe(() => store.putMonth(r));
   renderUploadState();
   renderResults();
+}
+
+// ---------- יומן (רשות) ----------
+//
+// הנחת היסוד היא שאין יומן, ומה שחסר בקבצים נשאל (בעל המוצר, 03/10/2026). משתמש שמחבר את יומן
+// האורגנייזר מקבל ממנו השלמות בלבד – הרכב הצוות ושעות הכוננות (js/calendar.js) – והן נשמרות על
+// המכשיר בלי שמות. התכנון והביצוע תמיד מהקבצים.
+
+const CAL_SETTING = 'calendar';
+const CAL_CLIENT = 'calendar-client';
+const CAL_NO_DATA = 'לא נמצאו ביומן נתוני סבבים. ייתכן שחובר יומן לא מתאים, או שהיומן מתאים אבל לא בוצע בו סנכרון דרך האורגנייזר.';
+
+const calendarFacts = () => state.calendar?.facts ?? null;
+// חיבור שנשמר לפני 03/10/2026, ליומן אחד.
+const calendarSetting = (c) => (c && !c.calendars ? { ...c, calendars: [{ id: c.calendarId, name: c.calendarName }] } : c);
+const pad2 = (n) => String(n).padStart(2, '0');
+const stamp = (iso) => { const d = new Date(iso); return `${pad2(d.getDate())}/${pad2(d.getMonth() + 1)} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`; };
+
+/**
+ * חלקי שורת היומן המחובר: הטקסט ("יומן מעודכן ל…") והכפתורים, ופרטי היומן. במחשב עם עכבר הפרטים בחלון צף
+ * על הטקסט, ובמכשיר בלי עכבר (אייפד) בלחיצה עליו (בעל המוצר, 03/10/2026).
+ */
+function calendarParts(c) {
+  if (!c) {
+    return { label: '<span class="cal-label">יומן: לא מחובר</span>', buttons: '<button type="button" class="btn" data-cal="connect">חיבור יומן</button>', infoHtml: '' };
+  }
+  const n = state.result?.calendarCrew ?? 0;
+  const when = state.calBusy ? 'מתעדכן…' : c.synced ? `מעודכן ל-${stamp(c.synced)}` : 'עוד לא עודכן';
+  const noData = c.synced && !c.facts?.flights?.length;
+  const info = [`${c.calendars.length === 1 ? 'יומן מחובר' : 'יומנים מחוברים'}: ${c.calendars.map((x) => x.name).join(', ')}`,
+    n ? `הרכב הצוות של ${n} ${state.result?.monthFlights >= n ? `מתוך ${state.result.monthFlights} ` : ''}${n === 1 && !(state.result?.monthFlights >= n) ? 'טיסה' : 'טיסות'} בחודש הזה מהיומן` : ''].filter(Boolean);
+  const hover = matchMedia('(hover: hover)').matches;
+  const label = hover
+    ? `<span class="cal-label" title="${esc(info.join('\n'))}">יומן ${when}</span>`
+    : `<button type="button" class="cal-toggle cal-label" data-cal="info" aria-expanded="${state.calInfo}">יומן ${when}</button>`;
+  const buttons = `${noData ? '<button type="button" class="btn" data-cal="connect">יומן אחר</button>' : ''}
+    <button type="button" class="btn" data-cal="sync" ${state.calBusy ? 'disabled' : ''}>עדכון</button>
+    <button type="button" class="btn" data-cal="disconnect">ניתוק יומן</button>`;
+  const infoHtml = !hover && state.calInfo ? `<div class="small muted cal-info">${info.map(esc).join('<br>')}</div>` : '';
+  return { label, buttons, infoHtml };
+}
+
+function bindCalendar(scope) {
+  if (!scope) return;
+  $('[data-cal="connect"]', scope)?.addEventListener('click', openCalendarDialog);
+  $('[data-cal="info"]', scope)?.addEventListener('click', () => { state.calInfo = !state.calInfo; renderCalendarBar(); });
+  $('[data-cal="sync"]', scope)?.addEventListener('click', () => syncCalendar());
+  $('[data-cal="disconnect"]', scope)?.addEventListener('click', disconnectCalendar);
+}
+
+/** פער בין היומן המעודכן לבין מה שנשמר בחודש, לתצוגה. */
+function describeGap(g) {
+  const crew = (v) => answerLabel(v, 'crew');
+  const what = `⁦${ddmm(g.date)} ${g.flight}⁩`;
+  return g.kind === 'removed'
+    ? `${what}: הטיסה כבר אינה ביומן. קודם: ${crew(g.before)}.`
+    : `${what}: ביומן הקודם ${crew(g.before)}, עכשיו ${crew(g.after)}.`;
+}
+
+/** שורת היומן: בראש התוצאות, ליד שם החודש, כשיש חודש פתוח; אחרת מתחת לאזור ההעלאה. */
+function renderCalendarBar() {
+  const bar = $('#calendar-bar');
+  if (!bar) return;
+  const c = state.calendar;
+  const notices = [];
+  if (state.calError) notices.push(`<div class="notice bad">${esc(state.calError)}</div>`);
+  else if (c?.synced && !c.facts?.flights?.length) notices.push(`<div class="notice warn">${esc(CAL_NO_DATA)}</div>`);
+  // ביומן אין אף טיסה מהחודש הפתוח (בעל המוצר, 04/10/2026).
+  // כשהמשתמש ענה על הרכב הצוות, ההודעה אומרת שההרכבים מהתשובות (בעל המוצר, 04/10/2026).
+  else if (c && !state.calBusy && state.result?.calendarNoMonth) {
+    const answered = Object.keys(state.record?.answers ?? {}).some((id) => /^(crew|night_crew|white):/.test(id));
+    notices.push(`<div class="notice warn">לא נמצאו ביומן טיסות של החודש הזה.${answered ? ' הרכבי הצוותים נלקחו מהתשובות שנתת.' : ''} ודא שבוצע סנכרון של היומן מהאורגנייזר.</div>`);
+  }
+  const gaps = state.calGaps?.key === state.record?.key ? state.calGaps.items : [];
+  if (gaps.length) {
+    notices.push(`<div class="notice warn">היומן המעודכן שונה ממה שנשמר בחודש הזה:<ul>${gaps.map((g) => `<li>${esc(describeGap(g))}</li>`).join('')}</ul></div>`);
+  }
+  const review = crewReview();
+  if (review.length) notices.push(renderCrewReview(review));
+  // טיסות שבוצעו ואין ביומן הרכב הצוות שלהן: כנראה שהיומן לא מעודכן (בעל המוצר, 04/10/2026).
+  const missing = c && !state.calBusy ? state.result?.calendarMissing ?? [] : [];
+  if (missing.length) {
+    notices.push(`<div class="notice warn">ביומן לא מופיע הרכב הצוות של ${missing.length === 1 ? 'טיסה אחת שבוצעה' : `${missing.length} טיסות שבוצעו`}: ${
+      missing.map((m) => esc(`⁦${ddmm(m.date)} ${m.flight}⁩`)).join(', ')}. ודא שבוצע סנכרון של היומן מהאורגנייזר.</div>`);
+  }
+  const parts = calendarParts(c);
+  if (state.result) {
+    bar.innerHTML = notices.join('');
+    const host = $('#head-cal');
+    if (host) {
+      host.innerHTML = parts.label + parts.buttons;
+      $('#head-cal-info').innerHTML = parts.infoHtml;
+      bindCalendar(host);
+    }
+  } else {
+    bar.innerHTML = `<div class="row">${parts.label}<span class="spacer"></span>${parts.buttons}</div>${parts.infoHtml}${notices.join('')}`;
+  }
+  bindCalendar(bar);
+  for (const btn of bar.querySelectorAll('[data-crew-review]')) btn.addEventListener('click', () => applyCrewReview(btn.dataset.crewReview === 'yes'));
+}
+
+// ---------- תשובות על הרכב הצוות שהיומן עונה עליהן ----------
+
+/** תשובות של המשתמש על הרכב הצוות בחודש הפתוח שהיומן עונה עליהן, ועוד לא הוחלט בהן מולו. */
+function crewReview() {
+  const r = state.record;
+  if (!r || !state.result) return [];
+  return crewAnswersInCalendar({ calendar: r.calendar, answers: r.answers ?? {}, domicile: state.result.domicile, period: r.period, ignored: r.calendarIgnored ?? [] });
+}
+
+/**
+ * תשובות שנשמרו לפני שהיומן הראה את הרכב הצוות: האם לעדכן מהיומן (בעל המוצר, 04/10/2026). כן –
+ * מה שהיומן מאשר עובר אליו, ומה שהוא שונה בו נשאל שוב; לא – התשובות נשארות, וניתנות לשינוי ידני.
+ */
+function renderCrewReview(review) {
+  const n = review.length;
+  const diff = review.filter((x) => x.differs);
+  const kind = (x) => x.id.split(':')[0];
+  const lead = diff.length === n
+    ? (n === 1 ? 'היומן שונה מהתשובה שלך, והשאלה תישאל שוב' : 'בכולן היומן שונה מהתשובה שלך, והן יישאלו שוב')
+    : `ב-${diff.length} מהן היומן שונה מהתשובה שלך, ו${diff.length === 1 ? 'היא תישאל' : 'הן יישאלו'} שוב`;
+  return `<div class="notice warn">ביומן מופיע הרכב הצוות של ${n === 1 ? 'טיסה אחת' : `${n} טיסות`} שכבר ענית עליהן. לעדכן אותן מהיומן?
+    ${diff.length ? `<p class="small">${lead}:</p>
+    <ul>${diff.map((x) => `<li>${esc(describeQuestionId(x.id))}: ענית ${esc(answerLabel(x.answer, kind(x)))}, ביומן ${esc(answerLabel(x.calendar, kind(x)))}</li>`).join('')}</ul>` : ''}
+    <div class="row"><button type="button" class="btn primary" data-crew-review="yes">עדכן מהיומן</button>
+      <button type="button" class="btn" data-crew-review="no">השאר את התשובות שלי</button></div>
+  </div>`;
+}
+
+async function applyCrewReview(update) {
+  const r = state.record;
+  const ignored = new Set(r.calendarIgnored ?? []);
+  const hints = { ...(r.crewHints ?? {}) };
+  for (const x of crewReview()) {
+    const related = relatedCrewIds(x.id, state.result?.crewIdOf);
+    if (update) {
+      delete r.answers[x.id];
+      if (!x.differs) continue;
+      // השאלה נשאלת שוב, עם מה שענית קודם ומה שביומן.
+      for (const id of related) { ignored.add(id); hints[id] = { answer: x.answer, calendar: x.calendar }; }
+    } else {
+      for (const id of related) ignored.add(id);
+    }
+  }
+  r.calendarIgnored = [...ignored];
+  r.crewHints = hints;
+  state.notices = [];
+  await runAndSave();
+}
+
+/**
+ * חלון החיבור: הסבר, הגדרה חד-פעמית של מזהה ההתחברות (כשאין מזהה מובנה), התחברות לגוגל, ואיתור
+ * יומן האורגנייזר. כשלא נמצא יומן עם נתונים – הודעה ובחירה ידנית מרשימת היומנים.
+ */
+async function openCalendarDialog() {
+  const dlg = $('#calendar-dialog');
+  const builtin = calendar.BUILTIN_CLIENT_ID;
+  const saved = builtin || (await safe(() => store.getSetting(CAL_CLIENT), null)) || '';
+  calendar.preload();
+  dlg.innerHTML = `<h2>חיבור יומן</h2>
+    <p class="small muted">היומן נקרא מגוגל ישירות למכשיר הזה, בהרשאת קריאה בלבד. נשמרים רק מספר הטייסים בכל טיסה ופרטי טיסה שלא ניתן למצוא בקבצי התכנון והביצוע, בלי שמות וטלפונים.</p>
+    ${builtin ? '' : `<details dir="ltr" lang="en" ${saved ? '' : 'open'}><summary>One-time setup: Google Client ID</summary>
+      <ol class="small">
+        <li>Open <a href="https://console.cloud.google.com/" target="_blank" rel="noopener">Google Cloud Console</a> and sign in with the Google account that holds your calendar. Click Select a project › New project, enter any name, and click Create. Make sure the new project is selected at the top of the page.</li>
+        <li>In the search bar, type Google Calendar API, open it, and click Enable.</li>
+        <li>Search for Google Auth Platform and click Get started. Enter any app name and your email, choose Audience: External, and click Create.</li>
+        <li>Go to Audience › Test users, click Add users, enter your Gmail address, and click Save.</li>
+        <li>Go to Clients › Create client and choose Web application. Under Authorized JavaScript origins, add ${esc(location.origin)}, then click Create.</li>
+        <li>Copy the Client ID (it ends with .apps.googleusercontent.com) and paste it below.</li>
+      </ol>
+      <p class="small muted">When you sign in, Google will show "Google hasn't verified this app". Click Continue.</p></details>
+    <label>Client ID <input name="clientId" dir="ltr" autocomplete="off" spellcheck="false" value="${esc(saved)}"></label>`}
+    <p class="small">בלחיצה על "התחברות לגוגל" ייפתח חלון של גוגל: בחר את חשבון הגוגל שאליו האורגנייזר מסנכרן את היומן, ואשר את שתי ההרשאות לקריאת היומן.</p>
+    <p class="small muted" dir="auto">אם גוגל מציג <bdi dir="ltr">Google hasn't verified this app</bdi>, לחץ על <bdi dir="ltr">Advanced</bdi> ואז על <bdi dir="ltr">Go to … (unsafe)</bdi>.</p>
+    <p class="small muted"><a href="privacy.html" target="_blank" rel="noopener">מדיניות פרטיות</a></p>
+    <div class="cal-step"></div>
+    <div class="row"><button type="button" class="btn primary" data-cal="login">התחברות לגוגל</button>
+      <button type="button" class="btn" data-cal="close">ביטול</button></div>`;
+  const step = (kind, html) => { $('.cal-step', dlg).innerHTML = html ? `<div class="notice ${kind}">${html}</div>` : ''; };
+  $('[data-cal="close"]', dlg).addEventListener('click', () => dlg.close());
+  $('[data-cal="login"]', dlg).addEventListener('click', async () => {
+    const clientId = (builtin || $('input[name="clientId"]', dlg).value).trim();
+    if (!calendar.CLIENT_ID_PATTERN.test(clientId)) {
+      step('bad', 'ה-<bdi dir="ltr">Client ID</bdi> אינו תקין. הוא מסתיים ב-<bdi dir="ltr">.apps.googleusercontent.com</bdi>.');
+      return;
+    }
+    // החלון של גוגל נפתח מיד, בלי המתנה לפניו בתוך הלחיצה.
+    const pending = calendar.requestToken(clientId, { consent: true });
+    step('info', 'מתחבר לגוגל…');
+    try {
+      const token = await pending;
+      if (!builtin) await safe(() => store.putSetting(CAL_CLIENT, clientId));
+      step('info', 'מחפש את יומן האורגנייזר…');
+      const all = await calendar.listCalendars(token);
+      const { timeMin, timeMax } = await calendarRange();
+      const found = await calendar.findOrganizerCalendars(token, all, timeMin, timeMax);
+      if (found.length) {
+        dlg.close();
+        await connectCalendar(clientId, found);
+        return;
+      }
+      step('warn', `לא נמצאו נתוני סבבים באף יומן בחשבון הזה. ייתכן שנבחר חשבון גוגל לא מתאים, או שלא בוצע סנכרון דרך האורגנייזר.
+        <label>אפשר לבחור יומן בעצמך <select name="calendarId">${all.map((c) => `<option value="${esc(c.id)}">${esc(c.name)}</option>`).join('')}</select></label>
+        <button type="button" class="btn" data-cal="pick">חיבור היומן הזה</button>`);
+      $('[data-cal="pick"]', dlg).addEventListener('click', async () => {
+        const id = $('select[name="calendarId"]', dlg).value;
+        dlg.close();
+        await connectCalendar(clientId, [all.find((c) => c.id === id)], { manual: true });
+      });
+    } catch (err) {
+      step('bad', esc(err.message));
+    }
+  });
+  dlg.showModal();
+}
+
+/** `manual`: יומן שהמשתמש בחר, ולא מחפשים במקומו. אחרת כל עדכון מחפש מחדש (`syncCalendar`). */
+async function connectCalendar(clientId, cals, { manual = false } = {}) {
+  state.calendar = { clientId, calendars: cals.map(({ id, name }) => ({ id, name })), manual, facts: null, synced: null };
+  state.calError = null;
+  await safe(() => store.putSetting(CAL_SETTING, state.calendar));
+  await syncCalendar();
+}
+
+/**
+ * ההשלמות מהיומן לכל החודשים השמורים, ועד חודשיים קדימה. `pending`: ההרשאה (`calendarToken`). היומנים עם אירועי האורגנייזר נמצאים מחדש בכל
+ * עדכון, כי האורגנייזר יכול לפתוח יומן חדש (03/10/2026); בלי ממצא – היומנים שכבר מחוברים.
+ */
+async function syncCalendar(pending = calendarToken()) {
+  const c = state.calendar;
+  if (!c || state.calBusy || !pending) return;
+  state.calBusy = true;
+  state.calError = null;
+  renderCalendarBar();
+  try {
+    const token = await pending;
+    const { timeMin, timeMax } = await calendarRange();
+    let cals = c.calendars;
+    const all = await calendar.listCalendars(token);
+    if (!c.manual) {
+      const found = await calendar.findOrganizerCalendars(token, all, timeMin, timeMax);
+      if (found.length) cals = found.map(({ id, name }) => ({ id, name }));
+    }
+    const facts = await calendar.fetchFacts(token, cals.map((x) => x.id), timeMin, timeMax);
+    // הפערים נבדקים מול החודש הפתוח בלבד (בעל המוצר, 04/10/2026), לפני שהיומן המעודכן נשמר בו.
+    const r = state.record;
+    state.calGaps = r && state.result ? { key: r.key, items: calendarGaps({ prev: r.calendar, fresh: monthCalendar(facts, r.period), domicile: state.result.domicile, period: r.period }) } : null;
+    const hint = all.find((x) => x.primary)?.id ?? c.hint ?? null;
+    state.calendar = { ...c, calendars: cals, hint, facts: { ...facts, from: timeMin }, synced: new Date().toISOString() };
+    await safe(() => store.putSetting(CAL_SETTING, state.calendar));
+  } catch (err) {
+    state.calError = err.message;
+  }
+  state.calBusy = false;
+  if (state.record) await runAndSave();
+  else renderCalendarBar();
+}
+
+/**
+ * היומן מתעדכן רק בפעולה של המשתמש: "עדכון מהיומן", בחירת קובץ ופתיחת חודש שמור (בעל המוצר,
+ * 03/10/2026). ההרשאה מתבקשת מיד, בתוך הפעולה: כשהקודמת פגה גוגל פותח חלון, ודפדפן חוסם חלון שלא
+ * נפתח בתגובה ישירה ללחיצה. null – אין יומן, או שאין הרשאה בתוקף והפעולה כבר אינה נחשבת לחיצה
+ * (גרירת קובץ, או בחירת קובץ אחרי שהלחיצה פגה).
+ */
+function calendarToken() {
+  const c = state.calendar;
+  if (!c || state.calBusy) return null;
+  const token = calendar.cachedToken();
+  if (token) return Promise.resolve(token);
+  if (navigator.userActivation && !navigator.userActivation.isActive) return null;
+  return calendar.requestToken(c.clientId, { hint: c.hint });
+}
+
+async function calendarRange() {
+  const keys = (await safe(() => store.listMonths(), [])).map((m) => m.key).sort();
+  const now = Date.now();
+  const day = 864e5;
+  const first = keys.length ? Date.parse(`${keys[0]}-01T00:00:00Z`) - 2 * day : now - 400 * day;
+  const last = keys.length ? Date.parse(`${keys.at(-1)}-01T00:00:00Z`) + 33 * day : now;
+  return { timeMin: new Date(Math.max(first, now - 760 * day)).toISOString(), timeMax: new Date(Math.max(last, now) + 62 * day).toISOString() };
+}
+
+async function disconnectCalendar() {
+  await calendar.revoke();
+  state.calendar = null;
+  state.calError = null;
+  await safe(() => store.deleteSetting(CAL_SETTING));
+  if (state.record) await runAndSave();
+  else renderCalendarBar();
+}
+
+/**
+ * החודשים שלפני `key`, מהחדש לישן, לחלונות של מגבלות החוק שמתחילים לפני החודש (168 שעות,
+ * 672 שעות, 365 ימים). `months` כבר ממוינים מהחדש לישן.
+ */
+function historyFor(key, months) {
+  return months.filter((m) => m.key < key && (m.plan || m.exec)).map((m) => ({ period: m.period, plan: m.plan ?? null, exec: m.exec ?? null }));
 }
 
 /** שורות ההשוואה שמוצגות. FLT+DH חוזר על הקרדיט של אותן טיסות, ולכן לא מוצג ולא נספר. */
@@ -277,11 +600,65 @@ function shownComparison(res) {
 }
 const isGap = (c) => c.ok === false || c.marks.length > 0;
 
-/** הסיבה לפיצוי שאינו קרדיט (Rig, ‏COM, ‏S/C), ליד שם העמודה: `reason` כשיש, אחרת `short_title` של החוק, אחרת שמו. */
-function reasonOf(c) {
+/**
+ * שורת פיצוי או Rig מוסברת בטבלה עצמה, ולא בהערות (בעל המוצר, 01/10/2026): מתחת לטיסה ההסבר
+ * (`explain` של כל ציפייה). שם החוק מוצג רק כשלוחצים על השורה (`setupRuleTips`).
+ * הסכום אינו בהסבר, כי הוא כבר בשורה; רק כשכמה חוקים חולקים שורה כתוב ליד כל אחד החלק שלו. קריאה
+ * מיוחדת: בלי הסבר. `notes` של השורה: פיצוי שברומה ואף חוק אינו מסביר.
+ */
+function explainOf(c) {
   if (!COMP_COLUMNS.has(c.column)) return '';
-  const reasons = [...new Set(c.items.map((e) => e.reason ?? e.shortTitle ?? e.ruleTitle).filter(Boolean))];
-  return reasons.length ? `<span class="reason">${esc(reasons.join(' · '))}</span>` : '';
+  const share = (e) => (c.items.length > 1 && c.unit !== 'count' ? ` · <span class="num">${minToHhmm(e.min)}</span>` : '');
+  const lines = [
+    ...c.items.map((e) => `${esc(share(e) ? (e.explain ?? '').replace(/\.$/, '') : e.explain ?? '')}${share(e)}`.trim()),
+    ...(c.notes ?? []).map(esc),
+  ];
+  return [...new Set(lines.filter(Boolean))].map((l) => `<div class="explain">${l}</div>`).join('');
+}
+
+// ---------- שם החוק ----------
+
+/** `data-rule` של שורה: שמות החוקים שמסבירים אותה, שם בכל שורה. */
+const ruleAttr = (titles) => {
+  const t = [...new Set(titles.filter(Boolean))];
+  return t.length ? ` data-rule="${esc(t.join('\n'))}"` : '';
+};
+
+// ציור מחדש של התוצאות מסיר את השורה שהחלון מתאר.
+function hideRuleTip() {
+  const tip = $('.rule-tip');
+  if (tip) tip.hidden = true;
+}
+
+/**
+ * שם החוק אינו כתוב בטבלאות ובהערות (בעל המוצר, 04/10/2026): הוא מוצג כשלוחצים על השורה, גם
+ * במחשב ולא בריחוף. לחיצה נוספת, או לחיצה במקום אחר, סוגרת אותו.
+ */
+function setupRuleTips() {
+  const tip = document.createElement('div');
+  tip.className = 'rule-tip no-print';
+  tip.hidden = true;
+  document.body.append(tip);
+  let shownFor = null;
+  const hide = hideRuleTip;
+  const isShown = (el) => !tip.hidden && el === shownFor;
+  const show = (el, x) => {
+    tip.textContent = el.dataset.rule;
+    tip.hidden = false;
+    shownFor = el;
+    const r = el.getBoundingClientRect();
+    const w = tip.offsetWidth;
+    const h = tip.offsetHeight;
+    tip.style.left = `${Math.min(Math.max(8, x - w / 2), innerWidth - w - 8)}px`;
+    tip.style.top = `${r.bottom + h + 8 > innerHeight ? r.top - h - 4 : r.bottom + 4}px`;
+  };
+  document.addEventListener('click', (e) => {
+    const el = e.target.closest?.('[data-rule]');
+    if (!el || e.target.closest('button, a, input, select, textarea, summary, label')) { hide(); return; }
+    if (isShown(el)) hide(); else show(el, e.clientX);
+  });
+  addEventListener('scroll', hide, true);
+  addEventListener('resize', hide);
 }
 
 function summarize(res) {
@@ -295,6 +672,7 @@ function summarize(res) {
       + (res.questions.length ? 0 : res.totals.filter((t) => t.ok === false && t.reported - t.expected !== rowsDiff(t.column)).length),
     reviews: res.reviews.length,
     unknownCodes: res.unknownCodes.length,
+    legal: res.legal?.violations.length ?? 0,
   };
 }
 
@@ -310,13 +688,24 @@ async function openMonth(key, { quiet = false } = {}) {
 
 // ---------- תוצאות ----------
 
-function renderResults() {
+/**
+ * מה שהמשתמש פתח או כיווץ נשאר כך בין ציור לציור של אותו חודש (בעל המוצר, 01/10/2026): שינוי
+ * תשובה, תשובה חדשה וסינון אינם מחזירים את החלקים לברירת המחדל. חודש אחר מתחיל מברירת המחדל.
+ * `keepDom` false: המצב שעל המסך אינו של המשתמש (ההדפסה פותחת הכול), ולכן לא נקרא ממנו.
+ */
+function renderResults(keepDom = true) {
+  hideRuleTip();
   const root = $('#results');
   const res = state.result;
+  const key = state.record?.key ?? null;
+  if (state.sections.key !== key) state.sections = { key, open: new Map() };
+  else if (keepDom) for (const d of root.querySelectorAll('details[data-section]')) state.sections.open.set(d.dataset.section, d.open);
+  renderCalendarBar();
   const parts = [state.notices.map((n) => `<div class="notice ${n.kind}">${esc(n.text)}</div>`).join('')];
   if (!res) { root.innerHTML = parts.join(''); return; }
 
   parts.push(renderHead(res));
+  parts.push(renderLegal(res));
   parts.push(renderAlerts(res));
   parts.push(renderQuestions(res));
   parts.push(renderTotals(res));
@@ -326,23 +715,68 @@ function renderResults() {
   parts.push(renderNotes(res));
   parts.push(renderAnswered());
   root.innerHTML = parts.join('');
+  for (const d of root.querySelectorAll('details[data-section]')) {
+    if (state.sections.open.has(d.dataset.section)) d.open = state.sections.open.get(d.dataset.section);
+  }
   bindResults(root);
 }
 
 function renderHead(res) {
   const r = state.record;
   const emp = r.exec?.employee?.name ?? (r.plan?.employee ? `${r.plan.employee.last} ${r.plan.employee.first ?? ''}` : '');
+  // פרטי החישוב לא על המסך: בחלון צף במעבר עם העכבר, ובמכשיר בלי עכבר (אייפד) בלחיצה על שם החודש. בהדפסה הם מופיעים.
+  const meta = `${MODE_LABEL[res.mode]} · בסיס ${res.domicile ?? '?'}${res.fleet ? ` · צי ${res.fleet}` : ''} · חוקים ${res.rulesVersion}`;
+  const hover = matchMedia('(hover: hover)').matches;
   return `<div class="card">
     <div class="result-head">
-      <h2>${esc(monthName(res.period))}</h2>
-      <span class="meta">${esc(MODE_LABEL[res.mode])} · בסיס ${esc(res.domicile ?? '?')}${res.fleet ? ` · צי ${esc(res.fleet)}` : ''} · חוקים ${esc(res.rulesVersion)}</span>
+      <h2${hover ? ` title="${esc(meta)}"` : ''}>${hover ? '' : '<button type="button" class="cal-toggle" data-action="head-info">'}${esc(monthName(res.period))}${hover ? '' : '</button>'}</h2>
+      <span class="meta head-meta">${esc(meta)}</span>
+      <span class="cal-inline no-print" id="head-cal"></span>
       <span class="spacer"></span>
       <button class="btn no-print" data-action="print">ייצוא PDF</button>
     </div>
+    <div class="no-print" id="head-cal-info"></div>
+    ${hover ? '' : `<p class="small muted no-print" data-head-info hidden>${esc(meta)}</p>`}
     <p class="print-only small">${esc(emp)} · הופק ${esc(new Date().toLocaleDateString('he-IL'))}</p>
     ${res.mode === 'plan' ? '<p class="small muted">בלי קובץ ביצוע אין השוואה מול מה שזוכה. מוצגים הקרדיט והפיצויים הצפויים לפי התכנון.</p>' : ''}
   </div>`;
 }
+
+/**
+ * מגבלות החוק (OMA 7.2), לפי הרומה כשיש ובלעדיה לפי התכנון: חריגה בראש הדף, באדום, ובטבלה היום
+ * שלה מסומן. בביצוע, חריגה שהארכה מותרת יכולה להסביר (7.2.10) – בכתום. בלי שתיהן – ההערה האחרונה
+ * בהערות (`legalNote`; בעל המוצר, 03/10/2026).
+ */
+function renderLegal(res) {
+  const l = res.legal;
+  const ext = l?.extensions ?? [];
+  if (!l?.violations?.length && !ext.length) return '';
+  const list = (items) => `<ul>${items.map((v) => `<li>${esc(v.message)}</li>`).join('')}</ul>`;
+  return `<div class="card">
+    ${l.violations.length ? `<div class="notice bad"><strong>חריגה ממגבלות החוק ${l.basis === 'exec' ? 'בביצוע' : 'בתכנון'}</strong>${list(l.violations)}</div>` : ''}
+    ${ext.length ? `<div class="notice warn"><strong>הארכה בביצוע</strong>${list(ext)}
+      <p class="small list-note">הארכת FDP של עד שעתיים מותרת רק בנסיבות לא צפויות, באישור הקברניט (OMA 7.2.10).</p></div>` : ''}
+  </div>`;
+}
+
+/** ההערה על מגבלות החוק כשאין חריגה: אחרונה בהערות. מה שלא נבדק כתוב בקצרה, כדי שלא ייראה שהכול נבדק. */
+function legalNote(res) {
+  const l = res.legal;
+  if (!l) return null;
+  if (l.skipped) return l.skipped;
+  // בתכנון לבד: באיזה הרכב צוות FDP עומד בחוק, במקום שאלה (בעל המוצר, 03/10/2026).
+  const byCrews = new Map();
+  for (const c of l.crewNeeded ?? []) byCrews.set(c.crews, [...(byCrews.get(c.crews) ?? []), c.what]);
+  const crew = [...byCrews].map(([crews, what]) => `כדי לעמוד בחוק, ${what.length > 1
+    ? `הטיסות ${what.slice(0, -1).join(', ')} ו-${what.at(-1)} נדרשות להיות מבוצעות` : `הטיסה ${what[0]} נדרשת להיות מבוצעת`} בצוות ${crews}.`).join(' ');
+  if (l.violations?.length) return crew || null;
+  const pending = res.questions.filter((q) => q.id.startsWith('crew:')).length;
+  const status = pending
+    ? `נבדקה עמידה בכל מגבלות החוק: אין חריגה, חוץ מ${pending === 1 ? '-FDP אחד שממתין' : `-${pending} FDP שממתינים`} לתשובה על הרכב הצוות.`
+    : `נבדקה עמידה בכל מגבלות החוק: אין חריגה.`;
+  return crew ? `${status} ${crew}` : status;
+}
+
 
 function renderAlerts(res) {
   const out = [];
@@ -357,7 +791,7 @@ function renderAlerts(res) {
       <button class="btn no-print" data-action="copy-codes">העתק פרטים</button></div>`);
   }
   if (res.reviews.length) {
-    out.push(`<div class="notice bad"><strong>לבדיקה ידנית</strong><ul>${res.reviews.map((v) => `<li>${esc(v.message)}${v.ruleTitle ? ` <span class="tag">${esc(v.ruleTitle)}</span>` : ''}</li>`).join('')}</ul></div>`);
+    out.push(`<div class="notice bad"><strong>לבדיקה ידנית</strong><ul>${res.reviews.map((v) => `<li${ruleAttr([v.ruleTitle])}>${esc(v.message)}</li>`).join('')}</ul></div>`);
   }
   return out.length ? `<div class="card">${out.join('')}</div>` : '';
 }
@@ -439,9 +873,13 @@ function renderQuestion(q, i) {
   const picker = q.dateInput ? `<label class="date-pick">בחר תאריך
     <input type="date" name="date" value="${esc(q.dateInput.value)}"${q.dateInput.min ? ` min="${esc(q.dateInput.min)}"` : ''}${q.dateInput.max ? ` max="${esc(q.dateInput.max)}"` : ''} required>
   </label>` : '';
+  const hint = state.record?.crewHints?.[q.id];
+  const kind = q.id.split(':')[0];
   return `<div class="question">
     <h3>${titleHtml(q.title)}</h3>
     ${q.body ? `<p>${esc(datesFirst(q.body))}</p>` : ''}
+    ${hint ? `<p class="small muted">ענית קודם ${esc(answerLabel(hint.answer, kind))}, וביומן ${esc(answerLabel(hint.calendar, kind))}.</p>` : ''}
+    ${q.calendarBefore && !hint ? `<p class="small muted">ביומן היה רשום קודם ${esc(answerLabel(q.calendarBefore, kind))}, והטיסה כבר אינה בו.</p>` : ''}
     <form data-qid="${esc(q.id)}">
       ${picker}${options}
       <div class="row" style="margin-top:.5rem"><button class="btn primary" type="submit" ${q.dateInput ? '' : 'disabled'}>שמור תשובה</button></div>
@@ -496,7 +934,7 @@ function renderComparison(res) {
   };
   const rows = all.filter(FILTERS[state.filter] ?? FILTERS.all);
   const chip = (id, label) => `<button class="chip" data-filter="${id}" aria-pressed="${state.filter === id}">${label} (${counts[id]})</button>`;
-  return `<details class="card" open>
+  return `<details class="card" data-section="detail" open>
     <summary><h2 style="display:inline">פירוט</h2></summary>
     <div class="filters">${chip('comp', 'רק פיצויים')}${chip('all', 'הכול')}${chip('bad', 'פערים')}</div>
     <div class="table-wrap"><table>
@@ -506,20 +944,24 @@ function renderComparison(res) {
         const cls = gap || (c.pending ? 'pending' : '');
         const status = gap ? `<span class="status ${gap}">✗</span>` : c.pending ? '<span class="status pending">ממתין</span>' : '<span class="status ok">✓</span>';
         const why = [
-          // שורה תקינה מציגה רק הערה שמסבירה פיצוי בלי ודאות (hint).
-          ...c.items.filter((e) => (c.ok !== true || e.hint) && (e.ruleTitle || e.note))
+          // שורת פיצוי או Rig כבר מוסברת מתחת לטיסה. שורת קרדיט מפורטת רק כשיש בה פער.
+          ...c.items.filter((e) => !COMP_COLUMNS.has(c.column) && c.ok !== true && (e.ruleTitle || e.note))
             .map((e) => `${esc(e.ruleTitle ?? '')}${e.note ? `: ${esc(e.note)}` : ''}${e.min != null && c.unit !== 'count' ? ` <span class="num">${minToHhmm(e.min)}</span>` : ''}`),
           ...c.marks.map((m) => `${esc(m.column)}: צפוי <span class="num">${hm(m.expected, m.unit)}</span>, ברומה <span class="num">${hm(m.reported, m.unit)}</span>`),
         ].join('<br>');
-        return `<tr class="${cls}">
-          <td>${esc(c.label).replace(/\n/g, '<br>')}</td><td class="col">${esc(c.column)}${reasonOf(c)}</td>
+        const rule = ruleAttr([...c.items, ...c.marks.flatMap((m) => m.items)].map((e) => e.ruleTitle));
+        return `<tr class="${cls}"${rule}>
+          <td>${esc(c.label).replace(/\n/g, '<br>')}${explainOf(c)}</td><td class="col">${esc(c.column)}</td>
           <td class="num">${hm(c.expected, c.unit)}</td><td class="num">${hm(c.reported, c.unit)}</td>
           <td class="num">${c.ok ? '' : (c.diff > 0 ? '+' : '') + hm(c.diff, c.unit)}</td><td>${status}</td></tr>
-          ${why ? `<tr class="detail"><td colspan="6">${why}</td></tr>` : ''}`;
+          ${why ? `<tr class="detail"${rule}><td colspan="6">${why}</td></tr>` : ''}`;
       }).join('') || '<tr><td colspan="6" class="muted">אין שורות בסינון הזה.</td></tr>'}</tbody>
     </table></div>
   </details>`;
 }
+
+/** הסבב של ציפייה, מתחת לשם החוק: שלה, או תיאור הסבב שבראש ההסבר של ציפייה לפי תאריך (ב-`explain` הוא כבר אינו מופיע). */
+const pairingOf = (e) => e.pairing ?? String(e.note ?? '').match(/^⁦[^⁩]*⁩/)?.[0] ?? null;
 
 // בתכנון לבד בלבד. עם דוח ביצוע ספירת הימים מוצגת בסיכום החודשי מול הדוח.
 function renderExpectations(res) {
@@ -534,7 +976,7 @@ function renderExpectations(res) {
   ];
   // הקרדיט של כל טיסה הוא רק רעש: הסך הכול בשורה העליונה, ובטבלה רק הפיצויים.
   const shown = rows.filter((e) => !CREDIT_KEYS.has(e.key));
-  return `<details class="card" open>
+  return `<details class="card" data-section="expected" open>
     <summary><h2 style="display:inline">קרדיט ופיצויים צפויים</h2></summary>
     <p class="small">סה"כ קרדיט: <span class="num">${minToHhmm(sumKeys(CREDIT_KEYS))}</span> · סה"כ COM: <span class="num">${minToHhmm(sumKeys(COM_KEYS))}</span></p>
     ${second.length ? `<p class="small">${second.join(' · ')}</p>` : ''}
@@ -542,10 +984,10 @@ function renderExpectations(res) {
       <thead><tr><th>תאריך</th><th>חוק</th><th>סוג</th><th>צפוי</th><th>הסבר</th></tr></thead>
       <tbody>${shown.map((e) => `<tr>
         <td class="num">${e.dates.length > 1 ? `${ddmm(e.dates[0])}–${ddmm(e.dates.at(-1))}` : ddmm(e.date)}</td>
-        <td>${esc(e.ruleTitle)}${e.pairing ? `<div class="small muted">${esc(e.pairing)}</div>` : ''}</td>
+        <td>${esc(e.ruleTitle)}${pairingOf(e) ? `<div class="small muted">${esc(pairingOf(e))}</div>` : ''}</td>
         <td>${esc(KEY_LABEL[e.key] ?? e.key)}</td>
         <td class="num">${minToHhmm(e.min)}</td>
-        <td class="small">${esc(e.note ?? '')}</td></tr>`).join('')}</tbody>
+        <td class="small">${esc(e.explain ?? e.note ?? '')}</td></tr>`).join('')}</tbody>
     </table></div>`}
   </details>`;
 }
@@ -554,27 +996,46 @@ function renderExpectations(res) {
  * תיאור סבב (`describePairing`) הוא קטע לועזי אחד מבודד. בתא עברי רוצים את התאריכים הכי ימניים
  * ומשמאלם את פרטי הטיסה, אז מפצלים כל תיאור כזה לשני קטעים מבודדים, לפי הסדר הזה.
  */
-const datesFirst = (text) => text.replace(/⁦(\S+) ([^⁩]*)⁩/g, '⁦$1⁩ ⁦$2⁩');
+const datesFirst = (text) => text.replace(/⁦(\d[^\s⁦⁩]*) ([^⁦⁩]*)⁩/g, '⁦$1⁩ ⁦$2⁩');
 
 function renderChanges(res) {
+  if (res.mode === 'plan') return renderCalendarChanges(res);
   const changes = res.changes.filter((c) => c.how !== 'exact' && c.how !== 'noplan');
   if (res.mode !== 'full') return '';
-  return `<details class="card" ${changes.length ? 'open' : ''}>
+  return `<details class="card" data-section="changes" ${changes.length ? 'open' : ''}>
     <summary><h2 style="display:inline">שינויים בין תכנון לביצוע <span class="count">${changes.length}</span></h2></summary>
-    ${changes.length ? `<ul class="list">${changes.map((c) => `<li>
+    ${changes.length ? `<ul class="list">${changes.map((c) => `<li${ruleAttr((c.notes ?? []).map((n) => n.ruleTitle))}>
       <strong class="num">${ddmm(c.date)}</strong> ${esc(c.label)}
       <div class="small"><span class="side-plan">תכנון: ${esc(datesFirst(c.plan ?? '—'))}</span> · <span class="side-exec">ביצוע: ${esc(datesFirst(c.exec ?? (c.replacedBy?.join(', ') || '—')))}</span></div>
+      ${(c.notes ?? []).map((n) => `<div class="explain">${esc(n.message)}${n.byUser ? ' <span class="muted">לפי תשובת המשתמש</span>' : ''}</div>`).join('')}
     </li>`).join('')}</ul>` : '<p class="muted">כל הסבבים בוצעו כמתוכנן.</p>'}
+  </details>`;
+}
+
+/**
+ * בתכנון לבד, כשיש ביומן נתונים מהחודש: השינויים בין התכנון ליומן, למידע בלבד (בעל המוצר, 04/10/2026).
+ * הפיצויים עליהם ייבדקו כשתועלה הרומה.
+ */
+function renderCalendarChanges(res) {
+  const changes = res.calendarChanges;
+  if (!changes) return '';
+  return `<details class="card" data-section="changes" ${changes.length ? 'open' : ''}>
+    <summary><h2 style="display:inline">שינויים בין תכנון לביצוע <span class="count">${changes.length}</span></h2></summary>
+    <p class="small muted">הקרדיט והפיצויים על השינויים ייבדקו כשתועלה הרומה.</p>
+    ${changes.length ? `<ul class="list">${changes.map((c) => `<li>
+      <strong class="num">${ddmm(c.date)}</strong> ${esc(c.label)}
+      <div class="small"><span class="side-plan">תכנון: ${esc(datesFirst(c.plan ?? '—'))}</span> · <span class="side-exec">יומן: ${esc(datesFirst(c.calendar ?? '—'))}</span></div>
+    </li>`).join('')}</ul>` : '<p class="muted">היומן תואם את התכנון.</p>'}
   </details>`;
 }
 
 function renderAnswered() {
   const answers = Object.entries(state.record?.answers ?? {});
   if (!answers.length) return '';
-  return `<details class="card">
+  return `<details class="card" data-section="answered">
     <summary><h2 style="display:inline">תשובות שנשמרו <span class="count">${answers.length}</span></h2></summary>
     <ul class="list">${answers.map(([id, a]) => `<li class="row">
-      <span>${esc(describeQuestionId(id))}: <strong>${esc(a.value === 'partial' && a.count ? `ויתרתי מרצוני על ${a.count === 1 ? 'יום אחד' : `${a.count} ימים`}` : answerLabel(a.value))}</strong>
+      <span>${esc(describeQuestionId(id))}: <strong>${esc(a.value === 'partial' && a.count ? `ויתרתי מרצוני על ${a.count === 1 ? 'יום אחד' : `${a.count} ימים`}` : a.label ?? answerLabel(a.value, id.split(':')[0]))}</strong>
         ${a.link !== undefined ? `<span class="small muted">(${a.link === 'none' ? 'מסירת הטיסה ללא חלופה' : a.link ? `עם ${esc(describePairingId(a.link))}` : 'בחודש אחר'})</span>` : ''}
         ${a.text ? `<span class="small muted">– ${esc(a.text)}</span>` : ''}
         ${typeof a.creditMin === 'number' ? `<span class="small muted">(${a.creditMin ? `מגיע קרדיט ${minToHhmm(a.creditMin)}` : 'לא מגיע קרדיט'})</span>` : ''}</span>
@@ -584,32 +1045,61 @@ function renderAnswered() {
   </details>`;
 }
 
+// מה נבדק, בחלונית של ההערה כשאין חריגה (כמו שם החוק: בלחיצה על ההערה; בעל המוצר, 04/10/2026).
+const LEGAL_TIP = 'נבדקו לכל לג/סבב שעות טיסה ו-FDP, מנוחה בין טיסות, ומגבלות טיסה מצטברות';
+
 function renderNotes(res) {
-  if (!res.notes.length) return '';
-  return `<details class="card">
-    <summary><h2 style="display:inline">הערות <span class="count">${res.notes.length}</span></h2></summary>
-    <ul class="list">${res.notes.map((n) => `<li>${n.date ? `<strong class="num">${ddmm(n.date)}</strong> ` : ''}${esc(n.message)}${n.byUser ? ' <span class="small muted">לפי תשובת המשתמש</span>' : ''}${n.ruleTitle ? ` <span class="tag">${esc(n.ruleTitle)}</span>` : ''}</li>`).join('')}</ul>
+  const legal = legalNote(res);
+  const legalTip = res.legal && !res.legal.skipped && !res.legal.violations?.length ? LEGAL_TIP : null;
+  const count = res.notes.length + (legal ? 1 : 0);
+  if (!count) return '';
+  return `<details class="card" data-section="notes">
+    <summary><h2 style="display:inline">הערות <span class="count">${count}</span></h2></summary>
+    <ul class="list">${res.notes.map((n) => `<li${ruleAttr([n.ruleTitle])}>${n.date ? `<strong class="num">${ddmm(n.date)}</strong> ` : ''}${esc(n.message)}${n.byUser ? ' <span class="small muted">לפי תשובת המשתמש</span>' : ''}</li>`).join('')}${legal ? `<li${ruleAttr([legalTip])}>${esc(legal)}</li>` : ''}</ul>
   </details>`;
 }
 
 const QUESTION_KIND = { cancelled: 'סבב שלא בוצע', unplanned: 'פעילות לא מתוכננת', replaced: 'סבב שהוחלף', assigned: 'מוצב לפעילות', standby_bid: 'טיסה בסוף כוננות', standby_code: 'קוד כוננות',
-  school_start: 'פתיחת שנת הלימודים', free_days: 'ימים ללא פעילות', free_days_first: 'ימים ללא פעילות, X ב-1 לחודש' };
+  school_start: 'פתיחת שנת הלימודים', free_days: 'ימים ללא פעילות', free_days_first: 'ימים ללא פעילות, X ב-1 לחודש',
+  crew: 'הרכב הצוות', night_crew: 'הרכב הצוות', white: 'טיסה לבנה', diversion: 'סטיה לשדה משנה', swap_conflict: 'סבב שהוחלף',
+  base_rest: 'מנוחה בבסיס', second_activity: 'פעילות נוספת באותו FDP', occasion: 'תאריך מיוחד', night_rounds: 'טיסות סבב לילה עוקבות',
+  stay_extension: 'הארכת שהייה', miami_short_rest: 'קיצור מנוחה במיאמי', miami_delay: 'דחייה במיאמי', las_vegas_rest: 'קיצור מנוחה בלאס וגאס',
+  sim_extension: 'הארכת סימולטור' };
 
+/**
+ * "diversion:2024-09-23:LY5104" → "סטיה לשדה משנה 23/09 LY5104". בחלק מהמזהים לפני התאריך יש מילה
+ * (`occasion:<חוק>:`, `second_activity:sim:`), ואחריו מה שמבדיל בין שאלות באותו יום (`sim_extension:<תאריך>:<STD>`):
+ * מוצגים הסבב, או הטיסה, או היום.
+ */
 function describeQuestionId(id) {
   const [kind, ...rest] = id.split(':');
-  const ref = rest.join(':');
-  const what = /^\d{4}-\d{2}-\d{2}$/.test(ref) ? ddmm(ref) : /^\d{4}-\d{2}$/.test(ref) ? `${ref.slice(5)}/${ref.slice(0, 4)}` : describePairingId(ref);
+  const ref = rest.join(':').replace(/^(?:[a-z][a-z_]*:)+/, '');
+  const pairing = ref.match(/^\d{4}-\d{2}-\d{2}\.\.\d{4}-\d{2}-\d{2}:[^:]+/)?.[0];
+  const what = pairing ? describePairingId(pairing)
+    : /^\d{4}-\d{2}-\d{2}:[A-Z]{2}\d+$/.test(ref) ? describePairingId(ref)
+      : /^\d{4}-\d{2}-\d{2}/.test(ref) ? ddmm(ref.slice(0, 10))
+        : /^\d{4}-\d{2}$/.test(ref) ? `${ref.slice(5)}/${ref.slice(0, 4)}` : describePairingId(ref);
   return `${QUESTION_KIND[kind] ?? kind} ${what}`;
 }
 
-/** "2026-07-21..2026-07-22:ATH" → "21/07–22/07 ATH". */
+/** "2026-07-21..2026-07-22:ATH" → "21/07–22/07 ATH". "2026-08-03:LY373" (טיסה) → "03/08 LY373". */
 function describePairingId(id) {
+  const leg = String(id).match(/^(\d{4}-\d{2}-\d{2}):(.+)$/);
+  if (leg) return `⁦${ddmm(leg[1])} ${leg[2]}⁩`;
   const m = String(id).match(/^(\d{4}-\d{2}-\d{2})\.\.(\d{4}-\d{2}-\d{2}):(.*)$/);
   if (!m) return id;
   return `⁦${m[1] === m[2] ? ddmm(m[1]) : `${ddmm(m[1])}–${ddmm(m[2])}`} ${m[3]}⁩`;
 }
 
 function bindResults(root) {
+  const host = $('#head-cal', root);
+  if (host) {
+    const p = calendarParts(state.calendar);
+    host.innerHTML = p.label + p.buttons;
+    $('#head-cal-info', root).innerHTML = p.infoHtml;
+    bindCalendar(host);
+  }
+  $('[data-action="head-info"]', root)?.addEventListener('click', () => { const p = $('[data-head-info]', root); p.hidden = !p.hidden; });
   $('[data-action="print"]', root)?.addEventListener('click', () => {
     // ה-PDF מציג הכול בפירוט וכל שאר החלקים פתוחים, בלי קשר למה שמוצג כרגע על המסך.
     const prevFilter = state.filter;
@@ -619,7 +1109,7 @@ function bindResults(root) {
     const restore = () => {
       window.removeEventListener('afterprint', restore);
       state.filter = prevFilter;
-      renderResults();
+      renderResults(false);
     };
     window.addEventListener('afterprint', restore);
     window.print();
@@ -648,7 +1138,11 @@ function bindResults(root) {
   }
   for (const btn of root.querySelectorAll('[data-unanswer]')) {
     btn.addEventListener('click', async () => {
-      delete state.record.answers[btn.dataset.unanswer];
+      const id = btn.dataset.unanswer;
+      // שאלה שנשאלה רק בגלל התשובה הזאת נפתחת מחדש יחד איתה.
+      for (const dep of [id, ...(state.result?.dependentAnswers?.[id] ?? [])]) delete state.record.answers[dep];
+      // בלי זה היומן היה עונה במקום התשובה שנמחקה, והשאלה לא הייתה נשאלת (בעל המוצר, 04/10/2026).
+      if (/^(crew|night_crew|white):/.test(id)) state.record.calendarIgnored = [...new Set([...(state.record.calendarIgnored ?? []), ...relatedCrewIds(id, state.result?.crewIdOf)])];
       state.notices = [];
       await runAndSave();
     });
@@ -673,6 +1167,9 @@ function bindResults(root) {
       if (!chosen && !picker) return;
       if (picker && !picker.value) { alert('בחר תאריך.'); return; }
       const answer = { value: picker ? picker.value : chosen.value };
+      // התווית של האפשרות שנבחרה, כפי שהופיעה בשאלה: "תשובות שנשמרו" מציג אותה.
+      const label = state.result?.questions.find((q) => q.id === form.dataset.qid)?.options?.find((o) => o.value === answer.value)?.label;
+      if (label) answer.label = label;
       if (chosen?.hasAttribute('data-needs-link')) {
         const sel = $(`.extra[data-for="${CSS.escape(chosen.value)}"] select`, form);
         answer.link = sel?.value || null;
@@ -691,6 +1188,7 @@ function bindResults(root) {
         answer.creditMin = due === 'yes' ? Number($('select[name="creditMin"]', credit).value) : 0;
       }
       state.record.answers = { ...(state.record.answers ?? {}), [form.dataset.qid]: answer };
+      if (state.record.crewHints) for (const id of relatedCrewIds(form.dataset.qid, state.result?.crewIdOf)) delete state.record.crewHints[id];
       state.notices = [];
       await runAndSave();
     });
@@ -700,10 +1198,10 @@ function bindResults(root) {
 // ---------- היסטוריה ----------
 
 /** הסיכום של חודש שמור לפי החוקים והקוד הנוכחיים, ולא זה שנשמר בהרצה האחרונה שלו. */
-function currentSummary(m) {
+function currentSummary(m, months) {
   if (!state.rulesData || !(m.plan || m.exec)) return m.summary ?? {};
   try {
-    return summarize(evaluate({ rulesData: state.rulesData, plan: m.plan, exec: m.exec, answers: m.answers ?? {} }));
+    return summarize(evaluate({ rulesData: state.rulesData, plan: m.plan, exec: m.exec, answers: m.answers ?? {}, history: historyFor(m.key, months), calendar: m.calendar ?? monthCalendar(calendarFacts(), m.period), reopen: m.calendarIgnored ?? [] }));
   } catch {
     return m.summary ?? {};
   }
@@ -716,17 +1214,18 @@ async function renderHistory() {
     <div class="card">
       <h2>חודשים שמורים על המכשיר</h2>
       ${months.length ? `<ul class="list">${months.map((m) => {
-        const s = currentSummary(m);
+        const s = currentSummary(m, months);
         const tags = [
           m.plan ? '<span class="tag">תכנון</span>' : '',
           m.exec ? '<span class="tag">ביצוע</span>' : '',
+          s.legal ? `<span class="tag bad">${s.legal === 1 ? 'חריגה ממגבלות החוק' : `${s.legal} חריגות ממגבלות החוק`}</span>` : '',
           s.questions ? `<span class="tag warn">${s.questions === 1 ? 'שאלה פתוחה אחת' : `${s.questions} שאלות פתוחות`}</span>` : '',
           s.gaps ? `<span class="tag bad">${s.gaps === 1 ? 'פער אחד' : `${s.gaps} פערים`}</span>` : '',
           m.exec && !s.gaps && !s.questions ? '<span class="tag ok">תואם לרומה</span>' : '',
         ].join(' ');
         return `<li class="month-item">
           <span class="name">${esc(monthName(m.period))}</span> ${tags}
-          <span class="small muted">חוקים ${esc(m.rulesVersion ?? '?')} · עודכן ${esc(m.updated ? new Date(m.updated).toLocaleDateString('he-IL') : '')}</span>
+          <span class="small muted">עודכן ${esc(m.updated ? new Date(m.updated).toLocaleDateString('he-IL') : '')}</span>
           <span class="spacer"></span>
           <button class="btn" data-open="${esc(m.key)}">פתח</button>
           <button class="btn danger" data-delete="${esc(m.key)}">מחק</button>
@@ -742,7 +1241,13 @@ async function renderHistory() {
       </div>
     </div>`;
 
-  for (const b of root.querySelectorAll('[data-open]')) b.addEventListener('click', () => openMonth(b.dataset.open));
+  for (const b of root.querySelectorAll('[data-open]')) {
+    b.addEventListener('click', async () => {
+      const calToken = calendarToken();
+      await openMonth(b.dataset.open);
+      if (calToken) syncCalendar(calToken);
+    });
+  }
   for (const b of root.querySelectorAll('[data-delete]')) {
     b.addEventListener('click', async () => {
       if (!confirm('למחוק את החודש מהחודשים השמורים? התשובות שנתת עליו יימחקו.')) return;

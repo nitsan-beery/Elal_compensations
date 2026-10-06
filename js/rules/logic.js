@@ -33,15 +33,15 @@ const H = (hours) => hoursToMin(hours) ?? 0;
 function credit_from_scheduled(ctx, params, rule) {
   const monthEnd = ctx.timeline.at(-1).date;
   for (const pairing of ctx.execPairings) {
-    if (sumLegs(pairing) == null) {
+    if (sumLegs(pairing, ctx.domicile) == null) {
       ctx.review(`${describePairing(pairing)}: חסרות שעות מתוכננות (SkdDur) ברומה, ולא ניתן לחשב קרדיט.`, rule);
       continue;
     }
     const airReturnMatch = ctx.matches.find((m) => m.exec === pairing);
     if (airReturnMatch?.how === 'air_return') {
       const top = minSlipTopUp(ctx, pairing);
-      ctx.note(pairing.from, `חזרה לבסיס אחרי היציאה: מגיע קרדיט לפי זמן הטיסה בפועל, ${minToHhmm(sumLegs(pairing))}` +
-        (top ? `, ועוד השלמה לסליפ קצר ${minToHhmm(top)}` : '') + '.', rule);
+      // בלי סכומים: הם בטבלת הפירוט, בשורה של הטיסה (בעל המוצר, 01/10/2026).
+      ctx.note(pairing.from, `חזרה לבסיס אחרי היציאה: קרדיט לפי זמן הטיסה בפועל${top ? ' והשלמה לסליפ קצר' : ''}.`, rule);
     }
     const days = new Map(); // date → {min, why[]}
     const add = (date, min, why) => {
@@ -105,6 +105,7 @@ function credit_from_scheduled(ctx, params, rule) {
 const legCreditDur = (leg, pairing, domicile) =>
   (isAirReturn(leg) || (pairing.destinations.length > 1 && leg.org !== domicile && leg.dst !== domicile) ? leg.actDur : null) ?? leg.skdDur;
 
+
 /**
  * חזרה לשדה המוצא אחרי ההמראה: מזוכה לפי זמן הביצוע בפועל (בעל המוצר, 28/09/2026). בדוח ה-SkdDur
  * שלה שווה ל-ActDur (LY571 ב-15/09/2025 ‏00:25, ‏LY321 ב-31/03/2025, ‏LY2367 ב-15/02/2026).
@@ -143,8 +144,14 @@ function splitAtMidnight(leg, domicile) {
   return { shift, before: clock + dur <= 1440 ? null : 1440 - clock };
 }
 
-const sumLegs = (pairing) => pairing.legs.reduce((acc, l) => {
-  const dur = isAirReturn(l) ? l.actDur ?? l.skdDur : l.skdDur;
+/**
+ * הקרדיט של סבב שבוצע, כפי ש-`credit_from_scheduled` מזכה אותו (`legCreditDur`): כולל רגל שאינה נוגעת
+ * בבסיס, שמזוכה לפי הביצוע. כל חוק שמשווה מול "קרדיט הטיסה שבוצעה" (הגבוה מבין השתיים, השלמה
+ * לסליפ קצר, כוננות שהופעלה) משווה מול הסכום הזה, כדי שהסך הכול לא יעבור את מה שמגיע
+ * (09/09/2024: ‏TLV-SOF-TIV-TLV מזוכה 06:54 ולא 06:33 המתוכננות; 01/10/2026).
+ */
+const sumLegs = (pairing, domicile) => pairing.legs.reduce((acc, l) => {
+  const dur = legCreditDur(l, pairing, domicile);
   return acc == null || dur == null ? null : acc + dur;
 }, 0);
 
@@ -160,7 +167,7 @@ function min_slip_credit(ctx, params, rule) {
 /** הקבוצות שההשלמה נבדקת עליהן: FDP שלם, או כל סבב בנפרד כשחלק מה-FDP אינו נבדק. */
 function minSlipGroups(ctx, params) {
   const groups = params.per_fdp
-    ? execFdpGroups(ctx.execPairings, ctx.domicile, H(params.legal_rest_hours), params.report_minutes_before_std ?? 0)
+    ? execFdpGroups(ctx.execPairings, ctx.domicile, H(params.legal_rest_hours), params.report_minutes_before_std ?? 0, ctx.legalRest?.postMin)
     : ctx.execPairings.map((p) => [p]);
   const out = [];
   for (const group of groups) {
@@ -177,9 +184,9 @@ function minSlipGroups(ctx, params) {
  * מסבב קצר באותו FDP (2018 ס' 27.2 מדבר על סליפ; 04/08/2025: BUS 06:16 ו-LCA 02:20 → Rig 02:40).
  * סבב שהקרדיט שלו אינו ידוע, או אפס, אינו נבדק.
  */
-function minSlipShortfall(group, min) {
+function minSlipShortfall(group, min, domicile) {
   return group.reduce((sum, p) => {
-    const credit = sumLegs(p);
+    const credit = sumLegs(p, domicile);
     return credit == null || credit === 0 ? sum : sum + Math.max(0, min - credit);
   }, 0);
 }
@@ -193,21 +200,26 @@ function minSlipTopUp(ctx, execPairing) {
   if (!rule) return 0;
   const params = rule.logic.params ?? {};
   const group = minSlipGroups(ctx, params).find((g) => g.some((p) => p.id === execPairing.id));
-  return group ? minSlipShortfall(group, H(params.min_credit_hours)) : 0;
+  return group ? minSlipShortfall(group, H(params.min_credit_hours), ctx.domicile) : 0;
 }
 
 /**
- * כל סבב ב-FDP מקבל השלמה למינימום לפי הקרדיט שלו בלבד. ב-25/11/2025 וב-30/12/2025 (BUS 05:04
- * ו-LCA 02:15) הדוח רשם Rig 02:41, ארבע דקות פחות מ-02:45 של קריאה זו, וזה הפער היחיד שנשאר.
+ * כל סבב ב-FDP מקבל השלמה למינימום לפי הקרדיט שלו בלבד, והיא רשומה עליו: ההסבר בשורה שלו הוא
+ * "השלמה ל-5 שעות", בלי להזכיר את שאר הסבבים שב-FDP, שאינם קשורים אליה (04/08/2025: רק LCA קצר;
+ * בעל המוצר, 01/10/2026). ב-25/11/2025 וב-30/12/2025 (BUS 05:04 ו-LCA 02:15) הדוח רשם Rig 02:41,
+ * ארבע דקות פחות מ-02:45 של קריאה זו, וזה הפער היחיד שנשאר.
  */
 function expectMinSlip(ctx, group, min, params, rule) {
-  const shortfall = minSlipShortfall(group, min);
-  if (!shortfall) return;
-  const note = group.length === 1
-    ? `השלמה ל-${params.min_credit_hours} שעות`
-    : `השלמה ל-${params.min_credit_hours} שעות לכל סבב קצר, על ${group.length} סבבים באותו FDP (${group.map(describePairing).join(', ')})`;
-  ctx.expectPairing(group.at(-1), 'rig', shortfall, rule, note,
-    { reason: `השלמה ל-${params.min_credit_hours} שעות` });
+  const note = `השלמה ל-${params.min_credit_hours} שעות`;
+  for (const p of group) {
+    const shortfall = minSlipShortfall([p], min, ctx.domicile);
+    if (!shortfall) continue;
+    // סבב אחר מה-FDP שרשום ברומה באותם ימים חולק איתו שורה בפירוט, ולכן ההסבר אומר על איזו טיסה
+    // ההשלמה (25/11/2025). כשלסבב הקצר שורה משלו, מספר הטיסה כבר כתוב בה (04/08/2025).
+    const days = ctx.reportDates(p).join();
+    const shared = group.some((o) => o !== p && ctx.reportDates(o).join() === days);
+    ctx.expectPairing(p, 'rig', shortfall, rule, note, { reason: note, explain: `${shared ? `${flightsOf(p)}: ` : ''}${note}.` });
+  }
 }
 
 // ---------- ימי היעדרות וזיכוי ----------
@@ -238,7 +250,7 @@ function absence_day_credit(ctx, params, rule) {
         if (onFlightDay.has(pairing)) continue;
         onFlightDay.add(pairing);
         const days = ctx.timeline.filter((d) => pairing.dates.includes(d.date) && matchesCode(d, params, ctx)).length;
-        const flown = sumLegs(pairing);
+        const flown = sumLegs(pairing, ctx.domicile);
         if (flown == null || flown < credit * days) {
           ctx.review(`${describePairing(pairing)}: ${rule.title} ביום שבו הופעלת לסליפ. הקרדיט הוא הגבוה מבין הסליפ ` +
             `(${flown == null ? 'לא ידוע' : minToHhmm(flown)}) לבין ${days} ימים × ${minToHhmm(credit)}. דורש בדיקה ידנית.`, rule);
@@ -443,21 +455,6 @@ function absence_month_cap(ctx, params, rule) {
   ctx.capAbsenceTotal(H(params.cap_hours), rule);
 }
 
-/**
- * פיצוי בדוח שאף חוק אינו מסביר, בגובה `hours` בדיוק על סבב, עשוי להיות החוק הזה. החוק תלוי
- * במידע שאינו בקבצים (למשל הרכב הצוות), ולכן לא מנחשים שהפיצוי מגיע; כשהוא כבר בדוח, הוא
- * נרשם כצפוי עם הערה `hint`. רץ אחרי כל שאר החוקים.
- */
-function unexplained_report_amount(ctx, params, rule) {
-  if (!ctx.hasExec) return;
-  const key = params.report_column === 'S/C' ? 'sc' : 'com';
-  for (const p of ctx.execPairings) {
-    const extra = ctx.reportedOn(p, params.report_column) - ctx.expectedAround(p, key);
-    if (extra !== H(params.hours)) continue;
-    ctx.expectPairing(p, key, extra, rule, `${describePairing(p)}: ${minToHhmm(extra)} שאף חוק אחר אינו מסביר. ${params.hint}`, { hint: true });
-  }
-}
-
 // ---------- חוקי ביצוע ----------
 
 /**
@@ -467,6 +464,10 @@ function unexplained_report_amount(ctx, params, rule) {
  * כל איחור מ-`note_from_minutes` ומעלה נרשם כהערה, גם כשמגיע עליו פיצוי: ההערה מפרטת
  * את משך האיחור, כמה מדרגות הן וכמה פיצוי יוצא מהן. משך האיחור בדקות עד שעה, ובשעות
  * (H:MM) מעבר לשעה (בעל המוצר, 24/09/2026).
+ *
+ * סטיה לשדה משנה (בעל המוצר, 03/10/2026): האיחור נמדד מול הנחיתה המקורית בבסיס, ולא מול
+ * ה-STA של הרגל האחרונה, שנקבעה אחרי הסטיה (`diversionOf`). אם הרומה כבר זיכתה לפיו –
+ * סטיה; אחרת שואלים (`diversion:`).
  */
 
 /** משך איחור בהערה: בדקות עד שעה, אחרת H:MM בלי "שעות" (בעל המוצר, 24/09/2026 ו-29/09/2026). */
@@ -481,28 +482,81 @@ function late_landing_home(ctx, params, rule) {
   const perStep = H(params.hours_per_step);
   // איחור קטן מזה אינו מעניין (בעל המוצר, 24/09/2026).
   const noteFrom = params.note_from_minutes ?? 0;
+  const stepsOf = (delay) => (delay > grace ? Math.ceil((delay - grace) / step) : 0);
+  const flat = ctx.timeline.flatMap((d) => (d.exec?.legs ?? []).map((leg) => ({ leg, date: d.date })));
 
-  for (const day of ctx.timeline) {
-    for (const leg of day.exec?.legs ?? []) {
-      if (leg.dst !== ctx.domicile || leg.sta == null || leg.ata == null) continue;
-      const delay = wrapDelta(leg.ata - leg.sta);
-      if (delay <= grace) {
-        if (delay >= noteFrom) ctx.note(day.date, `${leg.flight} נחתה באיחור של ${delayText(delay)}, לא מעבר לסף של ${grace} דק'. אין פיצוי.`, rule);
-        continue;
-      }
-      const steps = Math.ceil((delay - grace) / step);
-      // `flight`: לאיזה סבב שייך הפיצוי, כשהיום משותף לשני סבבים (טבלת הפירוט).
-      ctx.expect(day.date, 'com', steps * perStep, rule, `${leg.flight}: איחור ${delay} דק' → ${steps} מדרגות`, { flight: leg.flight });
-      if (delay >= noteFrom) {
-        const stepsWord = steps === 1 ? 'מדרגה אחת' : `${steps} מדרגות`;
-        ctx.note(
-          day.date,
-          `${leg.flight} נחתה באיחור של ${delayText(delay)}. ${stepsWord} (כל ${step} דק' או חלק מהן), פיצוי של ${minToHhmm(steps * perStep)}.`,
-          rule,
-        );
+  for (const [i, { leg, date }] of flat.entries()) {
+    if (leg.dst !== ctx.domicile || leg.sta == null || leg.ata == null) continue;
+    let delay = wrapDelta(leg.ata - leg.sta);
+    let diverted = '';
+    const div = diversionOf(flat, i, ctx.domicile);
+    if (div) {
+      const divDelay = wrapDelta(leg.ata - div.sta);
+      const divMin = stepsOf(divDelay) * perStep;
+      if (divMin > stepsOf(delay) * perStep) {
+        const id = `diversion:${date}:${leg.flight}`;
+        // שמות השדות מבודדים: בלי זה "RHO (14:30). 6" מוצג כקטע לועזי אחד.
+        const via = div.via.map((s) => `⁦${s}⁩`).join(' ו-');
+        const answer = ctx.answer(id)?.value;
+        if (answer === 'yes' || (!answer && ctx.paidOnDate(date, 'COM', 'com', divMin))) {
+          delay = divDelay;
+          diverted = `, מול הנחיתה המתוכננת לפני הסטיה ל-${via} (${minToHhmm(div.sta)})`;
+          // כל סטיה מופיעה בשינויים בין התכנון לביצוע, גם בסבב שלא תוכנן (`change`; בעל המוצר, 05/10/2026).
+          const pairing = ctx.execPairings.find((p) => p.legs.some((l) => l.flight === leg.flight && l.date === date));
+          if (pairing) {
+            ctx.markPairing(pairing, 'diversion');
+            ctx.note(date, `סטיה לשדה משנה: ${leg.flight} נחתה גם ב-${via}.`, rule, { change: true, pairingId: pairing.id });
+          }
+        } else if (!answer) {
+          ctx.ask({
+            id,
+            date,
+            title: `האם ${leg.flight} ב-${dayOf(date)} סטתה ל-${via} בדרך ל-${ctx.domicile}?`,
+            body: `אם כן, הנחיתה המתוכננת ב-${ctx.domicile} הייתה ${minToHhmm(div.sta)}, והאיחור ${delayText(divDelay)}.`,
+            options: [
+              { value: 'yes', label: `כן, סטתה ל-${via}` },
+              { value: 'no', label: `לא, הנחיתה ב-${via} תוכננה` },
+            ],
+            ruleId: rule.id,
+          });
+        }
       }
     }
+    if (delay <= grace) {
+      if (delay >= noteFrom) ctx.note(date, `${leg.flight} נחתה באיחור של ${delayText(delay)}, לא מעבר לסף של ${grace} דק'. אין פיצוי.`, rule);
+      continue;
+    }
+    const steps = Math.ceil((delay - grace) / step);
+    const stepsWord = steps === 1 ? 'מדרגה אחת' : `${steps} מדרגות`;
+    // ההסבר מוצג מתחת לטיסה בטבלת הפירוט, ולא בהערות (בעל המוצר, 01/10/2026). מספר הטיסה
+    // נכתב רק כשהיא אינה לבדה בשורה: הפיצוי נרשם לכל FDP, ושורה של רגל אחת כבר נושאת אותו.
+    const part = ctx.execPairings.flatMap((p) => fdpParts(p, ctx.fdp)).find((x) => x.legs.some((l) => l.flight === leg.flight && l.date === date));
+    const who = part?.legs.length === 1 ? '' : `${leg.flight} `;
+    // `flight`: לאיזה סבב שייך הפיצוי, כשהיום משותף לשני סבבים (טבלת הפירוט).
+    ctx.expect(date, 'com', steps * perStep, rule, `${leg.flight}: איחור ${delay} דק' → ${steps} מדרגות`, { flight: leg.flight,
+      explain: `${who}נחתה באיחור של ${delayText(delay)}${diverted}. ${stepsWord} (כל ${step} דק' או חלק מהן).` });
   }
+}
+
+/**
+ * סטיה לשדה משנה בדרך לבסיס: אותו מספר טיסה ממשיך משדה בחו"ל דרך שדה אחד או יותר
+ * לבסיס, והרגל שאחרי הנחיתה הראשונה נקבעה רק אחריה (ה-STD שלה אחרי ה-ATA). ברגל
+ * הראשונה נשארים ה-STD וזמן הטיסה המתוכנן המקוריים, ומהם הנחיתה המקורית בבסיס, בשעון
+ * הבסיס (30/06/2024: LY5102 WAW‑AYT‑RHO‑TLV, ‏09:50 + 3:40 = 14:30, ‏ATA 21:14 → COM 03:00).
+ * כשהרגל לבסיס נקבעה מראש זו אינה סטיה (20/06/2025: LY5420 PFO‑LCA‑TLV).
+ */
+function diversionOf(flat, i, domicile) {
+  const leg = flat[i].leg;
+  if (!leg.flight) return null;
+  let j = i;
+  while (j > 0 && flat[j - 1].leg.flight === leg.flight && flat[j - 1].leg.dst === flat[j].leg.org) j--;
+  if (j === i) return null;
+  const first = flat[j].leg, next = flat[j + 1].leg;
+  if (first.org === domicile || first.std == null || first.skdDur == null || first.ata == null || next.std == null) return null;
+  if (wrapDelta(next.std - first.ata) <= 0) return null;
+  const off = stationOffset(first.org, flat[j].date, domicile);
+  if (off == null) return null;
+  return { sta: mod(first.std - off + first.skdDur, 1440), via: flat.slice(j, i).map((x) => x.leg.dst) };
 }
 
 /**
@@ -522,7 +576,8 @@ function long_flight_day(ctx, params, rule) {
     }
     for (const [date, { legs, min: flown }] of byDate) {
       if (legs < 2 || flown <= over) continue;
-      ctx.expect(date, 'com', H(params.hours), rule, `${describePairing(pairing)}: זמן טיסה ${minToHhmm(flown)} ביום`);
+      ctx.expect(date, 'com', H(params.hours), rule, `${describePairing(pairing)}: זמן טיסה ${minToHhmm(flown)} ביום`,
+        { explain: `זמן טיסה ${minToHhmm(flown)}.` });
     }
   }
 }
@@ -545,6 +600,8 @@ function special_call(ctx, params, rule) {
     if (ctx.pairingHandledBy(match.exec, 'swap_conflict_void')) continue;
     const reported = ctx.reportedOn(match.exec, column);
     const answer = ctx.answerFor(match);
+    // סטיה לשדה משנה היא אותה טיסה, ולא קריאה מיוחדת, גם כשהרומה זיכתה S/C (`explainUnexplained`; בעל המוצר, 06/10/2026).
+    if (ctx.pairingHandledBy(match.exec, 'diversion_assumed') || answer?.value === 'diversion') continue;
 
     const training = ctx.pairingHandledBy(match.exec, 'training_cancelled');
     const bid = ctx.pairingHandledBy(match.exec, 'standby_bid');
@@ -558,27 +615,19 @@ function special_call(ctx, params, rule) {
         continue;
       }
       const days = countSpecialCallDays(stay, params, match.exec, ctx.fdp);
-      const explain = days.reason;
-      // כמה FDP נפרדים בסבב: כל יממה נרשמת על ה-FDP שהתחיל בה או לפניה (בעל המוצר, 29/09/2026).
+      // כל יממה שמגיעה עליה קריאה מיוחדת היא שורה משלה בטבלת הפירוט (`perDay`), בלי הסבר: הסכום
+      // והחוק כבר בשורה (בעל המוצר, 01/10/2026). רק יממה שנספרה אחרי בדיקת הסף מוסברת בשורה שלה
+      // (`lastWhy`). יממה שלא עמדה בסף אין לה שורה, ולכן ההסבר עליה בהערות, ביום שלה (`skipped`;
+      // 20–21/07/2025: S/C רק על 20/07). `aside`: ההערה נשארת בהערות ואינה עוברת לשורת השינוי.
+      // בכמה FDP נפרדים כל יממה נרשמת על ה-FDP שהתחיל בה או לפניה (בעל המוצר, 29/09/2026).
       const parts = fdpParts(match.exec, ctx.fdp);
-      const perPart = parts.map((part, i) => ({ part,
-        days: days.counted.filter((d) => d >= part.from && (i === parts.length - 1 || d < parts[i + 1].from)) }))
-        .filter((x) => x.days.length);
-      // השהייה נוגעת ביותר מיממה אחת (`all`, לא `counted`): הערה קבועה, גם כשתואם לדוח, כדי
-      // להסביר איזו יממה נספרת (20–21/07/2025: S/C רק על 20/07, היממה השנייה קצרה מהסף).
-      // בכמה FDP השינויים מציגים שורה לכל FDP, והערה על כל אחת אומרת שמגיעה עליו קריאה מיוחדת
-      // (`splitChangesByFdp` ב-evaluate.js, בעל המוצר 29/09/2026). הערה כאן רק על יממה שנבדקה מול הסף.
-      if (perPart.length > 1) {
-        if (!days.ownFdp) ctx.note(match.exec.from, `${flightsOf(match.exec)} קריאה מיוחדת: ${explain}`, rule);
-        for (const x of perPart) {
-          ctx.expectPairing(match.exec, 'sc', x.days.length * H(params.hours), rule,
-            `${flightsOf(x.part)}: ${x.days.length === 1 ? 'יממה אחת' : `${x.days.length} יממות`} (${x.days.map(dayOf).join(', ')}).`,
-            { date: x.days[0], dates: x.days });
-        }
-        continue;
+      const partOf = (d) => parts.findLast((p) => p.from <= d) ?? parts[0];
+      if (days.skipped) ctx.note(days.skipped.date, `${flightsOf(match.exec)}: ${days.skipped.why}`, rule, { aside: true });
+      if (days.cut) ctx.note(match.exec.from, `${flightsOf(match.exec)}: ${days.cut}`, rule, { aside: true });
+      for (const d of days.counted) {
+        ctx.expectPairing(match.exec, 'sc', H(params.hours), rule, `${flightsOf(partOf(d))}: יממה ${dayOf(d)}.`,
+          { date: d, dates: [d], perDay: true, explain: days.lastWhy && d === days.counted.at(-1) ? days.lastWhy : '' });
       }
-      if (days.all.length > 1) ctx.note(match.exec.from, `${flightsOf(match.exec)} קריאה מיוחדת: ${explain}`, rule);
-      ctx.expectPairing(match.exec, 'sc', days.counted.length * H(params.hours), rule, explain);
       continue;
     }
     // טיסה לא מתוכננת בלי S/C: לא מנחשים, שואלים.
@@ -645,38 +694,26 @@ function countSpecialCallDays(stay, params, pairing, fdp) {
   const lastDay = Math.floor((stay.end - 1) / 1440);
   const all = [];
   for (let d = firstDay; d <= lastDay; d++) all.push(addDays(stay.first, d));
-  const list = (ds) => `(${ds.map(dayOf).join(', ')})`;
-  if (stay.cutAtEnd) {
-    return { counted: all, all, reason: `${countDays(all.length)} עד סוף החודש ${list(all)}. הסבב חוזר בחודש הבא, והיממה האחרונה נבדקת בחודש הבא.` };
-  }
-  if (all.length === 1) return { counted: all, all, reason: `יממה אחת ${list(all)}.` };
+  // הסבב חוזר בחודש הבא: כל היממות עד סוף החודש נספרות (`cut`: הערה על כך).
+  if (stay.cutAtEnd) return { counted: all, all, cut: 'הסבב חוזר בחודש הבא, והיממה האחרונה נבדקת בחודש הבא.' };
+  if (all.length === 1) return { counted: all, all };
+  // היממה האחרונה פותחת FDP נפרד, אחרי מנוחה חוקית, ולכן נספרת בלי בדיקת סף.
+  if (pairing && lastFdpStartsOn(pairing, fdp, all.at(-1))) return { counted: all, all, ownFdp: true };
 
-  if (pairing && lastFdpStartsOn(pairing, fdp, all.at(-1))) {
-    return { counted: all, all, ownFdp: true, reason: `היממה האחרונה (${dayOf(all.at(-1))}) פותחת FDP נפרד, אחרי מנוחה חוקית, ולכן נספרת בלי בדיקת סף.` };
-  }
-
-  // נוסח ההסבר: בעל המוצר, 29/09/2026.
+  // `lastWhy`: ההסבר בשורה של היממה האחרונה, כשהיא נספרת. `skipped`: היממה שלא נספרה, ולמה.
   const total = stay.end - stay.start;
   const inLast = stay.end - lastDay * 1440;
   const gap = H(params.second_day_min_gap_hours);
   const min = H(params.second_day_min_hours);
   const which = all.length === 2 ? 'השנייה' : 'האחרונה';
   const need = `שהייה של מעל ${minToHhmm(gap)}, מתוכן לפחות ${minToHhmm(min)} ביממה ${which}`;
-  if (total > gap && inLast >= min) {
-    return { counted: all, all,
-      reason: `${all.length > 2 ? `${countDays(all.length)} ${list(all)}. ` : ''}בוצעה ${need}, ולכן מגיעה קריאה מיוחדת גם על היממה ${which}.` };
-  }
-  const counted = all.slice(0, -1);
+  if (total > gap && inLast >= min) return { counted: all, all, lastWhy: `בוצעה ${need}.` };
   return {
-    counted,
+    counted: all.slice(0, -1),
     all,
-    reason: `${counted.length === 1 ? 'נספרת רק יממה אחת' : `נספרות רק ${counted.length} יממות`} ${list(counted)}. ` +
-      `סה"כ זמן שהייה ${minToHhmm(total)}, מתוכן ${minToHhmm(inLast)} ביממה ${which}. ` +
-      `נדרשת ${need}, ולכן אין קריאה מיוחדת על היממה ${which}.`,
+    skipped: { date: all.at(-1), why: `אין קריאה מיוחדת על היממה ${which}. סה"כ זמן שהייה ${minToHhmm(total)}, מתוכן ${minToHhmm(inLast)} ביממה ${which}. נדרשת ${need}.` },
   };
 }
-
-const countDays = (n) => (n === 1 ? 'נספרת יממה אחת' : `נספרות ${n} יממות`);
 
 /** מספרי הטיסות של הסבב לפתיח של הערה: LY5109-LY5110. מספר שחוזר ברצף נכתב פעם אחת. */
 function flightsOf(p) {
@@ -701,6 +738,14 @@ const addDays = (iso, n) => new Date(Date.parse(iso) + n * dayMs).toISOString().
 const dayOf = (iso) => iso.slice(8, 10) + '/' + iso.slice(5, 7);
 
 /**
+ * תשובות שמשלמות את הגבוה מבין שתי הטיסות: שינוי ביוזמת החברה, זכייה במכרז, וסטיה לשדה משנה – אין
+ * עליה סעיף בהסכמים, ושינוי בגלל מזג אוויר הוא שינוי של החברה (ישן, כ"ה; בעל המוצר, 05/10/2026).
+ */
+const COMPANY_PAID_SWAPS = ['replaced', 'bid', 'diversion'];
+const SWAP_WORD = { bid: 'זכייה במכרז', diversion: 'סטיה לשדה משנה' };
+const swapWord = (answer) => SWAP_WORD[answer?.value] ?? 'שינוי ביוזמת החברה';
+
+/**
  * שינוי בתוכנית: תשלום לפי הגבוה מבין המתוכנן לבין שבוצע. חל אחרי תשובה "החלפה ביוזמת
  * החברה" בשאלה על הסבב המתוכנן שלא בוצע (`cancelled_no_compensation`), כי טיסה אחרת באותם
  * ימים אינה מוכיחה החלפה (בקשת בעל המוצר, 24/09/2026): ייתכן שהמתוכננת בוטלה ומה שבוצע היה
@@ -714,9 +759,10 @@ function higher_of_planned_performed(ctx, params, rule) {
   const reportColumn = params.shortfall_column ?? 'COM';
   for (const match of ctx.matches) {
     if (!match.plan) continue;
-    const answer = ctx.answerFor(match);
+    // סטיה לשדה משנה שהונחה מהקבצים (`assumeDiversion`) היא כמו תשובה.
+    const answer = ctx.answerFor(match) ?? (ctx.pairingHandledBy(match.plan, 'diversion') ? { value: 'diversion' } : null);
     if (params.excluded_when_voluntary_swap && answer?.value === 'voluntary_swap') continue;
-    if (answer && answer.value !== 'replaced') continue;
+    if (answer && !COMPANY_PAID_SWAPS.includes(answer.value)) continue;
     if (!answer && (params.requires_user_answer || match.how !== 'dates')) continue;
     if (ctx.pairingHandledBy(match.plan, 'lost_hours_credit')) continue;
     if (ctx.pairingHandledBy(match.plan, 'cancelled_no_compensation')) continue;
@@ -726,7 +772,7 @@ function higher_of_planned_performed(ctx, params, rule) {
     // תשובה ישנה נשמרה בלי קישור, ואז ההחלפה היא הסבב שבוצע באותם ימים.
     const exec = answer && 'link' in answer ? (answer.link ? ctx.pairingById(answer.link) : null) : match.exec;
     if (!exec) {
-      ctx.review(`${describePairing(match.plan)}: החלפה ביוזמת החברה בטיסה שאינה בקבצים של החודש, ` +
+      ctx.review(`${describePairing(match.plan)}: ${swapWord(answer)} בטיסה שאינה בקבצים של החודש, ` +
         'ולכן לא ניתן לחשב את ההפרש. דורש בדיקה ידנית.', rule);
       continue;
     }
@@ -745,16 +791,10 @@ function higher_of_planned_performed(ctx, params, rule) {
     // הערה בכל החלפה ביוזמת החברה, גם כשהטיסה שבוצעה ארוכה יותר ואין הפרש (בעל המוצר, 29/09/2026).
     const planned = ctx.plannedCredit(match.plan);
     const performed = planned - diff;
-    // בלי מספרי הטיסות: הם כבר בשינויים בין תכנון לביצוע (בעל המוצר, 29/09/2026).
-    const longer = diff > 0
-      ? `${minToHhmm(planned)} של הטיסה המתוכננת, מול ${minToHhmm(performed)} של הטיסה שבוצעה`
-      : `${minToHhmm(performed)} של הטיסה שבוצעה, מול ${minToHhmm(planned)} של הטיסה המתוכננת`;
-    // כאן שם העמודה כן מופיע, לבקשת בעל המוצר (29/09/2026).
-    const extraCredit = `מגיע ${minToHhmm(diff)} כקרדיט נוסף (${column === 'rig' ? 'RIG' : reportColumn})`;
-    const topUp = diff <= 0 ? ''
-      : !alreadyMinSlip ? ` ${extraCredit}.`
-      : extra > 0 ? ` ${extraCredit}: ${minToHhmm(alreadyMinSlip)} בהשלמה לסליפ קצר ועוד ${minToHhmm(extra)}.`
-      : ` ההפרש, ${minToHhmm(diff)}, כבר כלול בהשלמה לסליפ קצר (${minToHhmm(alreadyMinSlip)}).`;
+    // ההערה היא כותרת בלבד, בלי סכומים: ההשוואה והתוספת בטבלת הפירוט, בשורה של התוספת. רק כשאין
+    // שורה כזאת ההערה אומרת למה: הטיסה שבוצעה היא הארוכה, או שההפרש כבר בהשלמה לסליפ קצר
+    // (בעל המוצר, 01/10/2026).
+    const which = diff <= 0 ? ': הטיסה שבוצעה' : extra <= 0 ? ': ההפרש כבר כלול בהשלמה לסליפ קצר' : '';
 
     // לפעמים ההשלמה נרשמת על סבב סמוך ולא על המחליף עצמו (10/06/2026: LTN 11–12 → OTP 11,
     // ה-Rig 05:10 נרשם על OTP של 10/06). ההערה אומרת איפה, כדי שהסכום ביום האחר לא ייראה
@@ -763,26 +803,31 @@ function higher_of_planned_performed(ctx, params, rule) {
     const paidOn = extra <= 0 ? null
       : findShortfallPaid(ctx, m, extra, column, reportColumn) ?? findShortfallPaid(ctx, m, extra, column, reportColumn, true);
     const moved = paidOn && paidOn !== exec ? paidOn : null;
-    const movedText = moved ? ` ברומה הוא רשום ב-${dayOf(moved.from)}.` : '';
-    ctx.note(match.plan.from, `החלפה ביוזמת החברה: מגיע הקרדיט של הטיסה הארוכה מבין השתיים: ${longer}.${topUp}${movedText}`, rule);
+    ctx.note(match.plan.from, `${swapWord(answer)}: קרדיט של הטיסה הארוכה מבין השתיים${which}.`, rule);
     // ביום של הטיסה שבוצעה, כשהוא אחר.
-    if (exec.from !== match.plan.from) ctx.note(exec.from, 'החלפה ביוזמת החברה: קרדיט על הטיסה שבוצעה.', rule);
+    if (exec.from !== match.plan.from) ctx.note(exec.from, `${swapWord(answer)}: קרדיט על הטיסה שבוצעה.`, rule);
     if (extra <= 0) continue;
 
     const where = moved ? `, ונרשם על ${describePairing(moved)}` : '';
     const why = alreadyMinSlip
       ? `ההפרש הכולל לפי "הגבוה מבין השתיים" הוא ${minToHhmm(diff)}, ומתוכו ${minToHhmm(alreadyMinSlip)} כבר בהשלמה למינימום שמוצגת בנפרד; הנוסף כאן ${minToHhmm(extra)}`
       : 'ההפרש לפי "הגבוה מבין השתיים"';
-    // `forPlan`: הציפייה שייכת להחלפה של הסבב המתוכנן, גם כשהיא רשומה על סבב אחר (`noteChanges`).
+    // `forPlan`: הציפייה שייכת להחלפה של הסבב המתוכנן, גם כשהיא רשומה על סבב אחר (`explainChanges`).
+    // `showOn`: בטבלת הפירוט השורה מוצגת על הטיסה שהחליפה, עם מה שהרומה רשמה על הסבב האחר, וההסבר
+    // אומר איפה זה ברומה (בעל המוצר, 01/10/2026; 10–11/06/2026). לחוקים הציפייה נשארת על הסבב
+    // שעליו הרומה רשמה אותה, כדי שהסכום שם לא ייראה להם כזיכוי בלי הסבר.
+    const explain = `${swapWord(answer)}, מגיע הקרדיט של הטיסה הארוכה מבין השתיים (${minToHhmm(planned)} לעומת ${minToHhmm(performed)}).` +
+      (alreadyMinSlip ? ` מתוך ההפרש, ${minToHhmm(alreadyMinSlip)} כבר בהשלמה לסליפ קצר.` : '') +
+      (moved ? ` הקרדיט הזה מופיע ברומה ב-${dayOf(moved.from)}.` : '');
     ctx.expectPairing(paidOn ?? exec, column, extra, rule,
-      `המתוכנן (${describePairing(match.plan)}) גבוה מהמבוצע. ${why}${where}.`, moved ? { forPlan: match.plan.id } : undefined);
+      `המתוכנן (${describePairing(match.plan)}) גבוה מהמבוצע. ${why}${where}.`, { explain, ...(moved ? { forPlan: match.plan.id, showOn: exec.id } : {}) });
   }
 }
 
 /** ההפרש בין הקרדיט המתוכנן לבין מה שבוצע במקומו, או null כשאי אפשר לחשב את אחד מהם. */
 function plannedMinusPerformed(ctx, planPairing, execPairing) {
   const planned = ctx.plannedCredit(planPairing);
-  const performed = execPairing ? sumLegs(execPairing) : null;
+  const performed = execPairing ? sumLegs(execPairing, ctx.domicile) : null;
   return planned == null || performed == null ? null : planned - performed;
 }
 
@@ -828,9 +873,15 @@ function lost_hours_credit(ctx, params, rule) {
       : params.answer_label;
     const note = `${describePairing(match.plan)}: ${why}. השעות שהפסיד` +
       (match.exec ? `, בנוסף לקרדיט של ${describePairing(match.exec)}.` : '.');
-    if (match.exec) ctx.expectPairing(match.exec, key, lost, rule, note);
+    // ההסבר בשורת הפירוט קצר (בעל המוצר, 01/10/2026). כשהרומה זיכתה בלי שנשאלה שאלה: "…האפליקציה מניחה:"
+    // ושם החוק, שאינו כתוב עוד בתגית (04/10/2026); כשכמה חוקים מתאימים, כולם בשמם.
+    // אחרי תשובה: בלי הסבר, ועל טיסה שבוצעה במקום – של איזו טיסה השעות.
+    const explain = assumed
+      ? `הרומה מזכה את השעות והסיבה אינה בקבצים. האפליקציה מניחה${assumed.titles.length > 1 ? ` אחת מאלה: ${assumed.titles.join(' או ')}` : `: ${assumed.titles[0]}`}.`
+      : match.exec ? `השעות של ${describePairing(match.plan)}.` : '';
+    if (match.exec) ctx.expectPairing(match.exec, key, lost, rule, note, { explain });
     // בלי טיסה שבוצעה, שורת הפירוט מציגה את הטיסה שתוכננה (בעל המוצר, 29/09/2026).
-    else ctx.expect(assumed?.date ?? match.plan.from, key, lost, rule, note, { plannedRoute: describeRoute(match.plan) });
+    else ctx.expect(assumed?.date ?? match.plan.from, key, lost, rule, note, { plannedRoute: describeRoute(match.plan), explain });
     ctx.markPairing(match.plan, 'lost_hours_credit');
     for (const v of assumed?.values ?? []) ctx.assumeAnswer(match.plan, v);
   }
@@ -856,7 +907,7 @@ function paidLostHours(ctx, planPairing) {
   const free = (d) => !ctx.execPairings.some((e) => e.dates.includes(d));
   const date = planPairing.dates.find((d) => free(d) && ctx.paidOnDate(d, first.column, key, first.lost));
   return date ? { rule: rules[0], ...first, date, labels: rules.map((r) => r.logic.params?.answer_label).join(' או '),
-    values: rules.map((r) => r.logic.params?.answer_value) } : null;
+    titles: rules.map((r) => r.title), values: rules.map((r) => r.logic.params?.answer_value) } : null;
 }
 
 /** סוג המטוס כמשפחה: B789 → B787, ‏B738 → B737. */
@@ -912,11 +963,12 @@ function voluntary_swap(ctx, params, rule) {
     // ההערה ביום של כל צד: ביום המתוכנן שלא בוצע – אין קרדיט; ביום של הטיסה שבוצעה – הקרדיט שלה
     // (בעל המוצר, 29/09/2026).
     if (answer.link === 'none') {
-      ctx.note(date, 'החלפה מרצון: הטיסה נמסרה ללא חלופה, ולא מגיע עליה קרדיט.', rule);
+      ctx.note(date, 'החלפה מרצון: הטיסה נמסרה ללא חלופה, ולא מגיע עליה קרדיט.', rule, { pairingId: match.plan.id });
       continue;
     }
     if (!match.exec) {
-      ctx.note(date, `החלפה מרצון: לא מגיע קרדיט על ${match.plan.dates.length > 1 ? 'הימים האלה' : 'היום הזה'}.`, rule);
+      // `pairingId`: ההערה של הסבב המתוכנן, ולא של טיסה אחרת שבוצעה באותם ימים (`splitSwappedElsewhere`).
+      ctx.note(date, `החלפה מרצון: לא מגיע קרדיט על ${match.plan.dates.length > 1 ? 'הימים האלה' : 'היום הזה'}.`, rule, { pairingId: match.plan.id });
       continue;
     }
     const slip = minSlipTopUp(ctx, match.exec) ? ', כולל השלמה לסליפ קצר' : '';
@@ -927,16 +979,17 @@ function voluntary_swap(ctx, params, rule) {
 /**
  * סבב מתוכנן שלא בוצע כמתוכנן. הסיבה אינה בקבצים והיא קובעת מה מגיע, ולכן נשאלת עליה שאלה
  * אחת: גם כשלא בוצע דבר באותם ימים, וגם כשבוצע בהם סבב אחר – טיסה אחרת באותם ימים אינה
- * מוכיחה החלפה (בקשת בעל המוצר, 24/09/2026). ארבע התשובות ומה שכל אחת גוררת:
- * החלפה ביוזמת החברה – הגבוה מבין שתי הטיסות (`higher_of_planned_performed`);
+ * מוכיחה החלפה (בקשת בעל המוצר, 24/09/2026). שש התשובות ומה שכל אחת גוררת:
+ * שינוי ביוזמת החברה, זכייה במכרז וסטיה לשדה משנה – הגבוה מבין שתי הטיסות (`higher_of_planned_performed`);
  * החלפה מרצוני – רק הקרדיט של הטיסה שבוצעה (`voluntary_swap`);
  * המתוכננת בוטלה ללא קרדיט – ימיה נחשבים ימים ללא פעילות, ומה שבוצע בהם לא היה מתוכנן,
  * כלומר מגיעה עליו קריאה מיוחדת (`special_call`);
  * הורדה מהטיסה המקורית – השעות שהפסיד, בנוסף לקרדיט של מה שבוצע (`lost_hours_credit`).
- * בשתי ההחלפות נבחרת הטיסה שבוצעה במקום: קודם זו שבאותם ימים, ואחריה כל פעילות שלא תוכננה.
+ * בשינוי, במכרז ובהחלפה מרצוני נבחרת הטיסה שבוצעה במקום: קודם זו שבאותם ימים, ואחריה כל פעילות שלא תוכננה.
  *
- * סטיה לשדה משנה (הסבב שבוצע כולל, לצד היעד המתוכנן, יעד נוסף יחיד) אינה נשאלת: מניחים
- * החלפה ביוזמת החברה בלי שאלה, כי הקרדיט כבר כולל את כל מה שבוצע (`assumeDiversion`).
+ * סטיה לשדה משנה (אותם מספרי טיסה, עם נחיתה ביעד שלא תוכנן) אינה נשאלת: מניחים אותה, ומגיע הגבוה
+ * מבין השתיים, כמו בשינוי ביוזמת החברה (`assumeDiversion`). כשהיא אינה ברורה מהקבצים, היא אפשרות
+ * בשאלה.
  */
 function cancelled_no_compensation(ctx, params, rule) {
   checkLinkConflicts(ctx, rule);
@@ -950,6 +1003,7 @@ function cancelled_no_compensation(ctx, params, rule) {
       continue;
     }
     if (answer.value === 'cancelled') noteCancelled(ctx, match, rule, null);
+    if (answer.value === 'diversion' && match.exec) noteDiversion(ctx, match, rule);
     if (answer.value === 'other' && !applyOtherReason(ctx, answer, rule, {
       what: match.exec ? 'סבב מתוכנן שבמקומו בוצע סבב אחר' : 'סבב מתוכנן שלא בוצע',
       date: match.plan.from, pairing: match.exec, extra: { plannedRoute: describeRoute(match.plan) },
@@ -1004,7 +1058,7 @@ function checkLinkConflicts(ctx, rule) {
 
   // סבב מתוכנן עם קישור, מול מה שכבר סומן על הטיסה שהוא מצביע עליה.
   for (const entry of planResolution.values()) {
-    if (!['replaced', 'voluntary_swap'].includes(entry.value) || !entry.link || entry.link === 'none') continue;
+    if (![...COMPANY_PAID_SWAPS, 'voluntary_swap'].includes(entry.value) || !entry.link || entry.link === 'none') continue;
     const exec = execResolution.get(entry.link);
     if (!exec) continue;
     const compatible = entry.value === 'voluntary_swap' && exec.value === 'voluntary_swap' && exec.link === entry.match.plan.id;
@@ -1086,35 +1140,52 @@ function assumeCancelled(ctx, match, rule) {
   return true;
 }
 
-/**
- * סטיה לשדה משנה: הסבב המתוכנן היה ליעד יחיד X, והסבב שבוצע כולל את X ועוד יעד אחד בלבד –
- * לפני X (סטיה ביציאה: "טיסה ל-X" הופכת ל"טיסה ל-Y ומ-Y ל-X") או אחריו (סטיה בחזרה: "טיסה
- * מ-X" הופכת ל"טיסה מ-X ל-G ומ-G"). מחזיר את היעד הנוסף, או null כשזה לא המקרה.
- */
-function diversionExtraDestination(plan, exec) {
-  if (plan.destinations.length !== 1 || exec.destinations.length !== 2) return null;
-  const [x] = plan.destinations;
-  if (!exec.destinations.includes(x)) return null;
-  return exec.destinations.find((d) => d !== x) ?? null;
+/** לפחות אחד ממספרי הטיסה המתוכננים (בלי DH) נמצא בסבב שבוצע. */
+function sharesFlight(plan, exec) {
+  const flights = new Set(exec.legs.map((l) => l.flight).filter(Boolean));
+  return plan.legs.some((l) => !l.dh && l.flight && flights.has(l.flight));
 }
 
 /**
- * סטיה לשדה משנה במהלך הטיסה, למשל בגלל מזג אוויר: לא החלפה בסבב אחר, אלא אותה טיסה עם רגל
- * נוספת. הקרדיט כבר כולל את כל מה שבוצע (`credit_from_scheduled` סופר את כל רגלי הסבב, כולל
- * הרגל הנוספת), ולכן מניחים ולא שואלים – חוץ ממקרה לא צפוי שבו המבוצע יוצא קצר מהמתוכנן
- * למרות הרגל הנוספת, ואז בודקים ידנית כמו בהחלפה רגילה (בקשת בעל המוצר, 26/09/2026).
+ * סטיה לשדה משנה: הסבב שבוצע הוא הסבב המתוכנן – כל מספרי הטיסה המתוכננים (בלי DH) נמצאים בו – אבל
+ * נחת ביעד שלא תוכנן: בנוסף ליעדים המתוכננים (בדרך אליהם או בחזרה מהם), או במקום אחד מהם (05/02/2026:
+ * ‏LY5115/LY5116 ל-BUS נחתה ב-KUT בגלל מזג אוויר בבטומי). מספר טיסה אחר הוא סבב אחר, ונשאל (בעל
+ * המוצר, 05/10/2026).
+ */
+function isDiversion(plan, exec) {
+  if (!plan.destinations.length || !exec.destinations.some((d) => !plan.destinations.includes(d))) return false;
+  const flights = new Set(exec.legs.map((l) => l.flight).filter(Boolean));
+  return plan.legs.every((l) => l.dh || !l.flight || flights.has(l.flight));
+}
+
+/**
+ * סטיה לשדה משנה במהלך הטיסה, למשל בגלל מזג אוויר: לא החלפה בסבב אחר, אלא אותה טיסה עם נחיתה
+ * בשדה שלא תוכנן. מניחים ולא שואלים. אין עליה סעיף בהסכמים, ולכן היא שינוי ביוזמת החברה: הגבוה מבין
+ * המתוכנן למה שבוצע, לפי STA − STD (`higher_of_planned_performed`, לפי הסימון `diversion`; בעל המוצר,
+ * 26/09/2026 ו-05/10/2026). לחוקים של 2024 ס' 34–37 ו-39 היא ביוזמת החברה (`cancelStatus`).
  */
 function assumeDiversion(ctx, match, rule) {
-  if (!match.exec) return false;
-  const extra = diversionExtraDestination(match.plan, match.exec);
-  if (!extra) return false;
-  const diff = plannedMinusPerformed(ctx, match.plan, match.exec);
-  if (diff == null || diff > 0) return false;
-  ctx.markPairing(match.plan, 'diversion');
-  ctx.markPairing(match.exec, 'diversion');
+  if (!match.exec || !isDiversion(match.plan, match.exec)) return false;
+  noteDiversion(ctx, match, rule);
+  // גם כשהרומה זיכתה קריאה מיוחדת: אותם מספרי טיסה הם אותה טיסה (`explainUnexplained`; בעל המוצר, 06/10/2026).
+  ctx.markPairing(match.exec, 'diversion_assumed');
   ctx.assumeAnswer(match.plan, 'diversion');
-  ctx.note(match.plan.from, `סטיה לשדה משנה (נחיתה גם ב-${extra}): הקרדיט כבר כולל את כל מה שבוצע, ואין פער לתשלום.`, rule);
   return true;
+}
+
+/** סטיה לשדה משנה, שהונחה או שנענתה: סימון לחוקים אחרים, והערה בשורת השינוי עם השדות. */
+function noteDiversion(ctx, match, rule) {
+  ctx.markPairing(match.plan, 'diversion');
+  // הנחיתה המאוחרת כבר רשמה את הסטיה על הסבב שבוצע (`late_landing_home`).
+  if (!ctx.pairingHandledBy(match.exec, 'diversion')) {
+    const list = (ds) => ds.map((d) => `⁦${d}⁩`).join(' ו-');
+    const extra = match.exec.destinations.filter((d) => !match.plan.destinations.includes(d));
+    const missing = match.plan.destinations.filter((d) => !match.exec.destinations.includes(d));
+    if (extra.length) {
+      ctx.note(match.plan.from, `סטיה לשדה משנה: נחיתה ${missing.length ? `ב-${list(extra)} במקום ${list(missing)}` : `גם ב-${list(extra)}`}.`, rule);
+    }
+  }
+  ctx.markPairing(match.exec, 'diversion');
 }
 
 /** סבב שבוטל ללא קרדיט: ימיו נספרים כימים ללא פעילות, ומה שבוצע בהם לא היה מתוכנן. */
@@ -1137,7 +1208,14 @@ function whatHappenedOptions(ctx, plan, exec) {
     : diff > 0 ? `: ${amountWord(shortfall)} של ${minToHhmm(diff)}`
     : '; מה שבוצע אינו קצר מהמתוכנן, ולכן אין הפרש לתשלום');
   return [
-    { value: 'replaced', label: 'החלפה ביוזמת החברה (כולל זכיה במכרז או סטיה לשדה משנה)', hint: higher, needsLink: true },
+    { value: 'replaced', label: 'שינוי ביוזמת החברה', hint: higher, needsLink: true },
+    // אותה טיסה, עם נחיתה ביעד שלא תוכנן: רק מול הסבב שבוצע באותם ימים, ולכן בלי קישור. משלמת כמו
+    // שינוי ביוזמת החברה, ומוצגת בשמה בשינויים (בעל המוצר, 05/10/2026). רק כשלפחות אחד ממספרי הטיסה
+    // המתוכננים נמצא במה שבוצע: בלי אף אחד זו טיסה אחרת, ולא סטיה (04/06/2024: SKG → WAW).
+    ...(exec && sharesFlight(plan, exec) ? [{ value: 'diversion', label: 'סטיה לשדה משנה', hint: higher }] : []),
+    // זכייה במכרז משלמת כמו שינוי ביוזמת החברה, אבל אינה "ביוזמת החברה" לעניין 2024 ס' 34–37 ו-39
+    // (ס' 40): נחיתות לילה, שבתות ברצף וטיסות סבב לילה עוקבות (בעל המוצר, 05/10/2026).
+    { value: 'bid', label: 'זכייה במכרז', hint: higher, needsLink: true },
     { value: 'voluntary_swap', label: 'החלפה מרצוני', hint: 'רק הקרדיט של הטיסה שבוצעה', needsLink: true },
     { value: 'cancelled', label: 'הטיסה המקורית בוטלה ללא קרדיט',
       hint: exec ? 'מגיע פיצוי של קריאה מיוחדת על הטיסה שבוצעה' : 'לא מגיע כלום' },
@@ -1229,7 +1307,7 @@ function training_cancelled_flight(ctx, params, rule) {
     if (training.length && !marked.has(pairing)) {
       marked.add(pairing);
       ctx.markPairing(pairing, 'training_cancelled');
-      ctx.note(day.date, `${training.join(', ')} תוכנן ל-${dayOf(day.date)}, ובמקומו הוצבת לטיסה: מגיעה קריאה מיוחדת (ס' 17.ג).`, rule);
+      ctx.note(day.date, `${training.join(', ')} בוטל והוצבת לטיסה: קריאה מיוחדת.`, rule);
     }
 
     const own = ctx.matches.find((m) => m.exec === pairing);
@@ -1239,8 +1317,10 @@ function training_cancelled_flight(ctx, params, rule) {
       const movedTo = ctx.timeline.filter((d) => d.date !== day.date && ctx.execCodes(d).some((c) => c.startsWith(prefix)) &&
         !(d.plan?.codes ?? []).some((c) => c.startsWith(prefix)));
       if (movedTo.length) {
+        // `aside`: הטיסה של אותם ימים אינה קשורה להזזה, ולכן ההערה נשארת בהערות ולא עוברת לשורת
+        // השינוי של הטיסה (07/06/2026: HOME_RGT שזז, ו-BER שהוא החלפה מרצון של FRA).
         ctx.note(day.date, `${code} תוכנן ל-${dayOf(day.date)} ובוצע ב-${movedTo.map((d) => dayOf(d.date)).join(', ')}${placed}. ` +
-          'הזזה בתוך החודש אינה מזכה בפיצוי.', rule);
+          'הזזה בתוך החודש אינה מזכה בפיצוי.', rule, { aside: !placed });
       } else {
         ctx.review(`${code} תוכנן ל-${dayOf(day.date)}${placed}. ` +
           `${code} לא בוצע ביום אחר בחודש. דורש בדיקה ידנית.`, rule);
@@ -1316,7 +1396,7 @@ function standby_end_for_bid(ctx, params, rule) {
       }
       if (answer.value === 'standby_bid') {
         ctx.markPairing(pairing, 'standby_bid');
-        ctx.note(pairing.from, `סיום כוננות (${range}) בגלל זכייה במכרז: מגיע קרדיט הטיסה וקריאה מיוחדת על ימי הטיסה.`, rule);
+        ctx.note(pairing.from, `סיום כוננות (${range}) בגלל זכייה במכרז: קרדיט הטיסה וקריאה מיוחדת על ימי הטיסה.`, rule);
       } else if (answer.value === 'standby_activated') {
         // הקרדיט על ימי ההפעלה נבדק בחוק ההפעלה מכוננות.
         ctx.markPairing(pairing, 'standby_activated');
@@ -1377,7 +1457,7 @@ function standby_activation(ctx, params, rule) {
       ctx.markPairing(pairing, 'standby_activated');
       const flown = run.filter((d) => pairing.from <= d && d <= pairing.to);
       const beyond = pairing.to > run.at(-1);
-      ctx.note(pairing.from, `הפעלה מהכוננות (${range}): מגיע קרדיט הטיסה, בלי קריאה מיוחדת.`, rule);
+      ctx.note(pairing.from, `הפעלה מהכוננות (${range}): קרדיט הטיסה, בלי קריאה מיוחדת.`, rule);
       if (beyond) {
         ctx.review(`${describePairing(pairing)}: הופעלת מהכוננות (${range}), והחזרה אחרי סוף הכוננות. החברה רשאית להפעיל ` +
           'כונן רק כשהחזרה מתוכננת להסתיים בתוך הכוננות (2018 ס\' 88). דורש בדיקה ידנית.', rule);
@@ -1385,7 +1465,7 @@ function standby_activation(ctx, params, rule) {
 
       // הכוננות רשומה בדוח בימי הטיסה: חוק זיכוי היום כבר משווה בין הטיסה לכוננות.
       if (value && flown.some((d) => ctx.execCodes(ctx.timeline.find((x) => x.date === d)).some((c) => codeIn(c, value.rule.logic.params.report_codes, value.rule.logic.params.report_code_prefixes)))) continue;
-      const credit = sumLegs(pairing);
+      const credit = sumLegs(pairing, ctx.domicile);
       const what = `${flown.length === 1 ? 'יום הכוננות שבו' : `${flown.length} ימי הכוננות שבהם`} טסת (${flown.map(dayOf).join(', ')})`;
       if (!value) {
         ctx.review(`${describePairing(pairing)}: על ${what} מגיע הגבוה מבין קרדיט הטיסה לבין ערך ימי הכוננות (2018 ס' 98). ` +
@@ -1394,7 +1474,7 @@ function standby_activation(ctx, params, rule) {
         ctx.review(`${describePairing(pairing)}: על ${what} מגיע הגבוה מבין קרדיט הטיסה (${credit == null ? 'לא ידוע' : minToHhmm(credit)}) ` +
           `לבין ${flown.length} × ${minToHhmm(value.min)} (${value.rule.title}; 2018 ס' 98). הכוננות גבוהה יותר, ועוד לא ראינו איך זה נרשם ברומה. דורש בדיקה ידנית.`, rule);
       } else {
-        ctx.note(pairing.from, `הפעלה מהכוננות: קרדיט הטיסה, ${minToHhmm(credit)}, גבוה מערך ${what} (${flown.length} × ${minToHhmm(value.min)}), ולכן אין תוספת.`, rule);
+        ctx.note(pairing.from, 'הפעלה מהכוננות: קרדיט הטיסה גבוה מערך הכוננות, ולכן אין תוספת.', rule);
       }
     }
   }
@@ -1450,7 +1530,6 @@ export const LOGIC = {
   dh_activated,
   standby_end_for_bid,
   standby_activation,
-  unexplained_report_amount,
   ...DUTY_LOGIC,
 };
 
@@ -1478,7 +1557,6 @@ export const KNOWN_PARAMS = {
   dh_activated: ['hours', 'report_column', 'report_dh_types'],
   standby_end_for_bid: ['requires_user_answer', 'plan_codes', 'plan_code_prefixes', 'last_days'],
   standby_activation: ['plan_codes', 'plan_code_prefixes'],
-  unexplained_report_amount: ['hours', 'report_column', 'hint'],
   ...DUTY_PARAMS,
 };
 
@@ -1524,7 +1602,7 @@ export const LOGIC_ORDER = [
   'sim_extension',
   'sim_friday_holiday_eve',
   'covered_by',
-  // אחרון מבין חוקי הפיצוי: מה שנשאר בדוח בלי הסבר.
-  'unexplained_report_amount',
+  // אחרון מבין חוקי הפיצוי: בלי הרכב צוות, הוא מניח צוות חוקי רק כשהפיצוי ברומה ושאר החוקים אינם מסבירים אותו.
+  'legal_crew_composition',
   'absence_month_cap',
 ];

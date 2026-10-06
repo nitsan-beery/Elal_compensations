@@ -86,7 +86,8 @@ export function sameFdp(leg, next, fdp) {
   const starts = [next.std, next.atd].filter((t) => t != null);
   if (end == null || !starts.length) return false;
   const days = (Date.parse(next.date) - Date.parse(leg.date)) / 86400000;
-  const rest = days * 1440 + Math.min(...starts) - (fdp.reportMin ?? 0) - end;
+  // המנוחה מתחילה `postMin` אחרי ה-On block (OMA 7.2.1).
+  const rest = days * 1440 + Math.min(...starts) - (fdp.reportMin ?? 0) - end - (fdp.postMin ?? 0);
   return rest < fdp.legalRestMin;
 }
 

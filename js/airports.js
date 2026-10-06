@@ -71,6 +71,23 @@ function utcOffset(zone, ms) {
 }
 
 /**
+ * רגע ב-UTC (ISO) בשעון הבסיס: {date, clock, abs}. `abs` בדקות, כמו `at(date, clock)` במגבלות החוק
+ * (`Date.parse(date) / 60000 + clock`). null בבסיס לא מוכר.
+ */
+export function baseTime(iso, base = 'TLV') {
+  const zone = ZONES[base];
+  const ms = Date.parse(iso);
+  if (!zone || Number.isNaN(ms)) return null;
+  try {
+    const abs = Math.round(ms / 60000) + utcOffset(zone, ms);
+    const day = Math.floor(abs / 1440);
+    return { date: new Date(day * 86400000).toISOString().slice(0, 10), clock: abs - day * 1440, abs };
+  } catch {
+    return null;
+  }
+}
+
+/**
  * שעון מקומי בתחנה פחות שעון הבסיס, בדקות, בתאריך נתון (YYYY-MM-DD). נמדד בצהריים UTC,
  * כי מעברי שעון קיץ הם בלילה. null כששדה לא מוכר או שהדפדפן לא מכיר את האזור.
  */
