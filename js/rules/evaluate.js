@@ -334,11 +334,17 @@ function applyRootChain(ch, { ctx, matches, execPairings, answers, toExec, credi
   const e = execPairings.includes(eff.endsAt) ? eff.endsAt : null;
   // זכייה במכרז שהשרשרת שלה נגמרה בטיסה שבוצעה ביום שלא תוכננה בו פעילות במקור: מגיעה עליה קריאה
   // מיוחדת, באותם ימים או ביום אחר. רק הוספה בהסכמה היא כאילו הייתה בתכנון. ימי הזכייה, בלי פעילות,
-  // אינם מזכים (בעל המוצר, 06/10/2026). לכן הזכייה אינה נכנסת להשוואה, והשרשרת מוצגת מתחת לטיסה
-  // שבוצעה (`movedTo`, `chainNotes`).
+  // אינם מזכים (בעל המוצר, 06/10/2026). אחרי שינוי ביוזמת החברה מגיע בנוסף הגבוה מבין הזכייה לטיסה
+  // שבוצעה (`alsoSpecialCall`: גובר על `excluded_when_special_call`), והזכייה נכנסת להשוואה כסבב שלא
+  // בוצע, עם השרשרת מתחתיו; אחרת – השרשרת מתחת לטיסה שבוצעה (`movedTo`, `chainNotes`).
   if (e && answers[`unplanned:${ch.plan.id}`]?.value === 'bid' && matches.some((x) => x.exec === e && x.how === 'unplanned')) {
     answers[`unplanned:${e.id}`] ??= { value: 'special_call' };
-    ch.movedTo = e.id;
+    if (['replaced', 'bid', 'diversion'].includes(eff.value)) {
+      addAsPlanned(matches, ch.plan, null);
+      answers[`cancelled:${ch.plan.id}`] = { ...eff, alsoSpecialCall: true };
+    } else {
+      ch.movedTo = e.id;
+    }
     return;
   }
   addAsPlanned(matches, ch.plan, e);
@@ -364,6 +370,8 @@ function addAsPlanned(matches, pairing, exec) {
 function chainNotes(out, journal, answers) {
   for (const c of out.changes) {
     // זכייה במכרז שעברה ליום אחר (`applyRootChain`): השרשרת מתחת לטיסה שבוצעה.
+    // שורת "במקום סבב שתוכנן בימים אחרים" (`showSwaps`): השרשרת כבר מתחת לסבב שלא בוצע.
+    if (c.how === 'swap') continue;
     const moved = !c.planId && c.execId && journal.chains.find((x) => x.movedTo === c.execId);
     const ch = moved || (c.planId && journal.chains.find((x) => x.plan.id === c.planId));
     const eff = moved ? { chain: true } : ch && answers[`cancelled:${c.planId}`];
@@ -973,6 +981,8 @@ function showSwaps(out, answers, assumed) {
     c.how = 'swap';
     c.label = 'במקום סבב שתוכנן בימים אחרים';
     c.plan = planned?.plan ?? 'בחודש אחר';
+    // סבב שנוסף ביומן (`addAsPlanned`), גם כשהוא באותם ימים.
+    if (planned?.label.startsWith('סבב שנוסף ביומן')) c.label = 'במקום סבב שנוסף ביומן';
     if (!planned) continue;
     c.planId = planned.planId;
     planned.exec = c.exec;

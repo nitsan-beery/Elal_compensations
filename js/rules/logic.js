@@ -777,7 +777,9 @@ function higher_of_planned_performed(ctx, params, rule) {
         'ולכן לא ניתן לחשב את ההפרש. דורש בדיקה ידנית.', rule);
       continue;
     }
-    if (params.excluded_when_special_call && ctx.pairingHandledBy(exec, 'special_call')) continue;
+    // זכייה במכרז ביומן שהוחלפה ביוזמת החברה בטיסה ביום שלא תוכנן בו כלום: גם קריאה מיוחדת וגם הגבוה
+    // מבין השתיים (`applyRootChain` ב-js/rules/evaluate.js; בעל המוצר, 06/10/2026).
+    if (params.excluded_when_special_call && !answer?.alsoSpecialCall && ctx.pairingHandledBy(exec, 'special_call')) continue;
 
     // בשרשרת מהיומן: הגבוה מבין הסבבים שלא בוצעו (`reduceChain`; בעל המוצר, 06/10/2026).
     const planned0 = answer?.basis ?? match.plan;
@@ -806,9 +808,11 @@ function higher_of_planned_performed(ctx, params, rule) {
     const paidOn = extra <= 0 ? null
       : findShortfallPaid(ctx, m, extra, column, reportColumn) ?? findShortfallPaid(ctx, m, extra, column, reportColumn, true);
     const moved = paidOn && paidOn !== exec ? paidOn : null;
-    ctx.note(match.plan.from, `${swapWord(answer)}: קרדיט של הטיסה הארוכה מבין השתיים${which}.`, rule);
+    // זכייה במכרז ביומן שהוחלפה בטיסה ביום שלא תוכנן בו כלום (`alsoSpecialCall`): גם קריאה מיוחדת.
+    const sc = answer?.alsoSpecialCall ? ' וקריאה מיוחדת על הטיסה שבוצעה' : '';
+    ctx.note(match.plan.from, `${swapWord(answer)}: קרדיט של הטיסה הארוכה מבין השתיים${which}${sc}.`, rule);
     // ביום של הטיסה שבוצעה, כשהוא אחר.
-    if (exec.from !== match.plan.from) ctx.note(exec.from, `${swapWord(answer)}: קרדיט על הטיסה שבוצעה.`, rule);
+    if (exec.from !== match.plan.from) ctx.note(exec.from, `${swapWord(answer)}: קרדיט על הטיסה שבוצעה${sc ? ' וקריאה מיוחדת' : ''}.`, rule);
     if (extra <= 0) continue;
 
     const where = moved ? `, ונרשם על ${describePairing(moved)}` : '';
@@ -1047,7 +1051,8 @@ function checkLinkConflicts(ctx, rule) {
   for (const m of ctx.matches) {
     if (!m.plan || (m.how !== 'cancelled' && m.how !== 'dates')) continue;
     const a = ctx.answerFor(m);
-    if (a && !('via' in a)) planResolution.set(m.plan.id, { match: m, value: a.value, link: a.link ?? null });
+    // `alsoSpecialCall`: הקריאה המיוחדת על הטיסה שבקישור היא חלק מהתשובה, ולא סתירה.
+    if (a && !('via' in a) && !a.alsoSpecialCall) planResolution.set(m.plan.id, { match: m, value: a.value, link: a.link ?? null });
     else if (!a && wouldAssumeCancelled(ctx, m)) planResolution.set(m.plan.id, { match: m, value: 'assumed', link: null });
   }
 
