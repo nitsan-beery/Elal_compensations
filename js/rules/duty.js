@@ -208,9 +208,9 @@ function second_unplanned_activity(ctx, params, rule) {
   // טיסה לא מתוכננת
   for (const m of ctx.matches) {
     if (m.how !== 'unplanned' || m.exec.cutAtStart) continue;
-    // החלפה מרצוני, והוספה בהסכמה או בזכייה במכרז ביומן לפני הרומה (`ROOT` ב-js/rules/journal.js): אין
-    // פיצוי על ההוספה עצמה (בעל המוצר, 06/10/2026).
-    if (['voluntary_swap', 'added', 'bid'].includes(ctx.answerFor(m)?.value)) continue;
+    // החלפה מרצוני, והוספה בהסכמה ביומן לפני הרומה (`ROOT` ב-js/rules/journal.js): אין פיצוי על
+    // ההוספה עצמה (בעל המוצר, 06/10/2026).
+    if (['voluntary_swap', 'added'].includes(ctx.answerFor(m)?.value)) continue;
     const u = m.exec;
     const span = execSpan(u, ctx.domicile, false);
     if (span.start == null) continue;

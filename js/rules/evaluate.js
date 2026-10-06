@@ -311,7 +311,8 @@ function applyJournal(journal, { ctx, matches, execPairings, answers }) {
     if (n.step) continue;
     const a = answers[`unplanned:${n.id}`];
     const e = a && toExec(n.pairing);
-    if (e && !answers[`unplanned:${e.id}`]) answers[`unplanned:${e.id}`] = a;
+    // זכייה במכרז ביומן היא טיסה שנוספה על התכנון, ומגיעה עליה קריאה מיוחדת (בעל המוצר, 06/10/2026).
+    if (e && (!answers[`unplanned:${e.id}`] || e.id === n.id)) answers[`unplanned:${e.id}`] = a.value === 'bid' ? { ...a, value: 'special_call' } : a;
     // נוסף כאילו היה בתכנון ואינו ברומה: כמו סבב מתוכנן שלא בוצע, והשאלה הרגילה נשאלת עליו.
     if (n.root && !e) addAsPlanned(matches, { ...n.origin, id: n.id }, execPairings.find((x) => overlapDays(n.pairing, x)) ?? null);
   }
