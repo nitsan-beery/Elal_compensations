@@ -43,35 +43,9 @@ const CREDIT_LABEL_COLUMNS = ['Credit', 'FLT+DH', 'Rig'];
  *        אותו (`parseEvents` ב-js/calendar.js): הרכב הצוות ושעות הכוננות. תשובה של המשתמש קודמת להן.
  * @param {string[]} [input.reopen]  שאלות שהיומן אינו עונה עליהן, כי המשתמש החליט בהן בעצמו
  *        (`calendarIgnored` ברשומת החודש; בעל המוצר, 04/10/2026).
- *
- * הרכב צוות של טיסה שירדה מהיומן (`kept`, `keepRemovedFlights`), בדרך כלל כי לא בוצעה, עונה על
- * השאלה רק כשהוא מתאים למגבלות החוק ולפיצויים ברומה (בעל המוצר, 04/10/2026): אין איתו חריגה או
- * פער שאין גם בלעדיו. כל טיסה נבדקת לחוד, כדי שטיסה אחת שאינה מתאימה לא תבטל את האחרות. טיסה שאינה
- * מתאימה נשאלת, עם מה שהיה רשום ביומן (`calendarBefore`).
  */
-export function evaluate(input) {
-  const all = evaluateOnce(input, () => true);
-  if (!all.keptUsed.length) return all;
-  const none = evaluateOnce(input, () => false);
-  if (keptConsistent(all, none)) return all;
-  const fits = all.keptUsed.filter((key) => keptConsistent(evaluateOnce(input, (k) => k === key), none));
-  if (!fits.length) return none;
-  const some = evaluateOnce(input, (k) => fits.includes(k));
-  return keptConsistent(some, none) ? some : none;
-}
-
-/**
- * אין בתוצאה עם הרכב הצוות שנשמר (`withKept`) פער מול הרומה או חריגה מהחוק שאין גם בלעדיו. גם פער
- * שממתין לתשובה על שאלה אחרת באותו יום נחשב.
- */
-function keptConsistent(withKept, without) {
-  const gaps = (o) => new Set(o.comparison.filter((r) => r.diff).map((r) => `${r.column}|${r.dates.join(',')}|${r.diff}`));
-  const violations = (o) => new Set((o.legal?.violations ?? []).map((v) => JSON.stringify(v)));
-  const within = (a, b) => [...a].every((k) => b.has(k));
-  return within(gaps(withKept), gaps(without)) && within(violations(withKept), violations(without));
-}
-
-function evaluateOnce({ rulesData, plan = null, exec = null, answers = {}, history = [], calendar = null, reopen = [] }, allowKept) {
+export function evaluate({ rulesData, plan = null, exec = null, answers = {}, history = [], calendar = null, reopen = [] }) {
+  calendar = withoutKept(calendar);
   if (!plan && !exec) throw new Error('לא הועלה אף קובץ.');
   const period = (exec ?? plan).period;
   const mode = plan && exec ? 'full' : plan ? 'plan' : 'exec';
@@ -92,7 +66,7 @@ function evaluateOnce({ rulesData, plan = null, exec = null, answers = {}, histo
   const domicile = exec?.domicile ?? guessDomicile(plan);
   if (!domicile) warnings.push('לא ניתן לקבוע את בסיס הבית מהקבצים. חוקים שתלויים בבסיס לא ייבדקו.');
   const fleet = fleetOf(plan) ?? rulesData.crew?.fleet ?? null;
-  const cal = calendarFacts(calendar, domicile, allowKept);
+  const cal = calendarFacts(calendar, domicile);
 
   const planPairings = plan ? buildPairings(timeline, domicile, planLegsWithCredit).map(ftOnLastDay) : [];
   if (exec) markCarryIn(timeline, domicile);
@@ -265,25 +239,18 @@ function evaluateOnce({ rulesData, plan = null, exec = null, answers = {}, histo
     ? [...monthKeys].filter((k) => k.startsWith(month) && read(k) && matters(k) && !cal.has(k.slice(0, 10), k.slice(11))).sort()
       .map((k) => ({ date: k.slice(0, 10), flight: k.slice(11) }))
     : [];
-  // שאלה על הרכב הצוות של טיסה שירדה מהיומן: מה היה רשום בו.
-  for (const q of out.questions) {
-    const before = cal.keptAnswer(q.id);
-    if (before) q.calendarBefore = before.value;
-  }
-  out.keptUsed = [...cal.keptUsed];
   return out;
 }
 
 /**
  * סבבי היומן בחודש, שנבנים מהטיסות שבו כמו סבבי התכנון, והכוננויות שבו. `first`–`last`: הטווח
  * שהיומן מכסה בחודש (מהטיסה או הכוננות הראשונה בו ועד האחרונה). null – אין ביומן נתונים מהחודש.
- * טיסות שירדו מהיומן (`kept`) אינן בו.
  */
 function calendarView(calendar, domicile, period) {
   if (!calendar || !domicile) return null;
   const month = `${period.year}-${String(period.month).padStart(2, '0')}`;
   const byDate = new Map();
-  for (const f of (calendar.flights ?? []).filter((x) => !x.kept).sort((a, b) => a.std.localeCompare(b.std))) {
+  for (const f of [...(calendar.flights ?? [])].sort((a, b) => a.std.localeCompare(b.std))) {
     const t = baseTime(f.std, domicile);
     if (!t || t.date.slice(0, 7) !== month) continue;
     if (!byDate.has(t.date)) byDate.set(t.date, []);
@@ -393,14 +360,12 @@ export function monthCalendar(facts, period) {
 const crewClass = (pilots) => (pilots >= 4 ? 'double' : pilots === 3 ? 'augmented' : 'single');
 
 /**
- * היומן המעודכן של החודש, עם הרכב הצוות של טיסות שירדו ממנו מאז שנשמר (`prev`), מסומנות `kept`:
- * טיסה שתוכננה ולא בוצעה כבר אינה ביומן, ומה שהיה רשום בה עדיין עונה על השאלה עליה (בעל המוצר,
- * 04/10/2026; `evaluate`). טיסה נחשבת אותה טיסה כשמספר הטיסה זהה וההמראה בהפרש של עד 36 שעות.
+ * חודש שנשמר לפני 06/10/2026 יכול להחזיק טיסות שירדו מהיומן, עם הרכב הצוות שהיה רשום בהן (`kept`).
+ * הן אינן נקראות: טיסה שלא בוצעה מקבלת את הצוות החוזי, וטיסה שבוצעה נמצאת ביומן המעודכן (בעל המוצר,
+ * 06/10/2026).
  */
-export function keepRemovedFlights(fresh, prev) {
-  const same = (a, b) => a.flight === b.flight && Math.abs(Date.parse(a.std) - Date.parse(b.std)) <= 36 * 36e5;
-  const gone = (prev?.flights ?? []).filter((f) => f.pilots >= 2 && !fresh.flights.some((g) => same(f, g)));
-  return gone.length ? { ...fresh, flights: [...fresh.flights, ...gone.map((f) => ({ ...f, kept: true }))] } : fresh;
+function withoutKept(calendar) {
+  return calendar?.flights?.some((f) => f.kept) ? { ...calendar, flights: calendar.flights.filter((f) => !f.kept) } : calendar;
 }
 
 /**
@@ -415,13 +380,13 @@ export function calendarGaps({ prev, fresh, domicile, period }) {
   const crewOf = (cal) => {
     const m = new Map();
     for (const f of cal?.flights ?? []) {
-      const t = f.pilots >= 2 && !f.kept ? baseTime(f.std, domicile) : null;
+      const t = f.pilots >= 2 ? baseTime(f.std, domicile) : null;
       if (t && t.date.slice(0, 7) === month) m.set(`${t.date}|${f.flight}`, crewClass(f.pilots));
     }
     return m;
   };
   const gaps = [];
-  const before = crewOf(prev);
+  const before = crewOf(withoutKept(prev));
   const after = crewOf(fresh);
   if (after.size) {
     for (const [k, was] of before) {
@@ -435,13 +400,13 @@ export function calendarGaps({ prev, fresh, domicile, period }) {
 
 /**
  * תשובות של המשתמש על הרכב הצוות (`crew:`, ‏`night_crew:`, ‏`white:`) שהיומן של החודש עונה עליהן, חוץ
- * ממה שב-`ignored` (שאלות שהמשתמש כבר החליט בהן מול היומן) ובלי טיסות שירדו מהיומן (`kept`). האפליקציה שואלת אם לעדכן אותן מהיומן
+ * ממה שב-`ignored` (שאלות שהמשתמש כבר החליט בהן מול היומן). האפליקציה שואלת אם לעדכן אותן מהיומן
  * (בעל המוצר, 04/10/2026). `calendar`: היומן ששמור בחודש. `differs`: היומן עונה אחרת.
  */
 export function crewAnswersInCalendar({ calendar, answers = {}, domicile, period, ignored = [] }) {
   if (!domicile || !calendar?.flights?.length) return [];
   const month = `${period.year}-${String(period.month).padStart(2, '0')}`;
-  const cal = calendarFacts(calendar, domicile, () => false);
+  const cal = calendarFacts(withoutKept(calendar), domicile);
   const out = [];
   for (const [id, a] of Object.entries(answers)) {
     const m = /^(?:crew|night_crew|white):(\d{4}-\d{2}-\d{2}):/.exec(id);
@@ -476,17 +441,13 @@ export function relatedCrewIds(id, crewIdOf = {}) {
  * - `standby(date, code)`: שעות כוננות שאינה בתכנון, לפי חמשת התווים הראשונים של הקוד.
  * - `firstDay(date)`: טיסה ביומן ביום הראשון של החודש: null – אין; `carried` – היא חלק מסבב שיצא
  *   בחודש הקודם (הטיסה הראשונה ביום אינה יוצאת מהבסיס, או שהטיסה שלפניה לא חזרה אליו).
- * טיסה שירדה מהיומן (`kept`) עונה רק כש-`allowKept` מתיר אותה, לפי "date|flight" (`keptUsed`: הטיסות
- * שענו), ואינה נחשבת טיסה שהיומן מכיר.
  */
-function calendarFacts(calendar, domicile, allowKept = () => true) {
+function calendarFacts(calendar, domicile) {
   const crew = new Map(); // "date|flight" → מספר הטייסים
-  const kept = new Map(); // אותו דבר, לטיסות שירדו מהיומן
-  const keptUsed = new Set();
   const standby = [];
   for (const f of calendar?.flights ?? []) {
     const t = f.pilots >= 2 && domicile ? baseTime(f.std, domicile) : null;
-    if (t) (f.kept ? kept : crew).set(`${t.date}|${f.flight}`, f.pilots);
+    if (t) crew.set(`${t.date}|${f.flight}`, f.pilots);
   }
   for (const s of calendar?.standby ?? []) {
     const a = domicile ? baseTime(s.start, domicile) : null;
@@ -494,14 +455,13 @@ function calendarFacts(calendar, domicile, allowKept = () => true) {
     if (a && b) standby.push({ code: s.code, date: a.date, start: a.abs, end: b.abs });
   }
   const near = (date, k) => new Date(Date.parse(date) + k * 864e5).toISOString().slice(0, 10);
-  const legs = (calendar?.flights ?? []).filter((f) => !f.kept).map((f) => ({ ...f, t: domicile ? baseTime(f.std, domicile) : null }))
+  const legs = (calendar?.flights ?? []).map((f) => ({ ...f, t: domicile ? baseTime(f.std, domicile) : null }))
     .filter((f) => f.t).sort((a, b) => a.std.localeCompare(b.std));
   // הרגל בקובץ יכולה להיות רשומה ביום שליד היום שלה בשעון הבסיס.
   const find = (map, date, flight) => [0, -1, 1].map((k) => `${near(date, k)}|${flight}`).find((k) => map.has(k));
   const parse = (id) => /^(crew|night_crew|white):(\d{4}-\d{2}-\d{2}):(.+)$/.exec(id);
   const valueOf = (kind, pilots) => (kind === 'white' ? (pilots >= 3 ? 'yes' : 'no') : crewClass(pilots));
   return {
-    keptUsed,
     firstDay(date) {
       const i = legs.findIndex((f) => f.t.date === date);
       if (i < 0) return null;
@@ -513,17 +473,7 @@ function calendarFacts(calendar, domicile, allowKept = () => true) {
       const m = parse(id);
       if (!m) return null;
       const key = find(crew, m[2], m[3]);
-      if (key) return { value: valueOf(m[1], crew.get(key)), source: 'calendar' };
-      const old = find(kept, m[2], m[3]);
-      if (!old || !allowKept(old)) return null;
-      keptUsed.add(old);
-      return { value: valueOf(m[1], kept.get(old)), source: 'calendar', kept: true };
-    },
-    // מה שהיה רשום ביומן על טיסה שירדה ממנו, בלי קשר ל-`allowKept`.
-    keptAnswer(id) {
-      const m = parse(id);
-      const old = m && !find(crew, m[2], m[3]) ? find(kept, m[2], m[3]) : null;
-      return old ? { value: valueOf(m[1], kept.get(old)) } : null;
+      return key ? { value: valueOf(m[1], crew.get(key)), source: 'calendar' } : null;
     },
     // האם היומן מכיר את הטיסה, בלי קשר לשאלה על הרכב הצוות.
     has: (date, flight) => !!find(crew, date, flight),

@@ -4,7 +4,7 @@
 import { parsePlan } from './pdf/plan.js';
 import { parseExec } from './pdf/exec.js';
 import { xlsxBlob } from './xlsx.js';
-import { evaluate, monthCalendar, calendarGaps, crewAnswersInCalendar, relatedCrewIds, keepRemovedFlights } from './rules/evaluate.js';
+import { evaluate, monthCalendar, calendarGaps, crewAnswersInCalendar, relatedCrewIds } from './rules/evaluate.js';
 import { loadRules, partitionRules } from './rules/catalog.js';
 import { minToHhmm } from './time.js';
 import * as store from './store.js';
@@ -267,9 +267,9 @@ async function runAndSave() {
   const r = state.record;
   const months = await safe(() => store.listMonths(), []);
   // ההשלמות מהיומן נשמרות בחודש, ונשארות בו גם אחרי ניתוק (בעל המוצר, 04/10/2026). יומן שאין בו
-  // דבר מהחודש אינו מוחק את מה שנשמר, וטיסה שירדה מהיומן שומרת את הרכב הצוות שהיה רשום בה (`keepRemovedFlights`).
+  // דבר מהחודש אינו מוחק את מה שנשמר. טיסה שירדה מהיומן אינה נשמרת (בעל המוצר, 06/10/2026).
   const fresh = monthCalendar(calendarFacts(), r.period);
-  if (fresh?.flights.length || fresh?.standby.length) r.calendar = keepRemovedFlights(fresh, r.calendar);
+  if (fresh?.flights.length || fresh?.standby.length) r.calendar = fresh;
   state.result = evaluate({ rulesData: state.rulesData, plan: r.plan, exec: r.exec, answers: r.answers ?? {}, history: historyFor(r.key, months), calendar: r.calendar ?? null,
     reopen: r.calendarIgnored ?? [] });
   r.rulesVersion = state.result.rulesVersion;
@@ -350,8 +350,8 @@ function renderCalendarBar() {
     const answered = Object.keys(state.record?.answers ?? {}).some((id) => /^(crew|night_crew|white):/.test(id));
     notices.push(`<div class="notice warn">לא נמצאו ביומן טיסות של החודש הזה.${answered ? ' הרכבי הצוותים נלקחו מהתשובות שנתת.' : ''} ודא שבוצע סנכרון של היומן מהאורגנייזר.</div>`);
   }
-  // בתכנון לבד, טיסה שירדה מהיומן היא שינוי בסבב, והוא נשאל בשאלה עליו; הרכב הצוות שלה נשמר
-  // (`keepRemovedFlights`). לכן אין עליה הודעה (בעל המוצר, 06/10/2026).
+  // בתכנון לבד, טיסה שירדה מהיומן היא שינוי בסבב, והוא נשאל בשאלה עליו. לכן אין עליה הודעה (בעל
+  // המוצר, 06/10/2026).
   const gaps = (state.calGaps && state.calGaps.key === state.record?.key ? state.calGaps.items : [])
     .filter((g) => g.kind !== 'removed' || state.result?.mode !== 'plan');
   if (gaps.length) {
@@ -882,7 +882,6 @@ function renderQuestion(q, i) {
     <h3>${titleHtml(q.title)}</h3>
     ${q.body ? `<p>${esc(datesFirst(q.body))}</p>` : ''}
     ${hint ? `<p class="small muted">ענית קודם ${esc(answerLabel(hint.answer, kind))}, וביומן ${esc(answerLabel(hint.calendar, kind))}.</p>` : ''}
-    ${q.calendarBefore && !hint ? `<p class="small muted">ביומן היה רשום קודם ${esc(answerLabel(q.calendarBefore, kind))}, והטיסה כבר אינה בו.</p>` : ''}
     <form data-qid="${esc(q.id)}">
       ${picker}${options}
       <div class="row" style="margin-top:.5rem"><button class="btn primary" type="submit" ${q.dateInput ? '' : 'disabled'}>שמור תשובה</button></div>
