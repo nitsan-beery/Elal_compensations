@@ -634,7 +634,8 @@ function makeContext({ out, timeline, domicile, codes, holidays, answers, plan, 
   const askedIds = new Set();
   const noteKeys = new Set();
   const reviewKeys = new Set();
-  const ruleRef = (rule) => ({ ruleId: rule.id, ruleTitle: rule.title, ...(rule.short_title && { shortTitle: rule.short_title }) });
+  const ruleRef = (rule) => ({ ruleId: rule.id, ruleTitle: rule.title, ...(rule.short_title && { shortTitle: rule.short_title }),
+    ...(rule.short_title_plural && { shortTitlePlural: rule.short_title_plural }) });
   const linkedSwap = (prefix, pairingId) => {
     const hit = Object.entries(answers).find(([id, a]) =>
       id.startsWith(prefix) && LINKED_VALUES.includes(a.value) && a.link === pairingId);
@@ -1165,6 +1166,8 @@ function explainChanges(out, supported) {
       due = 'ממתין לתשובה בשאלה על הסבב';
     } else {
       const items = new Set();
+      // זיכוי יומי על כמה ימים: במספר המדויק וברבים ("קרדיט 2 ימי מחלה"; בעל המוצר, 07/10/2026).
+      const days = new Map();
       for (const e of out.expectations) {
         const logic = logicOf.get(e.ruleId);
         if (!CHANGE_DUE_LOGIC.has(logic)) continue;
@@ -1172,10 +1175,21 @@ function explainChanges(out, supported) {
         // רשום על הטיסה הזאת, אבל שייך להחלפה של סבב מתוכנן אחר (`forPlan`): לא חלק ממה שמגיע עליה,
         // ובפירוט הוא מוצג על הטיסה שהחליפה (10/06/2026: ה-RIG ‏05:10 של ההחלפה של LTN ב-11/06).
         if (e.forPlan && !ids.includes(e.forPlan)) continue;
-        items.add(DUE_WORDING[logic] ?? (logic === 'absence_day_credit' ? `קרדיט ${e.shortTitle ?? e.ruleTitle}` : e.shortTitle ?? e.ruleTitle));
+        if (logic === 'absence_day_credit') {
+          if (!days.has(e.ruleId)) days.set(e.ruleId, { e, dates: new Set() });
+          days.get(e.ruleId).dates.add(e.date);
+          items.add(`absence:${e.ruleId}`);
+          continue;
+        }
+        items.add(DUE_WORDING[logic] ?? e.shortTitle ?? e.ruleTitle);
       }
+      const dayWording = ({ e, dates }) => {
+        const one = e.shortTitle ?? e.ruleTitle;
+        if (dates.size < 2) return `קרדיט ${one}`;
+        return `קרדיט ${dates.size} ${e.shortTitlePlural ?? (one.startsWith('יום ') ? `ימי ${one.slice(4)}` : `ימי ${one}`)}`;
+      };
       // בלי "מגיע" בראש המשפט, כמו בהערות שהחוקים רושמים על שינוי (בעל המוצר, 01/10/2026).
-      const list = [...items];
+      const list = [...items].map((t) => (t.startsWith('absence:') ? dayWording(days.get(t.slice(8))) : t));
       due = list.length ? (list.length > 1 ? `${list.slice(0, -1).join(', ')} ו${list.at(-1)}` : list[0]) : 'לא מגיע קרדיט ולא פיצוי';
     }
     c.notes = [...diverted, { message: `${outcome}${due}.`, byUser: false }];

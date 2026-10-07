@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "rules_version": "2026-10-07.1",
+  "rules_version": "2026-10-07.2",
   "updated": "2026-10-07",
   "source": "טבלת פיצויי אצ\"א אל על (Artifact), על בסיס ההסכם הישן (פרק כ\"ה), הסכם 2018, הסכם אצ\"א 2024 והסכם 2026",
   "precedence": "הסכם מאוחר גובר על מוקדם. סעיף שלא בוטל ולא שונה נשאר בתוקף. פיצויי 2018, 2024 ו‑2026 באים בנוסף לפיצויים מהסכמים אחרים.",
@@ -252,6 +252,7 @@
       "id": "vacation_base_credit",
       "category": "plan",
       "title": "יום חופשה: זיכוי בסיסי",
+      "short_title": "יום חופשה",
       "when": "כל יממת חופשה שנתית שאושרה ופורסמה בתוכנית החודשית. לא חל על חופשות מיוחדות.",
       "amount": {
         "unit": "credit_hours",
@@ -376,6 +377,7 @@
       "id": "planned_sick_credit",
       "category": "plan",
       "title": "יום מחלה מתוכנן",
+      "short_title_plural": "ימי מחלה מתוכננים",
       "when": "יום מחלה שתוכנן בלוח (FSC_PLND / SCK_PLAN), וכל קוד שמתחיל ב‑SCK.",
       "amount": {
         "unit": "credit_hours",
@@ -554,6 +556,7 @@
       "id": "sim_day_credit",
       "category": "plan",
       "title": "יום סימולטור: זיכוי יומי",
+      "short_title": "יום סימולטור",
       "when": "יום אימון או בחינה בסימולטור.",
       "amount": {
         "unit": "credit_hours",
