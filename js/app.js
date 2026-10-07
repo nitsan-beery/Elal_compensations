@@ -614,14 +614,16 @@ const isGap = (c) => c.ok === false || c.marks.length > 0;
 /**
  * שורת פיצוי או Rig מוסברת בטבלה עצמה, ולא בהערות (בעל המוצר, 01/10/2026): מתחת לטיסה ההסבר
  * (`explain` של כל ציפייה). שם החוק מוצג רק כשלוחצים על השורה (`setupRuleTips`).
- * הסכום אינו בהסבר, כי הוא כבר בשורה; רק כשכמה חוקים חולקים שורה כתוב ליד כל אחד החלק שלו. קריאה
- * מיוחדת: בלי הסבר. `notes` של השורה: פיצוי שברומה ואף חוק אינו מסביר.
+ * הסכום אינו בהסבר, כי הוא כבר בשורה; רק כשכמה חוקים חולקים שורה כתוב ליד כל אחד החלק שלו. ציפייה
+ * בלי הסבר (קריאה מיוחדת, הורדה מטיסה אחרי תשובה) מוסברת בשם הקצר של החוק, כדי שאף פיצוי לא יישאר
+ * בלי שורה מתחת לטיסה (בעל המוצר, 07/10/2026). `notes` של השורה: פיצוי שברומה ואף חוק אינו מסביר.
  */
 function explainOf(c) {
   if (!COMP_COLUMNS.has(c.column)) return '';
   const share = (e) => (c.items.length > 1 && c.unit !== 'count' ? ` · <span class="num">${minToHhmm(e.min)}</span>` : '');
+  const text = (e) => e.explain || e.shortTitle || e.ruleTitle || '';
   const lines = [
-    ...c.items.map((e) => `${esc(share(e) ? (e.explain ?? '').replace(/\.$/, '') : e.explain ?? '')}${share(e)}`.trim()),
+    ...c.items.map((e) => `${esc(share(e) ? text(e).replace(/\.$/, '') : text(e))}${share(e)}`.trim()),
     ...(c.notes ?? []).map(esc),
   ];
   return [...new Set(lines.filter(Boolean))].map((l) => `<div class="explain">${l}</div>`).join('');
