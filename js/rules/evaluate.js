@@ -395,8 +395,11 @@ function chainNotes(out, journal, answers) {
     if (end && end !== c.exec) path.push(end);
     if (!moved) c.plan = path.join(' → ');
     if (view.steps.length > 1 || path.length > 1 || root || moved) c.steps = view.steps;
-    // מתחת לשורה רק הסיבה, ומה שמגיע עליה; כשהיא כבר הכותרת של השורה – רק מה שמגיע.
-    const reason = view.reason && view.reason !== `${c.label}.` ? [{ message: view.reason, byUser: true }] : [];
+    // מתחת לשורה רק הסיבה, ומה שמגיע עליה; כשהיא כבר הכותרת של השורה, או בראש ההערה על מה שמגיע
+    // ("החלפה מרצון: לא מגיע קרדיט על היום הזה."), – רק מה שמגיע (בעל המוצר, 07/10/2026; 21/07/2026 ATH).
+    const norm = (t) => t.replace(/\.$/, '').replace('מרצוני', 'מרצון');
+    const said = view.reason && (c.notes ?? []).some((n) => norm(n.message).startsWith(`${norm(view.reason)}:`));
+    const reason = view.reason && view.reason !== `${c.label}.` && !said ? [{ message: view.reason, byUser: true }] : [];
     c.notes = eff.value === 'chain_open' ? [...reason, { message: 'ממתין לתשובה בשאלה על הסבב.', byUser: false }] : [...reason, ...(c.notes ?? [])];
     chained.add(c);
   }
