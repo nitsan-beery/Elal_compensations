@@ -1270,6 +1270,7 @@ async function renderHistory() {
       <div class="row">
         <button class="btn" data-action="backup" ${months.length ? '' : 'disabled'}>גיבוי נתונים</button>
         <label class="btn">שחזר מקובץ<input type="file" accept="application/json,.json" hidden data-action="restore"></label>
+        <button class="btn danger" data-action="clear" ${months.length ? '' : 'disabled'}>ניקוי הנתונים</button>
       </div>
     </div>`;
 
@@ -1291,6 +1292,17 @@ async function renderHistory() {
   $('[data-action="backup"]', root)?.addEventListener('click', async () => {
     const data = await store.exportBackup();
     download(`elal-compensations-backup-${new Date().toISOString().slice(0, 10)}.json`, JSON.stringify(data), 'application/json');
+  });
+  // כל החודשים השמורים, עם התשובות וקובצי ה-PDF; חיבור היומן נשאר (בעל המוצר, 08/10/2026).
+  $('[data-action="clear"]', root)?.addEventListener('click', async () => {
+    if (!confirm(`למחוק את כל החודשים השמורים (${months.length})? הנתונים, התשובות שנתת וקובצי ה-PDF יימחקו מהמכשיר, ` +
+      'ואי אפשר לשחזר אותם בלי קובץ גיבוי.')) return;
+    await store.clearMonths();
+    if (state.record) { state.record = null; state.result = null; state.notices = []; }
+    for (const kind of Object.keys(PARSERS)) dropFileLink(kind);
+    renderUploadState();
+    renderResults();
+    renderHistory();
   });
   $('[data-action="restore"]', root)?.addEventListener('change', async (e) => {
     const file = e.target.files[0];

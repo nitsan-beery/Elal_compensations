@@ -67,6 +67,15 @@ export async function deleteMonth(key) {
   await tx('readwrite', (s) => { for (const kind of KINDS) s.delete(`${key}:${kind}`); }, FILES);
 }
 
+/**
+ * ניקוי כל החודשים השמורים: הנתונים, התשובות וקובצי ה-PDF (בעל המוצר, 08/10/2026). ההגדרות (`settings`)
+ * – חיבור היומן וההשלמות ממנו – נשארות.
+ */
+export async function clearMonths() {
+  await tx('readwrite', (s) => s.clear());
+  await tx('readwrite', (s) => s.clear(), FILES);
+}
+
 /** קובץ ה-PDF של חודש: {name, bytes}, או undefined כשלא נשמר (חודש שנשמר לפני שהקבצים נשמרו). */
 export const getFile = (key, kind) => tx('readonly', (s) => s.get(`${key}:${kind}`), FILES);
 
