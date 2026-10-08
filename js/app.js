@@ -114,13 +114,16 @@ function registerServiceWorker() {
 
 /**
  * מספר הגרסה בכותרת החלון, אחרי השם (בעל המוצר, 08/10/2026): באפליקציה המותקנת במחשב "… - מה מגיע לי v173".
+ * גם בשורת הקרדיט, בקצה השמאלי ("גרסה 173"), כי ב-iPad אין כותרת חלון (בעל המוצר, 08/10/2026).
  * המספר הוא של המטמון של ה-service worker (`CACHE` ב-sw.js), שעולה בכל שינוי בקבצי האפליקציה, כך שאין
  * מספר נוסף לעדכן. בזמן עדכון יש שני מטמונים, והחדש הוא הגבוה.
  */
 async function showVersion() {
   const keys = await caches.keys().catch(() => []);
   const version = Math.max(0, ...keys.map((k) => Number(k.match(/^elal-compensations-v(\d+)$/)?.[1] ?? 0)));
-  if (version) document.title = `מה מגיע לי v${version}`;
+  if (!version) return;
+  document.title = `מה מגיע לי v${version}`;
+  $('#app-version').textContent = `גרסה ${version}`;
 }
 
 function showBanner(kind, html) {

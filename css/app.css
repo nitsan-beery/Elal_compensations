@@ -79,7 +79,10 @@ button, input, select, textarea { font: inherit; color: inherit; }
   padding: .35rem .8rem; border-radius: 999px; cursor: pointer;
 }
 .tabs button[aria-selected="true"] { opacity: 1; background: rgba(255,255,255,.18); font-weight: 600; }
-.topbar .credit { flex-basis: 100%; margin: 0; text-align: right; color: #fff; font-size: .8rem; opacity: .85; }
+.topbar .credit { flex-basis: 100%; margin: 0; text-align: right; color: #fff; font-size: .8rem; opacity: .85;
+  display: flex; flex-wrap: wrap; justify-content: space-between; gap: 0 1rem; }
+/* מספר הגרסה בקצה השמאלי, גם כשבמסך צר הוא יורד לשורה משלו. */
+#app-version { margin-inline-start: auto; }
 main { max-width: 1100px; margin: 0 auto; padding: 1rem 16px 3rem; }
 
 .card {
