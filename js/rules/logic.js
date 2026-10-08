@@ -454,7 +454,17 @@ function late_landing_home(ctx, params, rule) {
   const flat = ctx.timeline.flatMap((d) => (d.exec?.legs ?? []).map((leg) => ({ leg, date: d.date })));
 
   for (const [i, { leg, date }] of flat.entries()) {
-    if (leg.dst !== ctx.domicile || leg.sta == null || leg.ata == null) continue;
+    if (leg.dst !== ctx.domicile || leg.sta == null) continue;
+    // רגל DH בלי ATA ברומה (22/03/2026 LY430 CDG→TLV): האיחור לא ניתן לחישוב. אם הרומה זיכתה COM
+    // שחוקים אחרים אינם מסבירים, מניחים נחיתה מאוחרת בגובה מה שזוכה (בעל המוצר, 08/10/2026).
+    if (leg.ata == null) {
+      const left = ctx.reportedOnDate(date, 'COM') - ctx.expectedOnDate(date, 'com');
+      if (leg.dhd && perStep && left > 0 && left % perStep === 0) {
+        ctx.expect(date, 'com', left, rule, `${leg.flight}: ברומה חסר ATA והרומה זיכתה נחיתה מאוחרת`, { flight: leg.flight,
+          explain: `ברומה חסר ה-ATA של ${leg.flight}, והיא זיכתה. האפליקציה מניחה נחיתה מאוחרת.` });
+      }
+      continue;
+    }
     let delay = wrapDelta(leg.ata - leg.sta);
     let diverted = '';
     const div = diversionOf(flat, i, ctx.tz);
