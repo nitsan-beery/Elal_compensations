@@ -624,7 +624,7 @@ function special_call(ctx, params, rule) {
         const flightOf = (p) => p.legs.find((l) => l.date === d && l.org === ctx.domicile)?.flight ?? flightsOf(p);
         const landed = prev.legs.findLast((l) => l.dst === ctx.domicile)?.flight ?? flightsOf(prev);
         if (ctx.reportedOnDate(d, column) > 0) {
-          ctx.note(d, `${landed} נחתה ביממה הזאת, ולכן על ${flightOf(match.exec)} מגיע בה פיצוי פעילות שנייה באותה יממה, ולא קריאה מיוחדת. ` +
+          ctx.note(d, `${landed} נחתה ביממה הזאת, ולכן על ${flightOf(match.exec)} מגיע פיצוי פעילות שנייה באותה יממה, ולא קריאה מיוחדת. ` +
             'הרומה זיכתה קריאה מיוחדת, והפיצוי בשני המקרים זהה.', second, { aside: true, pairingId: match.exec.id });
           continue;
         }
