@@ -1347,7 +1347,7 @@ async function renderHistory() {
       <h2>גיבוי ושחזור</h2>
       <p class="small muted">קובץ הגיבוי מכיל את קובצי התכנון והביצוע, את הנתונים שחולצו מהם ואת התשובות שלך. שמור אותו במקום פרטי. אפשר להעביר איתו את החודשים השמורים בין מכשירים שונים.</p>
       <div class="row">
-        <button class="btn" data-action="backup" ${months.length ? '' : 'disabled'}>גיבוי נתונים</button>
+        <button class="btn" data-action="backup" ${months.length ? '' : 'disabled'}>שמור</button>
         <label class="btn">שחזר מקובץ<input type="file" accept="application/json,.json" hidden data-action="restore"></label>
         <button class="btn danger" data-action="clear" ${months.length ? '' : 'disabled'}>מחק הכל</button>
       </div>
