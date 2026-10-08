@@ -4,6 +4,7 @@
 // בדוח הביצוע בין שני ימים.
 
 import { isoDate, daysInMonth } from './time.js';
+import { legTimes } from './flight-times.js';
 
 /** ציר הימים של החודש, עם התכנון והביצוע של כל יום זה לצד זה. */
 export function buildTimeline(period, plan, exec) {
@@ -77,17 +78,17 @@ export function markCarryIn(days, domicile) {
 const isAirReturnOnly = (pairing) => pairing.legs.every((l) => l.org === l.dst);
 
 /**
- * האם הרגל `next` יוצאת באותו FDP שבו נחתה `leg`: המנוחה ביניהן, פחות זמן ההתייצבות לפני
- * ה-STD, קצרה ממנוחה חוקית. השעות שתיהן בשעון הבסיס, כי שתי הרגליים נוגעות בו.
+ * האם הרגל `next` יוצאת באותו FDP שבו נחתה `leg`: המנוחה מהנחיתה (בפועל, ובלעדיה המתוכננת) ועד
+ * ההמראה (המתוכננת או בפועל, המוקדמת), פחות זמן ההתייצבות לפני ה-STD, קצרה ממנוחה חוקית. הזמנים
+ * מ-`legTimes`, לפי אזורי הזמן שב-`fdp.tz`.
  */
 export function sameFdp(leg, next, fdp) {
-  if (!fdp) return false;
-  const end = leg.ata ?? leg.sta;
-  const starts = [next.std, next.atd].filter((t) => t != null);
-  if (end == null || !starts.length) return false;
-  const days = (Date.parse(next.date) - Date.parse(leg.date)) / 86400000;
+  if (!fdp?.tz) return false;
+  const [a, b] = [legTimes(leg, fdp.tz), legTimes(next, fdp.tz)];
+  const end = a ? a.ata ?? a.sta : null;
+  if (end == null || !b) return false;
   // המנוחה מתחילה `postMin` אחרי ה-On block (OMA 7.2.1).
-  const rest = days * 1440 + Math.min(...starts) - (fdp.reportMin ?? 0) - end - (fdp.postMin ?? 0);
+  const rest = Math.min(b.std, b.atd ?? b.std) - (fdp.reportMin ?? 0) - end - (fdp.postMin ?? 0);
   return rest < fdp.legalRestMin;
 }
 

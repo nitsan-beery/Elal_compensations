@@ -1,17 +1,11 @@
 // חוקים שתלויים בזמני התפקיד: FDP, מנוחה בבסיס, נחיתות לילה ותאריכים מיוחדים.
 //
-// כל הזמנים כאן הם דקות מוחלטות בשעון הבסיס (שעון ישראל): `at(date, clock)`. כך אפשר
-// להשוות בין סבבים בימים שונים בלי לחשב הפרשי ימים בכל מקום.
-//
-// שני מקורות לזמנים:
-// - סבב תכנון: רגל עם dep/arr ({min, foreign}). שעה בלי ! היא שעון הבסיס. רגל רשומה
-//   ביום ההמראה, ונחיתה שנראית מוקדמת מההמראה היא ביום שאחרי (LY336 ב-16/07/2026).
-// - סבב ביצוע: רגל עם std/sta/atd/ata ומשכים. השעות מקומיות לכל תחנה, והרגל רשומה
-//   ביום ההמראה בשעון הבסיס (ראו awayFromBase ב-logic.js).
+// כל הזמנים כאן הם דקות מוחלטות בשעון הבסיס (שעון ישראל): `at(date, clock)`. זמני הרגליים
+// והסבבים – רק מ-js/flight-times.js (`legTimes`, ‏`pairingTimes`).
 
 import { hoursToMin, isoDate, minToHhmm } from '../time.js';
 import { describePairing } from '../model.js';
-import { stationOffset } from '../airports.js';
+import { at, dateOf, legTimes, pairingTimes } from '../flight-times.js';
 
 const H = (hours) => hoursToMin(hours) ?? 0;
 /**
@@ -44,8 +38,6 @@ export function applyOtherReason(ctx, answer, rule, { what, date, pairing = null
   return true;
 }
 const dayMs = 86400000;
-const at = (date, clock) => Date.parse(date) / 60000 + clock;
-const dateOf = (abs) => new Date(Math.floor(abs / 1440) * dayMs).toISOString().slice(0, 10);
 const clockOf = (abs) => ((abs % 1440) + 1440) % 1440;
 const addDays = (iso, n) => new Date(Date.parse(iso) + n * dayMs).toISOString().slice(0, 10);
 const ddmm = (iso) => iso.slice(8, 10) + '/' + iso.slice(5, 7);
@@ -57,65 +49,11 @@ const parseClock = (s) => {
 };
 export const keyFor = (column) => (column === 'S/C' ? 'sc' : column === 'Credit' ? 'credit' : 'com');
 
-/** בתכנון אין משך לרגל: STA − STD, כששעת נחיתה עם ! מומרת לשעון הבסיס לפי airports.js. */
-const planBlock = (l) => {
-  if (!l.arr || !l.dep) return null;
-  const off = l.arr.foreign ? stationOffset(l.dst, l.date) : 0;
-  return off == null ? null : mod(l.arr.min - off - l.dep.min, 1440);
+/** משך הרגל המתוכנן, STA − STD (`legTimes`), או null. */
+const legBlock = (ctx, l) => {
+  const t = legTimes(l, ctx.tz);
+  return t?.sta == null ? null : t.sta - t.std;
 };
-
-// ---------- זמני סבב ----------
-
-/**
- * זמני סבב מתוכנן לפי קובץ התכנון: יציאה מהבסיס (Off block), חזרה לבסיס (On block)
- * ושעות הטיסה המתוכננות (FT ורגלי DH). צד שאינו בחודש (סבב חתוך) נשאר null.
- */
-export function planSpan(pairing, domicile, monthFirst) {
-  const out = pairing.legs.find((l) => l.org === domicile && l.dep && !l.dep.foreign);
-  const home = pairing.legs.findLast((l) => l.dst === domicile && l.arr && !l.arr.foreign);
-  const start = out && !pairing.cutAtStart ? at(out.date, out.dep.min) : null;
-  let end = null;
-  if (home && !pairing.cutAtEnd) {
-    // נחיתה שנראית מוקדמת מההמראה היא ביום שאחרי. ביום הראשון בחודש, רגל שיצאה בחודש
-    // הקודם רשומה ביום הנחיתה (LY388 ב-01/06/2026) – אבל לא בסבב שיצא מהבסיס באותו יום
-    // (01/09/2024 LY2373/LY2374 ל-BER, נחיתה ב-03:15 ב-02/09).
-    const carriedIn = home.date === monthFirst && home.org !== domicile && pairing.legs[0].org !== domicile;
-    const nextDay = !carriedIn && home.dep && home.arr.min < home.dep.min;
-    end = at(home.date, home.arr.min) + (nextDay ? 1440 : 0);
-  }
-  const flight = pairing.legs.reduce((s, l) => (s == null || l.skdDur == null ? null : s + l.skdDur), 0);
-  return { start, end, flight };
-}
-
-/**
- * זמני סבב ביצוע. `planned` – לפי STD/STA; אחרת הטווח הרחב מבין המתוכנן לבפועל,
- * כמו בשהייה מחוץ לבסיס (ישן כ"ה ס' 1.יא).
- */
-function execSpan(pairing, domicile, planned) {
-  const out = pairing.legs.find((l) => l.org === domicile);
-  const home = pairing.legs.findLast((l) => l.dst === domicile);
-  let start = null;
-  if (out && !pairing.cutAtStart) {
-    const clocks = planned ? [out.std] : [out.std, out.atd];
-    const c = clocks.filter((t) => t != null);
-    if (c.length) start = at(out.date, Math.min(...c));
-  }
-  let end = null;
-  if (home && !pairing.cutAtEnd) {
-    const ends = [];
-    if (home.sta != null && home.skdDur != null) ends.push(at(home.date, mod(home.sta - home.skdDur, 1440)) + home.skdDur);
-    // הנחיתה בפועל: לפי היום האחרון של הסבב ברומה וה-TAB שלו (`reportEnd` ב-js/rules/evaluate.js),
-    // כי הרגל רשומה ביום ה-STD גם כשהמריאה בפועל אחרי חצות (24–25/09/2026: LY392, ‏ATA 05:16 ב-25/09).
-    if (!planned && pairing.reportEnd) ends.push(at(pairing.reportEnd.date, pairing.reportEnd.min));
-    else if (!planned && home.ata != null && (home.actDur ?? home.skdDur) != null) {
-      const dur = home.actDur ?? home.skdDur;
-      ends.push(at(home.date, mod(home.ata - dur, 1440)) + dur);
-    }
-    if (ends.length) end = Math.max(...ends);
-  }
-  const flight = pairing.legs.reduce((s, l) => (s == null || l.skdDur == null ? null : s + l.skdDur), 0);
-  return { start, end, flight };
-}
 
 /**
  * טיסת סבב (turnaround): אין בה מנוחה בחו"ל. המנוחה בחו"ל מתחילה `postMin` אחרי הנחיתה ונגמרת
@@ -155,7 +93,7 @@ function same_fdp_rounds(ctx, params, rule) {
   const list = planPairingsSorted(ctx);
   for (let i = 1; i < list.length; i++) {
     const [p1, p2] = [list[i - 1], list[i]];
-    const [s1, s2] = [planSpan(p1, ctx.domicile, ctx.monthFirst), planSpan(p2, ctx.domicile, ctx.monthFirst)];
+    const [s1, s2] = [pairingTimes(p1, ctx.tz), pairingTimes(p2, ctx.tz)];
     if (s1.end == null || s2.start == null) continue;
     const post = ctx.legalRest?.postMin ?? 0;
     const rest = legalRestBetween(s1, s2, report, post);
@@ -191,8 +129,8 @@ function same_fdp_rounds(ctx, params, rule) {
  */
 export function extensionDays(ctx, match) {
   if (!match.plan || !match.exec || match.exec.cutAtStart || match.exec.cutAtEnd || match.plan.cutAtStart || match.plan.cutAtEnd) return null;
-  const e = execSpan(match.exec, ctx.domicile, false);
-  const p = planSpan(match.plan, ctx.domicile, ctx.monthFirst);
+  const e = pairingTimes(match.exec, ctx.tz, { away: true });
+  const p = pairingTimes(match.plan, ctx.tz);
   if (e.start == null || e.end == null || p.start == null || p.end == null) return null;
   const days = [];
   for (let d = dateOf(e.start); at(d, 0) < e.end; d = addDays(d, 1)) {
@@ -215,11 +153,11 @@ export function extensionDays(ctx, match) {
  */
 export function landedBefore(ctx, exec, d) {
   const params = ctx.rulesWithLogic('second_unplanned_activity')[0]?.logic.params;
-  const span = execSpan(exec, ctx.domicile, false);
+  const span = pairingTimes(exec, ctx.tz, { away: true });
   if (!params || span.start == null) return null;
   return ctx.execPairings.find((o) => {
     if (o === exec || o.dates.includes(d)) return false;
-    const so = execSpan(o, ctx.domicile, false);
+    const so = pairingTimes(o, ctx.tz, { away: true });
     return so.end != null && so.end < span.start && dateOf(so.end) === d &&
       legalRestBetween(so, span, params.report_minutes_before_std ?? 0, ctx.legalRest?.postMin) >= H(params.legal_rest_hours);
   }) ?? null;
@@ -259,13 +197,13 @@ function second_unplanned_activity(ctx, params, rule) {
     // ההוספה עצמה (בעל המוצר, 06/10/2026).
     if (['voluntary_swap', 'added'].includes(ctx.answerFor(m)?.value)) continue;
     const u = m.exec;
-    const span = execSpan(u, ctx.domicile, false);
+    const span = pairingTimes(u, ctx.tz, { away: true });
     if (span.start == null) continue;
     const day = u.from;
     const others = ctx.execPairings.filter((p) => p !== u && p.dates.includes(day));
     let separate = null;
     for (const o of others) {
-      const so = execSpan(o, ctx.domicile, false);
+      const so = pairingTimes(o, ctx.tz, { away: true });
       const [first, second] = (so.start ?? 0) < span.start ? [so, span] : [span, so];
       if (first.end == null || second.start == null) continue;
       if (legalRestBetween(first, second, report, ctx.legalRest?.postMin) >= legal) { separate = o; break; }
@@ -299,12 +237,12 @@ function second_unplanned_activity(ctx, params, rule) {
     if (!ext?.second.length) continue;
     const reason = `extended:${m.exec.id}`;
     if (ctx.isAsked(reason) || ctx.answer(reason)?.value === 'agreed') continue;
-    const span = execSpan(m.exec, ctx.domicile, false);
+    const span = pairingTimes(m.exec, ctx.tz, { away: true });
     for (const d of ext.second) {
       const what = `${describePairing(m.exec)} התארך ל-${ddmm(d)}`;
       const others = ctx.execPairings.filter((x) => x !== m.exec && x.dates.includes(d));
       const separate = others.find((o) => {
-        const so = execSpan(o, ctx.domicile, false);
+        const so = pairingTimes(o, ctx.tz, { away: true });
         const [first, second] = (so.start ?? 0) < span.start ? [so, span] : [span, so];
         return first.end != null && second.start != null && legalRestBetween(first, second, report, ctx.legalRest?.postMin) >= legal;
       });
@@ -361,7 +299,7 @@ function base_rest_shortfall(ctx, params, rule) {
 
   for (let i = 1; i < list.length; i++) {
     const [p1, p2] = [list[i - 1], list[i]];
-    const [s1, s2] = [planSpan(p1, ctx.domicile, ctx.monthFirst), planSpan(p2, ctx.domicile, ctx.monthFirst)];
+    const [s1, s2] = [pairingTimes(p1, ctx.tz), pairingTimes(p2, ctx.tz)];
     if (s1.start == null || s1.end == null || s2.start == null || s1.flight == null) continue;
     if (isTurnaround(s1, legal, ctx) && isTurnaround(s2, legal, ctx)) continue; // רצף סבבים, 2018 ס' 55
 
@@ -450,47 +388,33 @@ const CREW_PILOTS = { single: 2, augmented: 3, double: 4 };
  * השחרור אחרי הנחיתה שלה לבין ההתייצבות לרגל הבאה (`rest`: הזמנים האלה, OMA 7.2.1). חסר
  * מידע לא נדלג בשקט: נספרת כמסיימת FDP.
  */
-function legEndsFdp(p, i, legal, rest) {
-  if (i === p.legs.length - 1) return true;
-  const leg = p.legs[i];
-  const next = p.legs[i + 1];
-  const dur = planBlock(leg);
-  if (dur == null || !next.dep) return true;
-  const arr = at(leg.date, leg.dep.min) + dur;
-  const dep = at(next.date, next.dep.min);
-  return dep - arr - (rest?.postMin ?? 0) - (rest?.outstationReportMin ?? 0) >= legal;
+function legEndsFdp(ctx, legs, i, legal) {
+  if (i === legs.length - 1) return true;
+  const [a, b] = [legTimes(legs[i], ctx.tz), legTimes(legs[i + 1], ctx.tz)];
+  if (a?.sta == null || !b) return true;
+  const rest = ctx.legalRest;
+  return b.std - a.sta - (rest?.postMin ?? 0) - (rest?.outstationReportMin ?? 0) >= legal;
+}
+
+/** שעת הנחיתה המתוכננת של רגל בשעון הבסיס (`legTimes`), או null. */
+function arrivalClock(ctx, leg) {
+  const t = legTimes(leg, ctx.tz);
+  return t?.sta == null ? null : clockOf(t.sta);
 }
 
 /**
  * נחיתת לילה בסבב שבוצע (לזכייה במכרז במקום טיסת לילה מתוכננת): רגל פעילה בצי, שהנחיתה
  * המתוכננת שלה בשעון ישראל בחלון, ומסיימת FDP – הרגל האחרונה, או שאחריה מנוחה חוקית ביעד.
- * בדוח STD ו-STA מקומיים: נחיתה בבסיס היא STA; ביציאה מהבסיס STD + SkdDur; בין שני שדות
- * זרים – STA אחרי המרה לפי אזור הזמן של היעד. מחזירה את הרגל ואת שעת הנחיתה, או null.
+ * מחזירה את הרגל ואת שעת הנחיתה, או null.
  */
 function execNightLanding(ctx, pairing, params, inWindow, legal) {
   const dh = (l) => l.dhd || l.type === 'DHO' || l.type === 'DHX';
-  const arrival = (l) => {
-    if (l.sta == null) return null;
-    if (l.dst === ctx.domicile) return l.sta;
-    if (l.org === ctx.domicile && l.std != null && l.skdDur != null) return mod(l.std + l.skdDur, 1440);
-    const off = stationOffset(l.dst, l.date, ctx.domicile);
-    return off == null ? null : mod(l.sta - off, 1440);
-  };
-  // שתי השעות מקומיות באותו שדה. נחיתה שעברה חצות (STA לפני STD) – ביום שאחרי.
-  const endsFdp = (i) => {
-    const l = pairing.legs[i];
-    const next = pairing.legs[i + 1];
-    if (!next || l.sta == null || next.std == null) return true;
-    const arr = at(l.date, l.sta) + (l.std != null && l.sta < l.std - 180 ? 1440 : 0);
-    const rest = ctx.legalRest;
-    return at(next.date, next.std) - arr - (rest?.postMin ?? 0) - (rest?.outstationReportMin ?? 0) >= legal;
-  };
   for (let i = 0; i < pairing.legs.length; i++) {
     const l = pairing.legs[i];
-    if (dh(l) || !endsFdp(i)) continue;
+    if (dh(l) || !legEndsFdp(ctx, pairing.legs, i, legal)) continue;
     if (params.base_landings_only && l.dst !== ctx.domicile) continue;
     if (params.fleet && (l.ac ?? ctx.fleet) !== params.fleet) continue;
-    const clock = arrival(l);
+    const clock = arrivalClock(ctx, l);
     if (clock != null && inWindow(clock)) return { leg: l, clock };
   }
   return null;
@@ -511,10 +435,10 @@ function night_landings(ctx, params, rule) {
   for (const p of ctx.planPairings) {
     p.legs.forEach((leg, i) => {
       if (leg.dh || !leg.arr) return;
-      if (!legEndsFdp(p, i, legal, ctx.legalRest)) return;
+      if (!legEndsFdp(ctx, p.legs, i, legal)) return;
       if (params.base_landings_only && leg.dst !== ctx.domicile) return;
       if (params.fleet && (leg.ac ?? ctx.fleet) !== params.fleet) return;
-      const clock = arrivalAtBaseClock(ctx, leg);
+      const clock = arrivalClock(ctx, leg);
       if (clock == null) {
         const local = leg.arr.min;
         if ([-180, 0, 180].some((d) => inWindow(mod(local + d, 1440)))) unsure.push(leg);
@@ -670,7 +594,7 @@ function night_landings(ctx, params, rule) {
     } else {
       // שואלים אחת בכל פעם, מהטיסה הארוכה ביותר (בקשת בעל המוצר, 23/09/2026): תשובה שאינה
       // נספרת מורידה את המספר ומייתרת את השאר, והסיכוי לכך גדול יותר בטיסה ארוכה.
-      const block = (n) => plannedBlock(ctx, n.crewLeg) ?? n.crewLeg.skdDur ?? 0;
+      const block = (n) => legBlock(ctx, n.crewLeg) ?? n.crewLeg.skdDur ?? 0;
       const next = [...open].sort((a, b) => block(b) - block(a) || a.crewLeg.date.localeCompare(b.crewLeg.date))[0];
       const leg = next.crewLeg;
       const clock = next.bid?.landing?.clock ?? next.clock;
@@ -710,56 +634,6 @@ function night_landings(ctx, params, rule) {
     if (n.target) ctx.expectPairing(n.target, key, hours, rule, why);
     else ctx.expect(n.pairing.from, key, hours, rule, `${why} (בוטלה ביוזמת החברה)`);
   });
-}
-
-/**
- * משך הטיסה המתוכנן של רגל: STA − STD, אחרי שכל צד מומר לשעון הבסיס. ה-`skdDur` של רגל
- * בתכנון אינו משמש כאן: הוא ה-FT של כל היום, שנרשם על הרגל האחרונה שבו.
- */
-function plannedBlock(ctx, leg) {
-  if (!leg.dep || !leg.arr) return null;
-  const [o, d] = [offsetOf(ctx, leg.dep, leg.org, leg.date), offsetOf(ctx, leg.arr, leg.dst, leg.date)];
-  return o == null || d == null ? null : mod(leg.arr.min - d - (leg.dep.min - o), 1440);
-}
-
-/** ההפרש בין שעון התחנה לשעון הבסיס: 0 בבסיס, מה שנלמד מהקבצים, ואחרת לפי אזור הזמן. */
-export function stationOffsetAt(ctx, station, date) {
-  if (!station || station === ctx.domicile) return 0;
-  const learned = ctx.stationOffsets?.[station];
-  if (learned?.length) {
-    return [...learned].sort((a, b) => Math.abs(Date.parse(a.date) - Date.parse(date)) - Math.abs(Date.parse(b.date) - Date.parse(date)))[0].off;
-  }
-  return stationOffset(station, date, ctx.domicile);
-}
-
-/** ההפרש של שעה בתכנון: שעה בלי ! היא כבר בשעון הבסיס. */
-const offsetOf = (ctx, time, station, date) => (time.foreign ? stationOffsetAt(ctx, station, date) : 0);
-
-/** שעת הנחיתה של רגל מתוכננת בשעון הבסיס, או null. */
-function arrivalAtBaseClock(ctx, leg) {
-  if (!leg.arr.foreign) return leg.arr.min;
-  const learned = ctx.stationOffsets?.[leg.dst];
-  if (learned?.length) {
-    const closest = [...learned].sort((a, b) => Math.abs(Date.parse(a.date) - Date.parse(leg.date)) - Math.abs(Date.parse(b.date) - Date.parse(leg.date)))[0];
-    return mod(leg.arr.min - closest.off, 1440);
-  }
-  // בלי הפרש מהתכנון: לומדים אותו מהדוח, מרגל מהבסיס לתחנה או ממנה בחזרה. בדוח STD ו-STA
-  // מקומיים ו-SkdDur הוא המשך האמיתי, ולכן ההפרש יוצא מדויק.
-  const found = [];
-  for (const day of ctx.timeline) {
-    for (const l of day.exec?.legs ?? []) {
-      if (l.std == null || l.sta == null || l.skdDur == null) continue;
-      if (l.org === ctx.domicile && l.dst === leg.dst) found.push({ date: day.date, off: mod(l.sta - l.std - l.skdDur + 720, 1440) - 720 });
-      if (l.org === leg.dst && l.dst === ctx.domicile) found.push({ date: day.date, off: mod(l.std + l.skdDur - l.sta + 720, 1440) - 720 });
-    }
-  }
-  if (!found.length) {
-    // אין הפרש בקבצים: לפי אזור הזמן של השדה (LTN → לונדון), כולל שעון קיץ.
-    const off = stationOffset(leg.dst, leg.date, ctx.domicile);
-    return off == null ? null : mod(leg.arr.min - off, 1440);
-  }
-  const closest = found.sort((a, b) => Math.abs(Date.parse(a.date) - Date.parse(leg.date)) - Math.abs(Date.parse(b.date) - Date.parse(leg.date)))[0];
-  return mod(leg.arr.min - closest.off, 1440);
 }
 
 /**
@@ -890,7 +764,7 @@ function special_date_activity(ctx, params, rule) {
 
     let hit = null;
     for (const p of pairings) {
-      const s = ctx.hasExec ? execSpan(p, ctx.domicile, false) : planSpan(p, ctx.domicile, ctx.monthFirst);
+      const s = pairingTimes(p, ctx.tz, { away: ctx.hasExec });
       const start = s.start != null ? s.start - report : monthStart;
       const end = s.end ?? monthEnd;
       if (start < wTo && end > wFrom) { hit = p; break; }
@@ -959,7 +833,7 @@ function free_days_waived(ctx, params, rule) {
   const offFrom = parseClock(params.off_block_from);
   const onUntil = parseClock(params.on_block_until);
   const dropped = ctx.planPairings.filter((p) => ctx.pairingHandledBy(p, 'cancelled_no_compensation'));
-  const spans = spansOf(ctx, ctx.planPairings.filter((p) => !dropped.includes(p)), (p) => planSpan(p, ctx.domicile, ctx.monthFirst));
+  const spans = spansOf(ctx, ctx.planPairings.filter((p) => !dropped.includes(p)), (p) => pairingTimes(p, ctx.tz));
   const free = ctx.timeline.filter((day) => {
     if (ctx.planActivityCodes(day).length) return false;
     const d0 = at(day.date, 0);
@@ -978,7 +852,7 @@ function free_days_waived(ctx, params, rule) {
   let pendingFirst = false;
   const firstIsX = free.includes(ctx.monthFirst) && (first?.plan?.codes ?? []).includes('X');
   const carried = ctx.hasExec ? ctx.execPairings.find((p) => p.cutAtStart) : null;
-  const landed = carried ? execSpan(carried, ctx.domicile, true).end : null;
+  const landed = carried ? pairingTimes(carried, ctx.tz).end : null;
   if (firstIsX && ctx.hasExec && (!carried || landed != null)) {
     if (carried && landed > at(ctx.monthFirst, onUntil)) {
       free.splice(free.indexOf(ctx.monthFirst), 1);
@@ -1074,8 +948,8 @@ function free_days_waived(ctx, params, rule) {
  */
 function consecutive_saturdays(ctx, params, rule) {
   const key = keyFor(params.report_column);
-  const planSpans = ctx.hasPlan ? spansOf(ctx, ctx.planPairings, (p) => planSpan(p, ctx.domicile, ctx.monthFirst)) : [];
-  const execSpans = ctx.hasExec ? spansOf(ctx, ctx.execPairings, (p) => execSpan(p, ctx.domicile, false)) : [];
+  const planSpans = ctx.hasPlan ? spansOf(ctx, ctx.planPairings, (p) => pairingTimes(p, ctx.tz)) : [];
+  const execSpans = ctx.hasExec ? spansOf(ctx, ctx.execPairings, (p) => pairingTimes(p, ctx.tz, { away: true })) : [];
   const inShabbat = (sp, date) =>
     sp.start < at(date, parseClock(params.shabbat_to)) && sp.end > at(addDays(date, -1), parseClock(params.shabbat_from));
   const active = (date) => {
@@ -1127,12 +1001,12 @@ function consecutive_night_rounds(ctx, params, rule) {
 
   const planned = new Map(); // לילה → סבב מתוכנן
   for (const p of planPairingsSorted(ctx)) {
-    for (const d of nightsOf(planSpan(p, ctx.domicile, ctx.monthFirst))) if (!planned.has(d)) planned.set(d, p);
+    for (const d of nightsOf(pairingTimes(p, ctx.tz))) if (!planned.has(d)) planned.set(d, p);
   }
   const performed = new Map(); // לילה → סבב ביצוע
   if (ctx.hasExec) {
     for (const e of ctx.execPairings) {
-      for (const d of nightsOf(execSpan(e, ctx.domicile, true))) if (!performed.has(d)) performed.set(d, e);
+      for (const d of nightsOf(pairingTimes(e, ctx.tz))) if (!performed.has(d)) performed.set(d, e);
     }
   }
   // done / company / no / unknown
@@ -1225,11 +1099,11 @@ export function whiteFlightLegs(ctx, params) {
   for (const p of pairings) {
     for (const l of p.legs) {
       const dh = ctx.hasExec ? l.dhd || l.type === 'DHO' : l.dh;
-      const std = ctx.hasExec ? l.std : l.dep && !l.dep.foreign ? l.dep.min : null;
-      if (dh || l.org !== ctx.domicile || std == null) continue;
-      const reportAt = at(l.date, std) - report;
+      const t = legTimes(l, ctx.tz);
+      if (dh || l.org !== ctx.domicile || !t) continue;
+      const reportAt = t.std - report;
       if (!inWindow(clockOf(reportAt))) continue;
-      const block = ctx.hasExec ? l.skdDur : planBlock(l);
+      const block = legBlock(ctx, l);
       if (block != null && block <= H(params.min_block_hours)) continue;
       out.push({ p, l, reportAt, block });
     }
@@ -1314,7 +1188,7 @@ function ulh_flight(ctx, params, rule) {
   for (const { pairing, plan } of entries) {
     for (const l of pairing.legs) {
       if (ctx.hasExec ? l.dhd || l.type === 'DHO' : l.dh) continue;
-      const block = ctx.hasExec ? l.skdDur : planBlock(l);
+      const block = legBlock(ctx, l);
       if (block == null || block <= min || block > max) continue;
 
       const what = `${l.flight ?? ''} ${l.org}→${l.dst} ב-${ddmm(l.date)}, בלוק ${minToHhmm(block)}`.trim();
@@ -1511,8 +1385,8 @@ function stay_extension(ctx, params, rule) {
   const own = ctx.rulesWithLogic('stay_extension').map((r) => r.id);
   for (const m of ctx.matches) {
     if (!m.plan || !m.exec) continue;
-    const planned = planSpan(m.plan, ctx.domicile, ctx.monthFirst).end;
-    const actual = execSpan(m.exec, ctx.domicile, false).end;
+    const planned = pairingTimes(m.plan, ctx.tz).end;
+    const actual = pairingTimes(m.exec, ctx.tz, { away: true }).end;
     if (planned == null || actual == null || actual - planned <= H(params.over_hours)) continue;
 
     ctx.markPairing(m.exec, 'stay_extension');
@@ -1557,43 +1431,22 @@ function stay_extension(ctx, params, rule) {
 // ---------- מיאמי (2026 ס' 24) ----------
 
 /**
- * זמני רגל בזמן מוחלט בשעון הבסיס. הרגל רשומה ביום ההמראה בשעון הבסיס, בתכנון ובדוח
- * כאחד, והשעות עצמן מקומיות לתחנה (בתכנון עם !). `actual` – לפי ATD ומשך בפועל כשיש.
- */
-function legTimes(ctx, leg, actual) {
-  const off = stationOffsetAt(ctx, leg.org, leg.date);
-  if (off == null) return null;
-  const abs = (clock) => at(leg.date, mod(clock - off, 1440));
-  if (leg.dep || leg.arr) { // רגל תכנון
-    const block = plannedBlock(ctx, leg);
-    if (block == null) return null;
-    const dep = abs(leg.dep.min);
-    return { dep, arr: dep + block };
-  }
-  if (leg.std == null || leg.skdDur == null) return null;
-  const dep = abs(leg.std);
-  if (!actual || leg.atd == null) return { dep, arr: dep + leg.skdDur };
-  // המראה בפועל שנראית מוקדמת מה-STD היא ביום שאחרי.
-  const real = dep - abs(leg.atd) > 720 ? abs(leg.atd) + 1440 : abs(leg.atd);
-  return { dep: real, arr: real + (leg.actDur ?? leg.skdDur) };
-}
-
-/**
- * שהייה בתחנה בתוך סבב: מהנחיתה בה ועד ההתייצבות לרגל שיוצאת ממנה. שעת ההתייצבות אינה
- * בקבצים, ונגזרת מ-STD פחות `report_minutes_before_std`. מוחזרים גם הזמנים בשעון התחנה,
- * כי חלון הלילה של ס' 24.3 הוא מקומי. רגל DH נספרת גם היא: הצוות שוהה בתחנה בכל מקרה.
+ * שהייה בתחנה בתוך סבב: מהנחיתה בה (`actual` – בפועל כשיש) ועד ההתייצבות לרגל שיוצאת ממנה.
+ * שעת ההתייצבות אינה בקבצים, ונגזרת מ-STD פחות `report_minutes_before_std`. מוחזרים גם הזמנים
+ * בשעון התחנה, כי חלון הלילה של ס' 24.3 הוא מקומי. רגל DH נספרת גם היא: הצוות שוהה בתחנה בכל מקרה.
  */
 function stationStay(ctx, pairing, params, actual) {
   const legs = pairing.legs;
   for (let i = 0; i < legs.length - 1; i++) {
     const [inLeg, outLeg] = [legs[i], legs[i + 1]];
     if (inLeg.dst !== params.station || outLeg.org !== params.station) continue;
-    const [a, b] = [legTimes(ctx, inLeg, actual), legTimes(ctx, outLeg, false)];
-    const off = stationOffsetAt(ctx, params.station, inLeg.date);
-    if (!a || !b || off == null) return null;
-    const pickup = b.dep - (params.report_minutes_before_std ?? 0);
-    if (pickup <= a.arr) return null;
-    return { inLeg, outLeg, arr: a.arr, pickup, localArr: a.arr + off, localPickup: pickup + off };
+    const [a, b] = [legTimes(inLeg, ctx.tz), legTimes(outLeg, ctx.tz)];
+    const off = ctx.tz.offsetAt(params.station, inLeg.date);
+    const arr = actual ? a?.ata ?? a?.sta : a?.sta;
+    if (arr == null || !b || off == null) return null;
+    const pickup = b.std - (params.report_minutes_before_std ?? 0);
+    if (pickup <= arr) return null;
+    return { inLeg, outLeg, arr, pickup, localArr: arr + off, localPickup: pickup + off };
   }
   return null;
 }
@@ -1676,13 +1529,12 @@ function short_rest_miami(ctx, params, rule) {
 
 /** הדחייה בהמראה מהבסיס: מה-STD המתוכנן ועד ה-ATD בפועל, וכך גם הזזה של לוח הזמנים נכללת. */
 function outboundDelay(ctx, execPairing, leg) {
-  if (leg.atd == null) return null;
-  const [actual, scheduled] = [legTimes(ctx, leg, true), legTimes(ctx, leg, false)];
-  if (!actual || !scheduled) return null;
+  const t = legTimes(leg, ctx.tz);
+  if (t?.atd == null) return null;
   const planLeg = ctx.matches.find((m) => m.exec === execPairing)?.plan?.legs
     .find((l) => l.flight === leg.flight && l.dst === leg.dst && Math.abs(Date.parse(l.date) - Date.parse(leg.date)) <= dayMs);
-  const planned = planLeg ? legTimes(ctx, planLeg, false) : null;
-  return actual.dep - (planned?.dep ?? scheduled.dep);
+  const planned = planLeg ? legTimes(planLeg, ctx.tz) : null;
+  return t.atd - (planned?.std ?? t.std);
 }
 
 const PHASE_LABEL = {
@@ -1925,12 +1777,12 @@ function covered_by() {}
  * קיבוץ סבבי הביצוע ל-FDP: סבבים עוקבים שאין ביניהם מנוחה חוקית, לפי STD/STA. סבב חתוך,
  * או סבב שחסרים לו זמנים, עומד לבד.
  */
-export function execFdpGroups(pairings, domicile, legalRest, reportMin, postMin = 0) {
+export function execFdpGroups(pairings, tz, legalRest, reportMin, postMin = 0) {
   const sorted = [...pairings].sort((a, b) => a.from.localeCompare(b.from));
   const groups = [];
   let prev = null;
   for (const p of sorted) {
-    const span = execSpan(p, domicile, true);
+    const span = pairingTimes(p, tz);
     const joins = prev && prev.span.end != null && span.start != null && legalRestBetween(prev.span, span, reportMin, postMin) < legalRest;
     if (joins) groups.at(-1).push(p);
     else groups.push([p]);

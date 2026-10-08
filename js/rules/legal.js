@@ -16,6 +16,8 @@
 // כל הזמנים הם דקות מוחלטות בשעון הבסיס: `at(date, clock)`.
 
 import { minToHhmm } from '../time.js';
+import { markCarryIn } from '../model.js';
+import { legTimes } from '../flight-times.js';
 
 const dayMs = 86400000;
 const at = (date, clock) => Date.parse(date) / 60000 + clock;
@@ -151,15 +153,9 @@ function planDuties(plan, o) {
   const out = [];
   for (const day of Object.values(plan.days).sort((a, b) => a.date.localeCompare(b.date))) {
     for (const leg of day.legs) {
-      if (!leg.dep || !leg.arr) continue;
-      const offDep = leg.dep.foreign ? offsetAt(leg.org, day.date) : 0;
-      const offArr = leg.arr.foreign ? offsetAt(leg.dst, day.date) : 0;
-      if (offDep == null || offArr == null) continue;
-      // הרגל רשומה ביום ההמראה בשעון הבסיס, ולכן ההמרה נשארת באותו יום.
-      const depBase = mod(leg.dep.min - offDep, 1440);
-      const std = at(day.date, depBase);
-      const block = mod(leg.arr.min - offArr - depBase, 1440);
-      out.push({ kind: leg.dh ? 'dh' : 'flight', date: day.date, flight: leg.flight, org: leg.org, dst: leg.dst, ac: leg.ac, std, sta: std + block, block });
+      const t = legTimes({ ...leg, date: day.date }, o);
+      if (!t) continue;
+      out.push({ kind: leg.dh ? 'dh' : 'flight', date: day.date, flight: leg.flight, org: leg.org, dst: leg.dst, ac: leg.ac, std: t.std, sta: t.sta, block: t.sta - t.std });
     }
     for (const code of day.codes) {
       const kind = reserveKind(code, limits);
@@ -193,31 +189,18 @@ function execDuties(exec, o, planned = null) {
   const { limits, domicile, offsetAt, classify } = o;
   const out = [];
   const days = Object.values(exec.days).sort((a, b) => a.date.localeCompare(b.date));
+  // ב-1 לחודש הרומה חוזרת על הרגל שיצאה ביום האחרון של החודש הקודם (`prevMonth`), גם בחודשים הקודמים.
+  if (days[0]?.date.endsWith('-01')) markCarryIn(days.map((d) => ({ exec: d })), domicile);
   for (const day of days) {
     const legs = [];
     for (const leg of day.legs ?? []) {
       const actual = leg.atd != null && leg.actDur != null;
-      const sched = leg.std ?? leg.atd;
       const dur = actual ? leg.actDur : leg.skdDur;
-      if (sched == null || dur == null || !leg.org) continue;
-      const off = offsetAt(leg.org, day.date);
-      if (off == null) continue;
-      // ה-STD בשעון הבסיס נופל ביום הרשום; ההמראה בפועל היא הקרובה אליו (עיכוב אל מעבר לחצות).
-      const skd = at(day.date, mod(sched - off, 1440));
-      const std = skd + (actual ? mod(leg.atd - sched + 720, 1440) - 720 : 0);
-      // ההתייצבות לפי ה-STD: עיכוב אינו מזיז אותה.
-      legs.push({ kind: leg.type === 'LEG' ? 'flight' : 'dh', date: day.date, flight: leg.flight ?? leg.type, org: leg.org, dst: leg.dst, ac: null, skd, std, sta: std + dur, block: dur, planBlock: leg.skdDur ?? dur });
-    }
-    // ביום הראשון, כשהוא מחוץ לבסיס מתחילתו (TAB של 24:00), הרומה חוזרת על סבב שיצא בחודש הקודם
-    // (01/06/2026: LY387 ו-LY388 של 31/05; כמו `markCarryIn`): הרגליים עד החזרה לבסיס יצאו יום קודם.
-    if (day === days[0] && day.date.endsWith("-01") && legs[0]?.org === domicile && (day.values?.TAB?.min ?? 0) >= 1440) {
-      for (const l of legs) {
-        l.std -= 1440;
-        l.skd -= 1440;
-        l.sta -= 1440;
-        l.date = addDays(l.date, -1);
-        if (l.dst === domicile) break;
-      }
+      const t = legTimes({ ...leg, date: day.date }, o);
+      if (!t || dur == null || !leg.org) continue;
+      // ההתייצבות לפי ה-STD (`skd`): עיכוב אינו מזיז אותה.
+      const std = actual ? t.atd : t.std;
+      legs.push({ kind: leg.type === 'LEG' ? 'flight' : 'dh', date: dateOf(t.std), flight: leg.flight ?? leg.type, org: leg.org, dst: leg.dst, ac: null, skd: t.std, std, sta: std + dur, block: dur, planBlock: leg.skdDur ?? dur });
     }
     out.push(...legs);
     const rap = classify.execCodes(day).find((c) => reserveKind(c, limits) === 'rap' && !planned?.has(`${day.date}|${c.slice(0, 5)}`));

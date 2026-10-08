@@ -12,7 +12,8 @@ import { buildTimeline, buildPairings, markCarryIn, matchPairings, describePairi
 import { hoursToMin, minToHhmm } from '../time.js';
 import { OPTIONAL_COLUMNS } from '../pdf/exec.js';
 import { checkLegalLimits, restDefinition, delayFitsFdp, baseReportMinutes } from './legal.js';
-import { stationOffsetAt, whiteFlightLegs, whiteCrew, contractCrewOf, planSpan } from './duty.js';
+import { whiteFlightLegs, whiteCrew, contractCrewOf } from './duty.js';
+import { timeZones, legTimes, pairingTimes, crossesMidnight, dateOf } from '../flight-times.js';
 import { calendarView, buildJournal, reduceChain, sameAssignment, firstFdpLegs, overlapDays, samePairing } from './journal.js';
 import { baseTime } from '../airports.js';
 
@@ -75,15 +76,17 @@ export function evaluate({ rulesData, plan = null, exec = null, answers = {}, hi
 
   const planPairings = plan ? buildPairings(timeline, domicile, planLegsWithCredit).map(ftOnLastDay) : [];
   if (exec) markCarryIn(timeline, domicile);
+  // אזורי הזמן של החודש, לזמני הרגליים והסבבים (js/flight-times.js).
+  const tz = timeZones(domicile, plan?.stationOffsets ?? null, timeline);
   // חזרה לבסיס אחרי המראה מצטרפת לטיסה שיוצאת אחריה באותו FDP, לפי הגדרת ה-FDP של הסליפ הקצר.
   const slip = supported.find((r) => r.logic.id === 'min_slip_credit')?.logic.params;
   // המנוחה החוקית לפי ה-OMA: מתחילה 15 דק' אחרי ה-On block (`legal_limits`).
   const legalRest = restDefinition(rulesData.legal_limits);
   const fdp = slip?.legal_rest_hours != null
-    ? { legalRestMin: slip.legal_rest_hours * 60, reportMin: slip.report_minutes_before_std ?? 0, postMin: legalRest?.postMin ?? 0 } : null;
+    ? { legalRestMin: slip.legal_rest_hours * 60, reportMin: slip.report_minutes_before_std ?? 0, postMin: legalRest?.postMin ?? 0, tz } : null;
   const execPairings = exec ? buildPairings(timeline, domicile, (d) => d.exec?.legs, fdp) : [];
-  const reportDays = exec ? attachReportTails(execPairings, timeline, domicile, codes, answers) : [];
-  markLandingDays(planPairings, execPairings, timeline, domicile, plan?.stationOffsets ?? null);
+  const reportDays = exec ? attachReportTails(execPairings, timeline, tz, codes, answers) : [];
+  markLandingDays(planPairings, execPairings, timeline, tz);
   const dependentAnswers = {};
   // ההחלפות עם טיסה אחרת (`splitSwappedElsewhere`) והפעילות במקום סבב (`explainByActivity`) – אחרי
   // שהשרשרת מהיומן הוסיפה את התשובות שלה, לפני החוקים.
@@ -119,10 +122,11 @@ export function evaluate({ rulesData, plan = null, exec = null, answers = {}, hi
 
   const assumed = new Map(); // planId → ערכי התשובה שהאפליקציה הניחה בלי לשאול
   const ctx = makeContext({ out, timeline, domicile, codes, holidays: rulesData.holidays ?? {}, answers, plan, exec, supported, matches, planPairings,
-    period, fleet, fdp, assumed, reportDays, calendarAnswer: (id) => (reopen.includes(id) ? null : cal.answer(id)), calendarFirstDay: cal.firstDay,
+    period, fleet, fdp, tz, assumed, reportDays, calendarAnswer: (id) => (reopen.includes(id) ? null : cal.answer(id)), calendarFirstDay: cal.firstDay,
     // בלי דוח ביצוע, הסבבים המתוכננים משמשים לחישוב הקרדיט והרי"ג הצפויים.
     execPairings: exec ? execPairings : planPairings });
   ctx.legalRest = legalRest;
+  ctx.tz = tz;
   // טיסות שהרכב הצוות שלהן משנה את בדיקת מגבלות החוק או את הזכאות לפיצוי, "date|flight": רק עליהן
   // ההודעה על הרכב צוות שחסר ביומן (`calendarMissing`; בעל המוצר, 04/10/2026).
   const crewMatters = new Set();
@@ -150,7 +154,7 @@ export function evaluate({ rulesData, plan = null, exec = null, answers = {}, hi
     const activity = new Set([...(codes.relevant ?? []).filter((c) => !leave.has(c)), ...(codes.ground_activity ?? [])]);
     const common = {
       limits: rulesData.legal_limits, period, plan, history, domicile, fleet,
-      offsetAt: (station, date) => stationOffsetAt(ctx, station, date),
+      offsetAt: tz.offsetAt,
       classify: {
         notDuty: (c) => isLeaveCode(c, leave, codes) || isIgnoredPlanCode(c, codes),
         isActivity: (c) => !isLeaveCode(c, leave, codes) && (activity.has(c) || activity.has(expandCode(c, codes)) || c.startsWith('SIM')),
@@ -230,7 +234,7 @@ export function evaluate({ rulesData, plan = null, exec = null, answers = {}, hi
   if (mode === 'full') addedNotes(out, answers);
   explainCompensations(out);
   if (exec) {
-    out.comparison = compare({ out, timeline, execPairings, domicile, codes, fdp });
+    out.comparison = compare({ out, timeline, execPairings, tz, codes, fdp });
     explainUnexplained(out, timeline, cal, execPairings.filter((p) => ctx.pairingHandledBy(p, 'diversion_assumed')));
     out.totals = compareTotals(out, exec);
     warnMissingColumns(out, exec);
@@ -633,7 +637,7 @@ function calendarFacts(calendar, domicile) {
 
 // ---------- ctx: מה שהלוגיקות רואות ----------
 
-function makeContext({ out, timeline, domicile, codes, holidays, answers, plan, exec, supported, matches, planPairings, period, fleet, execPairings, fdp, assumed, reportDays = [], calendarAnswer, calendarFirstDay }) {
+function makeContext({ out, timeline, domicile, codes, holidays, answers, plan, exec, supported, matches, planPairings, period, fleet, execPairings, fdp, tz, assumed, reportDays = [], calendarAnswer, calendarFirstDay }) {
   const absenceBy = new Map(); // date → Set(ruleId)
   const pairingTags = new Map(); // pairing.id → Set(tag)
   const askedIds = new Set();
@@ -746,7 +750,7 @@ function makeContext({ out, timeline, domicile, codes, holidays, answers, plan, 
       const d0 = Date.parse(date) / 60000;
       return !planPairings.some((p) => {
         if (p.from <= date && date <= p.to) return true;
-        const s = planSpan(p, domicile, timeline[0].date);
+        const s = pairingTimes(p, tz);
         return (s.start ?? -Infinity) < d0 + 1440 && (s.end ?? Infinity) > d0;
       });
     },
@@ -841,21 +845,14 @@ function makeContext({ out, timeline, domicile, codes, holidays, answers, plan, 
     },
 
     /** הימים שבהם הסבב רשום בדוח, כולל יום שהקרדיט התפצל אליו: הימים של השורה שלו בפירוט. */
-    reportDates: (pairing) => reportDates(pairing, timeline, domicile),
+    reportDates: (pairing) => reportDates(pairing, timeline, tz),
 
     /** ימים ברומה בלי טיסה, עם TAB, אחרי סבב שנחת לפני חצות: נשאלים (`attachReportTails`). */
     reportDays,
 
-    /**
-     * סוף השהייה מחוץ לבסיס לפי הרומה (`awayFromBase`): היום האחרון של הסבב ברומה, והדקות בו. הרומה
-     * כבר חישבה אותן ב-TAB של היום, לפי הזמנים בפועל; כשסבב אחר יוצא באותו יום, ה-TAB של שניהם, והחלק
-     * של הסבב שנחת הוא מחצות עד הנחיתה (בעל המוצר, 08/10/2026). null בלי רומה, בסבב של יום אחד, או בלי TAB.
-     */
-    reportStay: (pairing) => (exec && execPairings.includes(pairing) ? pairing.reportEnd ?? null : null),
-
     /** סכום עמודה בדוח על ימי הסבב, כולל יום שהקרדיט התפצל אליו (`columnDates`). */
     reportedOn(pairing, column) {
-      return columnDates(pairing, column, timeline, domicile, execPairings)
+      return columnDates(pairing, column, timeline, tz, execPairings)
         .reduce((s, date) => s + (dayOf(timeline, date)?.exec?.values?.[column]?.min ?? 0), 0);
     },
 
@@ -865,7 +862,7 @@ function makeContext({ out, timeline, domicile, codes, holidays, answers, plan, 
 
     /** מה שצפוי על ימי הסבב בדוח: ציפיות של הסבב, וציפיות לפי תאריך שנופלות בימים שלו. */
     expectedAround(pairing, key) {
-      const dates = reportDates(pairing, timeline, domicile);
+      const dates = reportDates(pairing, timeline, tz);
       return out.expectations.filter((e) => e.key === key &&
         (e.pairingId === pairing.id || (!e.pairingId && dates.includes(e.date)))).reduce((s, e) => s + e.min, 0);
     },
@@ -882,7 +879,7 @@ function makeContext({ out, timeline, domicile, codes, holidays, answers, plan, 
      */
     paidOn(pairing, column, key, min, except = []) {
       if (!exec || !min) return false;
-      const reported = columnDates(pairing, column, timeline, domicile, execPairings)
+      const reported = columnDates(pairing, column, timeline, tz, execPairings)
         .reduce((s, date) => s + (dayOf(timeline, date)?.exec?.values?.[column]?.min ?? 0), 0);
       const explained = out.expectations
         .filter((e) => e.pairingId === pairing.id && e.key === key && !except.includes(e.ruleId)).reduce((s, e) => s + e.min, 0);
@@ -1430,20 +1427,16 @@ function reportedCells(day) {
  * הקרדיט של רגל כזו מתפצל בדוח בין שני הימים (אומת: LY336, 16–17/07). סבב ברומה שימי ההמשך
  * שלו כבר נקבעו (`reportTail`, `attachReportTails`) – לפיהם.
  */
-function reportDates(pairing, timeline, domicile) {
+function reportDates(pairing, timeline, tz) {
   const dates = [...pairing.dates];
   if (pairing.reportTail) return [...dates, ...pairing.reportTail.filter((d) => !dates.includes(d))];
   const last = pairing.legs.at(-1);
-  if (last?.dst === domicile) {
+  if (last?.dst === tz.domicile) {
     const next = timeline[timeline.findIndex((d) => d.date === pairing.to) + 1];
-    if (crossesMidnight(last) && next && !dates.includes(next.date)) dates.push(next.date);
+    if (crossesMidnight(last, tz) && next && !dates.includes(next.date)) dates.push(next.date);
   }
   return dates;
 }
-
-/** רגל שהמריאה לפני חצות ונחתה אחריו, לפי הזמנים המתוכננים או בפועל (בשעון של כל שדה). */
-const crossesMidnight = (leg) => (leg.sta != null && leg.skdDur != null && leg.sta - leg.skdDur < 0) ||
-  (leg.ata != null && leg.actDur != null && leg.ata - leg.actDur < 0);
 
 /**
  * הימים שאחרי סבב שהרומה רושמת עליו (`pairing.reportTail`). הרומה רושמת את הרגל ביום ה-STD, ואת
@@ -1454,7 +1447,7 @@ const crossesMidnight = (leg) => (leg.sta != null && leg.skdDur != null && leg.s
  * המיוחדת); בתשובה "המשך" הוא נוסף לסבב. כמה סבבים שמסתיימים באותו יום נבדקים כולם (17/06/2024).
  * @returns {{date: string, pairing: object}[]} הימים שנשאלים
  */
-function attachReportTails(execPairings, timeline, domicile, codes, answers) {
+function attachReportTails(execPairings, timeline, tz, codes, answers) {
   const index = new Map(timeline.map((d, i) => [d.date, i]));
   const inOther = (date, self) => execPairings.some((p) => p !== self && (p.dates.includes(date) || (p.from < date && date < p.to)));
   const loose = (day) => !!day && !(day.exec?.legs ?? []).length && !(day.exec?.sims ?? []).length &&
@@ -1466,11 +1459,11 @@ function attachReportTails(execPairings, timeline, domicile, codes, answers) {
   for (const p of execPairings) {
     p.reportTail = [];
     const last = p.legs.at(-1);
-    if (last?.dst !== domicile || p.cutAtEnd) continue;
+    if (last?.dst !== tz.domicile || p.cutAtEnd) continue;
     const i = index.get(p.to) + 1;
     const next = timeline[i];
     if (!next || p.dates.includes(next.date)) continue;
-    if (crossesMidnight(last)) {
+    if (crossesMidnight(last, tz)) {
       p.reportTail.push(next.date);
       // יום ההמשך שסבב אחר יוצא בו אינו עיכוב שנמשך.
       if (!inOther(next.date, p)) extend(p, i + 1);
@@ -1484,47 +1477,46 @@ function attachReportTails(execPairings, timeline, domicile, codes, answers) {
     if (answers[`report_day:${date}`]?.value === 'continued') extend(p, i);
     else asked.push({ date, pairing: p });
   }
-  for (const p of execPairings) p.reportEnd = reportEnd(p, execPairings, timeline, domicile);
+  for (const p of execPairings) p.reportEnd = reportEnd(p, execPairings, timeline, tz);
   return asked;
 }
 
 /**
- * סוף השהייה מחוץ לבסיס לפי הרומה (`pairing.reportEnd`; `awayFromBase` ב-js/rules/logic.js, `execSpan`
- * ב-js/rules/duty.js): היום האחרון של הסבב ברומה, והדקות בו. הרומה כבר חישבה אותן ב-TAB של היום, לפי
+ * סוף השהייה מחוץ לבסיס לפי הרומה (`pairing.reportEnd`; `pairingTimes` עם `away` ב-js/flight-times.js):
+ * היום האחרון של הסבב ברומה, והדקות בו. הרומה כבר חישבה אותן ב-TAB של היום, לפי
  * הזמנים בפועל; כשסבב אחר יוצא באותו יום, ה-TAB של שניהם, והחלק של הסבב שנחת הוא מחצות עד הנחיתה
  * (בעל המוצר, 08/10/2026). null בסבב של יום אחד, או בלי TAB.
  */
-function reportEnd(pairing, execPairings, timeline, domicile) {
-  const home = pairing.legs.findLast((l) => l.dst === domicile);
-  const date = reportDates(pairing, timeline, domicile).at(-1);
+function reportEnd(pairing, execPairings, timeline, tz) {
+  const home = pairing.legs.findLast((l) => l.dst === tz.domicile);
+  const date = reportDates(pairing, timeline, tz).at(-1);
   if (!home || pairing.cutAtEnd || date === pairing.from) return null;
-  const shared = execPairings.some((p) => p !== pairing && p.dates.includes(date));
-  const min = shared ? (home.ata ?? home.sta) : dayOf(timeline, date)?.exec?.values?.TAB?.min;
-  return min ? { date, min } : null;
+  if (!execPairings.some((p) => p !== pairing && p.dates.includes(date))) {
+    const min = dayOf(timeline, date)?.exec?.values?.TAB?.min;
+    return min ? { date, min } : null;
+  }
+  const t = legTimes(home, tz);
+  const landed = t ? t.ata ?? t.sta : null;
+  return landed ? { date: dateOf(landed), min: landed - Date.parse(dateOf(landed)) / 60000 } : null;
 }
 
 /**
  * יום הנחיתה בבסיס, לתיאור הסבב (`shownTo`, ‏`describePairing`): סבב שחוזר אחרי חצות מתואר עד היום
  * שבו נחת, בשני הצדדים (בעל המוצר, 08/10/2026; ‏LY392 מ-BCN: 23/09–25/09, ולא 23/09–24/09). בביצוע –
  * היום האחרון שהרומה רושמת על הסבב (`reportDates`, כולל עיכוב של יותר מיממה; בסוף החודש – הרגל
- * חוצה את חצות); בתכנון – "+1" ליד שעת הנחיתה, או המראה בשעון הבסיס אחרי שעת הנחיתה. ה-`skdDur` של
- * רגל בתכנון אינו משמש כאן: בטיסת לילה הוא ה-FT של כל הסבב (LY5110 מ-TBS ב-15/04/2025: 6:56).
- * רגל שהמריאה ביום שלפני שורת הרגל ("-1") כבר רשומה ביום הנחיתה.
+ * חוצה את חצות); בתכנון – יום הנחיתה המתוכננת (`pairingTimes`).
  */
-function markLandingDays(planPairings, execPairings, timeline, domicile, stationOffsets) {
+function markLandingDays(planPairings, execPairings, timeline, tz) {
   const dayAfter = (date) => new Date(Date.parse(date) + 86400000).toISOString().slice(0, 10);
   for (const p of execPairings) {
-    const last = reportDates(p, timeline, domicile).at(-1);
+    const last = reportDates(p, timeline, tz).at(-1);
     const leg = p.legs.at(-1);
     if (last > p.to) p.shownTo = last;
-    else if (!p.cutAtEnd && leg?.dst === domicile && crossesMidnight(leg) && p.to === timeline.at(-1)?.date) p.shownTo = dayAfter(p.to);
+    else if (!p.cutAtEnd && leg?.dst === tz.domicile && crossesMidnight(leg, tz) && p.to === timeline.at(-1)?.date) p.shownTo = dayAfter(p.to);
   }
-  const at = { domicile, stationOffsets };
   for (const p of planPairings) {
-    const leg = p.legs.at(-1);
-    if (p.cutAtEnd || leg?.dst !== domicile || !leg.dep || !leg.arr || leg.arr.foreign || leg.dep.prevDay) continue;
-    const off = leg.dep.foreign ? stationOffsetAt(at, leg.org, leg.date) : 0;
-    if (leg.arr.nextDay || (off != null && leg.dep.min - off > leg.arr.min)) p.shownTo = dayAfter(p.to);
+    const { end } = pairingTimes(p, tz);
+    if (end != null && p.legs.at(-1)?.dst === tz.domicile && dateOf(end) > p.to) p.shownTo = dateOf(end);
   }
 }
 
@@ -1536,8 +1528,8 @@ const SPLIT_COLUMNS = ['Credit', 'FLT', 'DH', 'PDFT', 'TAB', 'ABR'];
  * שמתפצלות: פיצוי שהרומה רשמה בו (S/C, ‏COM, ‏Rig) שייך לסבב שיוצא (22–23/09/2026: LY2524 מ-PRG
  * נחתה אחרי חצות, וה-S/C של 23/09 הוא של BCN שיצאה באותו יום, ולא קריאה מיוחדת על PRG).
  */
-function columnDates(pairing, column, timeline, domicile, execPairings) {
-  const dates = reportDates(pairing, timeline, domicile);
+function columnDates(pairing, column, timeline, tz, execPairings) {
+  const dates = reportDates(pairing, timeline, tz);
   if (SPLIT_COLUMNS.includes(column)) return dates;
   return dates.filter((d) => pairing.dates.includes(d) || !execPairings.some((p) => p !== pairing && p.dates.includes(d)));
 }
@@ -1550,14 +1542,14 @@ function reportedValue(day, column) {
   return v[column]?.min ?? 0;
 }
 
-function compare({ out, timeline, execPairings, domicile, codes: catalog, fdp }) {
+function compare({ out, timeline, execPairings, tz, codes: catalog, fdp }) {
   // קבוצות ימים: סבב וימי הפיצול שלו מתאחדים; ימים שחולקים סבב מתאחדים גם הם.
   const parent = new Map(timeline.map((d) => [d.date, d.date]));
   const find = (x) => (parent.get(x) === x ? x : (parent.set(x, find(parent.get(x))), parent.get(x)));
   const union = (a, b) => parent.set(find(b), find(a));
   const pairingOf = new Map(); // date → הסבבים שנוגעים בו (כמה סבבים באותו יום, 25/11/2025)
   for (const p of execPairings) {
-    const dates = reportDates(p, timeline, domicile);
+    const dates = reportDates(p, timeline, tz);
     for (const d of dates) { union(dates[0], d); pairingOf.set(d, [...(pairingOf.get(d) ?? []), p]); }
   }
 
@@ -1574,7 +1566,7 @@ function compare({ out, timeline, execPairings, domicile, codes: catalog, fdp })
     if (!to) return e;
     const column = KEY_COLUMNS[e.key][0];
     const from = execPairings.find((p) => p.id === e.pairingId);
-    const days = from ? reportDates(from, timeline, domicile) : e.dates;
+    const days = from ? reportDates(from, timeline, tz) : e.dates;
     bump(days.find((d) => raw(d, column) >= e.min) ?? days[0], column, -e.min);
     bump(to.from, column, e.min);
     return { ...e, date: to.from, dates: [...to.dates], pairingId: to.id, pairing: describePairing(to) };
@@ -1598,7 +1590,7 @@ function compare({ out, timeline, execPairings, domicile, codes: catalog, fdp })
   // `only`: הסבבים של השורה, ו-`dayCodes`: קודי היום שבה, כשהקבוצה פוצלה (`splitByPairing`).
   const labelOf = (dates, column, only = null, dayCodes = null) => {
     const parts = (only ?? [...new Set(dates.flatMap((d) => pairingOf.get(d) ?? []))]).flatMap(pairingParts)
-      .map((part) => ({ part, days: reportDates(part, timeline, domicile).filter((d) => dates.includes(d)) }))
+      .map((part) => ({ part, days: reportDates(part, timeline, tz).filter((d) => dates.includes(d)) }))
       .filter(({ part, days }) => days.length && (CREDIT_LABEL_COLUMNS.includes(column) || !part.legs.every((l) => l.org === l.dst)));
     const lines = parts.length === 1
       ? [[range(dates), describeRoute(parts[0].part)]]

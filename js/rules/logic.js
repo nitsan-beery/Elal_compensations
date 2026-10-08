@@ -6,7 +6,7 @@
 
 import { hoursToMin, minToHhmm } from '../time.js';
 import { describePairing, describeRoute, fdpParts } from '../model.js';
-import { stationOffset } from '../airports.js';
+import { at, dateOf, legTimes, pairingTimes } from '../flight-times.js';
 import { DUTY_LOGIC, DUTY_PARAMS, execFdpGroups, amountWord, otherOption, applyOtherReason, extensionDays, landedBefore, keyFor } from './duty.js';
 import { overlapDays } from './journal.js';
 
@@ -63,7 +63,7 @@ function credit_from_scheduled(ctx, params, rule) {
           ? `${leg.flight}: לג שאינו נוגע בבסיס, קרדיט לפי הביצוע ${minToHhmm(dur)} ולא ${minToHhmm(leg.skdDur)} מתוכננות`
           : null;
       const note = (msg) => [basis, msg].filter(Boolean).join('. ');
-      const split = splitAtMidnight(leg, ctx.domicile);
+      const split = splitAtMidnight(leg, ctx.tz);
       if (leg.prevMonth) {
         // הרגל רשומה ביום 1 אבל יצאה ביום האחרון של החודש הקודם.
         if (split.error) { error = split.error; break; }
@@ -114,35 +114,19 @@ const legCreditDur = (leg, pairing, domicile) =>
 const isAirReturn = (leg) => leg.org != null && leg.org === leg.dst;
 
 /**
- * ההמראה בפועל בשעון הבסיס, ביחס לחצות של היום שבו הרגל רשומה: `shift` – כמה ימים
- * אחרי (או לפני) היום הרשום היא המריאה, ו-`before` – כמה ממנה חל לפני חצות של יום
- * ההמראה, או null אם היא לא חוצה חצות. השעות בדוח מקומיות, ולכן ההפרש של שדה המוצא
- * נלמד מהנחיתה בבסיס, או לפי אזור הזמן של השדה.
- *
- * הדוח רושם רגל ביום ה-STD בשעון הבסיס, גם כשבשעון המקומי זה עוד היום הקודם (LY398
- * ב-24/01/2025: ‏STD 23:05 במדריד = 00:05 ב-24/01, ‏ATD 00:35 → 24/01, לא 25/01).
+ * ההמראה בפועל בשעון הבסיס (`legTimes`), ביחס לחצות של היום שבו הרגל רשומה: `shift` – כמה
+ * ימים אחרי (או לפני) היום הרשום היא המריאה, ו-`before` – כמה ממנה חל לפני חצות של יום
+ * ההמראה, או null אם היא לא חוצה חצות (LY398 ב-24/01/2025: ‏STD 23:05 במדריד = 00:05 ב-24/01,
+ * ‏ATD 00:35 → 24/01, לא 25/01).
  */
-function splitAtMidnight(leg, domicile) {
+function splitAtMidnight(leg, tz) {
   const dur = leg.actDur ?? leg.skdDur;
-  let local = leg.atd ?? leg.std; // ההמראה בשעון המקומי, ביחס ליום ה-STD המקומי
-  if (local == null || dur == null) return { error: `לא ניתן לדעת מתי המריאה ${leg.flight}.` };
-  if (leg.atd != null && leg.std != null) {
-    if (leg.atd - leg.std < -720) local += 1440; // עיכוב אל מעבר לחצות
-    else if (leg.atd - leg.std > 720) local -= 1440; // הקדמה לפני חצות
-  }
-  let off = null; // שעון מקומי בשדה המוצא פחות שעון הבסיס
-  if (leg.org === domicile) off = 0;
-  else if (leg.dst === domicile && (leg.ata ?? leg.sta) != null) {
-    const depBase = mod((leg.ata ?? leg.sta) - dur, 1440);
-    off = mod(local - depBase + 720, 1440) - 720;
-  } else off = stationOffset(leg.org, leg.date, domicile);
-  if (off == null) return { error: `לא ניתן לדעת מתי המריאה ${leg.flight} בשעון הבסיס.` };
-  // ה-STD בשעון הבסיס נופל ביום הרשום; מזיזים את השעון המקומי כך שיתאים לו.
-  const std = leg.std ?? local;
-  const dep = local - off - (std - off - mod(std - off, 1440));
-  const shift = Math.floor(dep / 1440);
-  const clock = dep - shift * 1440;
-  return { shift, before: clock + dur <= 1440 ? null : 1440 - clock };
+  if ((leg.atd ?? leg.std) == null || dur == null) return { error: `לא ניתן לדעת מתי המריאה ${leg.flight}.` };
+  const t = legTimes(leg, tz);
+  if (!t) return { error: `לא ניתן לדעת מתי המריאה ${leg.flight} בשעון הבסיס.` };
+  const dep = t.atd ?? t.std;
+  const clock = dep - at(dateOf(dep), 0);
+  return { shift: daysBetween(leg.date, dateOf(dep)), before: clock + dur <= 1440 ? null : 1440 - clock };
 }
 
 /**
@@ -168,7 +152,7 @@ function min_slip_credit(ctx, params, rule) {
 /** הקבוצות שההשלמה נבדקת עליהן: FDP שלם, או כל סבב בנפרד כשחלק מה-FDP אינו נבדק. */
 function minSlipGroups(ctx, params) {
   const groups = params.per_fdp
-    ? execFdpGroups(ctx.execPairings, ctx.domicile, H(params.legal_rest_hours), params.report_minutes_before_std ?? 0, ctx.legalRest?.postMin)
+    ? execFdpGroups(ctx.execPairings, ctx.tz, H(params.legal_rest_hours), params.report_minutes_before_std ?? 0, ctx.legalRest?.postMin)
     : ctx.execPairings.map((p) => [p]);
   const out = [];
   for (const group of groups) {
@@ -473,7 +457,7 @@ function late_landing_home(ctx, params, rule) {
     if (leg.dst !== ctx.domicile || leg.sta == null || leg.ata == null) continue;
     let delay = wrapDelta(leg.ata - leg.sta);
     let diverted = '';
-    const div = diversionOf(flat, i, ctx.domicile);
+    const div = diversionOf(flat, i, ctx.tz);
     if (div) {
       const divDelay = wrapDelta(leg.ata - div.sta);
       const divMin = stepsOf(divDelay) * perStep;
@@ -529,18 +513,18 @@ function late_landing_home(ctx, params, rule) {
  * הבסיס (30/06/2024: LY5102 WAW‑AYT‑RHO‑TLV, ‏09:50 + 3:40 = 14:30, ‏ATA 21:14 → COM 03:00).
  * כשהרגל לבסיס נקבעה מראש זו אינה סטיה (20/06/2025: LY5420 PFO‑LCA‑TLV).
  */
-function diversionOf(flat, i, domicile) {
+function diversionOf(flat, i, tz) {
   const leg = flat[i].leg;
   if (!leg.flight) return null;
   let j = i;
   while (j > 0 && flat[j - 1].leg.flight === leg.flight && flat[j - 1].leg.dst === flat[j].leg.org) j--;
   if (j === i) return null;
   const first = flat[j].leg, next = flat[j + 1].leg;
-  if (first.org === domicile || first.std == null || first.skdDur == null || first.ata == null || next.std == null) return null;
+  if (first.org === tz.domicile || first.std == null || first.skdDur == null || first.ata == null || next.std == null) return null;
   if (wrapDelta(next.std - first.ata) <= 0) return null;
-  const off = stationOffset(first.org, flat[j].date, domicile);
-  if (off == null) return null;
-  return { sta: mod(first.std - off + first.skdDur, 1440), via: flat.slice(j, i).map((x) => x.leg.dst) };
+  const t = legTimes({ ...first, date: flat[j].date }, tz);
+  if (!t) return null;
+  return { sta: mod(t.sta, 1440), via: flat.slice(j, i).map((x) => x.leg.dst) };
 }
 
 /**
@@ -599,7 +583,7 @@ function special_call(ctx, params, rule) {
     if (match.plan && !cancelledPlan && !training && !bid && extendedPairing(ctx, params, rule, match, answer)) continue;
     if (reported > 0 || answer?.value === 'special_call' || companyLinked || training || bid || cancelledPlan) {
       ctx.markPairing(match.exec, 'special_call');
-      const stay = awayFromBase(match.exec, ctx.domicile, ctx.timeline.at(-1).date, ctx.reportStay(match.exec));
+      const stay = awayFromBase(match.exec, ctx.tz, ctx.timeline.at(-1).date);
       if (stay.error) {
         ctx.review(`${describePairing(match.exec)}: ${stay.error} לא ניתן לספור יממות לקריאה המיוחדת. דורש בדיקה ידנית.`, rule);
         continue;
@@ -757,38 +741,21 @@ function extendedPairing(ctx, params, rule, match, answer) {
 }
 
 /**
- * זמן שהייה מחוץ לבסיס (פרק כ"ה ס' 1.יא): מההמראה המתוכננת או בפועל, המוקדם מביניהם,
- * ועד סיום הטיסה האחרונה בבסיס. זמנים מוחזרים כדקות מתחילת היממה הראשונה, בשעון הבסיס.
- *
- * בדוח הביצוע כל שעה רשומה בשעון המקומי של התחנה. רגל היציאה מהבסיס היא כבר בשעון
- * הבסיס. בנחיתה בבסיס ידוע השעון בבסיס, ושעת ההמראה בשעון הבסיס מחושבת לאחור לפי משך
- * הטיסה. הרגל רשומה בדוח תחת יום ההמראה בשעון הבסיס, גם כשבשעון המקומי ההמראה כבר
- * ביום הבא (אומת: LY336 ב-16/07; LY5110 ב-06/01, 25/01 ו-29/01/2026, המראה אחרי חצות בטביליסי).
+ * זמן שהייה מחוץ לבסיס (פרק כ"ה ס' 1.יא), לפי `pairingTimes` עם `away`: מההמראה המתוכננת או
+ * בפועל, המוקדמת מביניהן, ועד הנחיתה בפועל בבסיס. זמנים מוחזרים כדקות מתחילת היממה הראשונה,
+ * בשעון הבסיס. סבב שחוזר בחודש הבא – עד סוף החודש.
  */
-function awayFromBase(pairing, domicile, monthEnd, reported = null) {
-  const out = pairing.legs.find((l) => l.org === domicile);
-  const home = [...pairing.legs].reverse().find((l) => l.dst === domicile);
+function awayFromBase(pairing, tz, monthEnd) {
+  const out = pairing.legs.find((l) => l.org === tz.domicile);
+  const home = pairing.legs.findLast((l) => l.dst === tz.domicile);
   if (!out || (!home && !pairing.cutAtEnd)) return { error: 'הסבב לא יוצא מהבסיס או לא חוזר אליו.' };
-
   const first = pairing.from;
-  const sched = out.std ?? out.atd;
-  if (sched == null) return { error: 'חסרה שעת המראה מהבסיס.' };
-  // המראה בפועל לפני ה-STD מקדימה את תחילת השהייה. ATD שנראה מוקדם ביותר משלוש שעות הוא עיכוב
-  // שעבר את חצות (STD 23:50, ‏ATD 00:20), ואינו משנה את תחילת השהייה.
-  const early = out.std != null && out.atd != null ? mod(out.std - out.atd, 1440) : 0;
-  const start = daysBetween(first, out.date) * 1440 + sched - (early <= 180 ? early : 0);
-  // הסבב חוזר בחודש הבא: בחודש הזה נספרות היממות עד סוף החודש.
+  const span = pairingTimes(pairing, tz, { away: true });
+  if (span.start == null) return { error: 'חסרה שעת המראה מהבסיס.' };
+  const start = span.start - at(first, 0);
   if (!home) return { first, start, end: (daysBetween(first, monthEnd) + 1) * 1440, cutAtEnd: true };
-  // יש רומה: סוף השהייה לפי היום האחרון של הסבב בה וה-TAB שלו (`ctx.reportStay`), כי הרגל רשומה ביום
-  // ה-STD גם כשהמריאה בפועל אחרי חצות (24–25/09/2026: LY392 ‏BCN-TLV, ‏ATD 00:01, ‏ATA 05:16).
-  if (reported) return { first, start, end: daysBetween(first, reported.date) * 1440 + reported.min };
-
-  const arrClock = home.ata ?? home.sta;
-  const dur = home.ata != null ? (home.actDur ?? home.skdDur) : home.skdDur;
-  if (arrClock == null || dur == null) return { error: 'חסרים שעת נחיתה בבסיס או משך הטיסה.' };
-  const homeDep = mod(arrClock - dur, 1440); // שעת ההמראה של רגל החזרה, בשעון הבסיס
-  const end = daysBetween(first, home.date) * 1440 + homeDep + dur;
-  return { first, start, end };
+  if (span.end == null) return { error: 'חסרים שעת נחיתה בבסיס או משך הטיסה.' };
+  return { first, start, end: span.end - at(first, 0) };
 }
 
 /**
@@ -1760,7 +1727,7 @@ function standbyDayRule(ctx, planCode) {
 function bidHint(pairing, ctx, sc) {
   if (!sc) return 'קריאה מיוחדת על ימי הטיסה';
   const p = sc.logic.params ?? {};
-  const stay = awayFromBase(pairing, ctx.domicile, ctx.timeline.at(-1).date, ctx.reportStay(pairing));
+  const stay = awayFromBase(pairing, ctx.tz, ctx.timeline.at(-1).date);
   if (stay.error) return `קריאה מיוחדת על ימי הטיסה, ב-${p.report_column ?? 'S/C'}`;
   const n = countSpecialCallDays(stay, p, pairing, ctx.fdp).counted.length;
   return `קריאה מיוחדת: ${n === 1 ? 'יממה אחת' : `${n} יממות`}, ${minToHhmm(n * H(p.hours))} ב-${p.report_column ?? 'S/C'}`;
@@ -1770,7 +1737,7 @@ function bidHint(pairing, ctx, sc) {
 function bidAmount(pairing, ctx, sc) {
   if (!sc) return 0;
   const p = sc.logic.params ?? {};
-  const stay = awayFromBase(pairing, ctx.domicile, ctx.timeline.at(-1).date, ctx.reportStay(pairing));
+  const stay = awayFromBase(pairing, ctx.tz, ctx.timeline.at(-1).date);
   if (stay.error) return 0;
   return countSpecialCallDays(stay, p, pairing, ctx.fdp).counted.length * H(p.hours);
 }
