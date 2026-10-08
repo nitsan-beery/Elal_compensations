@@ -758,9 +758,10 @@ function extendedPairing(ctx, params, rule, match, answer) {
   if (!days.length && !ext.second.length) return false;
   const id = `extended:${exec.id}`;
   const second = ctx.rulesWithLogic('second_unplanned_activity')[0]?.logic.params;
-  // S/C לפי יום: כל יממה שנוספה, ולא הסכום על הסבב (בעל המוצר, 08/10/2026).
+  // לפי יום: S/C על כל יממה פנויה שנוספה, ופעילות שנייה על כל יממה שתוכננה בה פעילות, ולא הסכום על הסבב
+  // (בעל המוצר, 08/10/2026).
   const paid = days.every((d) => ctx.paidOnDate(d, params.report_column ?? 'S/C', 'sc', H(params.hours))) &&
-    (!ext.second.length || ctx.paidOn(exec, second.report_column ?? 'COM', 'com', ext.second.length * H(second.hours)));
+    ext.second.every((d) => ctx.paidOnDate(d, second.report_column ?? 'COM', keyFor(second.report_column ?? 'COM'), H(second.hours)));
   // סבב שהוחלף באותם ימים בשינוי ביוזמת החברה או בזכייה במכרז: התשובה עליו כבר אומרת שהימים הנוספים
   // אינם בהסכמה, ועל יום שלא תוכנן בו כלום מגיעה קריאה מיוחדת, כמו ב-`companySwapToFreeDay` (בעל המוצר,
   // 08/10/2026; רון, ספטמבר 2026: WAW ב-10/09 שהוחלף ב-BCN ‏09–11/09).

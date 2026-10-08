@@ -166,6 +166,8 @@ export function landedBefore(ctx, exec, d) {
 /**
  * טיסה או סימולטור שלא היו בתכנון, באותה יממה שבה אצ"א ביצע טיסה או סימולטור אחרים.
  * לא כולל פעילות קרקע, ולא שתי פעילויות באותו FDP (פחות ממנוחה חוקית ביניהן).
+ * הפיצוי שייך ליממה, ולא לסבב כולו (בעל המוצר, 08/10/2026): הציפייה על היממה, ו"הרומה זיכתה" נבדק
+ * ביממה עצמה (`paidOnDate`).
  */
 function second_unplanned_activity(ctx, params, rule) {
   if (!ctx.hasExec || !ctx.hasPlan) return;
@@ -178,7 +180,6 @@ function second_unplanned_activity(ctx, params, rule) {
   // SIM_PRG ב-28/01/2025: סימולטור בחו"ל שתוכנן באמצע סבב.
   const simPlanned = (day) => (day.plan?.codes ?? []).some((c) => simPlan.includes(c) || simPlanPrefixes.some((x) => c.startsWith(x)));
   const key = keyFor(params.report_column);
-  const own = ctx.rulesWithLogic('second_unplanned_activity').map((r) => r.id);
 
   const askRest = (id, date, title) => ctx.ask({
     id, date, title,
@@ -200,7 +201,10 @@ function second_unplanned_activity(ctx, params, rule) {
     const span = pairingTimes(u, ctx.tz, { away: true });
     if (span.start == null) continue;
     const day = u.from;
-    const others = ctx.execPairings.filter((p) => p !== u && p.dates.includes(day));
+    // שתי טיסות לא מתוכננות באותה יממה: רק המאוחרת היא הפעילות השנייה, ופיצוי אחד על היממה (בעל המוצר, 08/10/2026).
+    const unplannedIds = new Set(ctx.matches.filter((x) => x.how === 'unplanned').map((x) => x.exec.id));
+    const others = ctx.execPairings.filter((p) => p !== u && p.dates.includes(day) &&
+      !(unplannedIds.has(p.id) && (pairingTimes(p, ctx.tz, { away: true }).start ?? Infinity) > span.start));
     let separate = null;
     for (const o of others) {
       const so = pairingTimes(o, ctx.tz, { away: true });
@@ -210,7 +214,7 @@ function second_unplanned_activity(ctx, params, rule) {
     }
     if (separate) {
       ctx.expectPairing(u, key, H(params.hours), rule,
-        `${describePairing(u)} לא הייתה בתכנון, ובאותה יממה בוצעה גם ${describePairing(separate)} עם מנוחה חוקית ביניהן`);
+        `${describePairing(u)} לא הייתה בתכנון, ובאותה יממה בוצעה גם ${describePairing(separate)} עם מנוחה חוקית ביניהן`, { date: day, dates: [day] });
       continue;
     }
     if (others.length) {
@@ -221,10 +225,10 @@ function second_unplanned_activity(ctx, params, rule) {
     if (!simDay) continue;
     const id = `second_activity:${u.id}`;
     const answered = ctx.answer(id);
-    const a = answered ?? (ctx.paidOn(u, params.report_column, key, H(params.hours), own) ? { value: 'separate' } : null);
+    const a = answered ?? (ctx.paidOnDate(day, params.report_column, key, H(params.hours)) ? { value: 'separate' } : null);
     if (!a) askRest(id, day, `${describePairing(u)} לא הייתה בתכנון, ובאותה יממה היה סימולטור. האם הייתה מנוחה ביניהם?`);
     else if (a.value === 'separate') ctx.expectPairing(u, key, H(params.hours), rule, `${describePairing(u)} לא הייתה בתכנון, ובאותה יממה היה סימולטור ` +
-      `(${answered ? 'לפי תשובתך, עם מנוחה חוקית ביניהם' : `הרומה מזכה את הפיצוי`})`);
+      `(${answered ? 'לפי תשובתך, עם מנוחה חוקית ביניהם' : `הרומה מזכה את הפיצוי`})`, { date: day, dates: [day] });
   }
 
   // סבב מתוכנן שהתארך ליום שתוכננו בו טיסה או סימולטור (`extensionDays`; בעל המוצר, 06/10/2026): ההארכה
@@ -257,7 +261,7 @@ function second_unplanned_activity(ctx, params, rule) {
       }
       const id = `second_activity:${m.exec.id}:${d}`;
       const answered = ctx.answer(id);
-      const a = answered ?? (ctx.paidOn(m.exec, params.report_column, key, H(params.hours), own) ? { value: 'separate' } : null);
+      const a = answered ?? (ctx.paidOnDate(d, params.report_column, key, H(params.hours)) ? { value: 'separate' } : null);
       if (!a) askRest(id, d, `${what}, ובאותה יממה היה סימולטור. האם הייתה מנוחה ביניהם?`);
       else if (a.value === 'separate') ctx.expectPairing(m.exec, key, H(params.hours), rule, `${what}, ובאותה יממה היה סימולטור ` +
         `(${answered ? 'לפי תשובתך, עם מנוחה חוקית ביניהם' : 'הרומה מזכה את הפיצוי'})`, { date: d, dates: [d], explain: `הסבב התארך ל-${ddmm(d)}, ובאותה יממה היה סימולטור.` });
