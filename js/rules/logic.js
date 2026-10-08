@@ -624,6 +624,13 @@ function special_call(ctx, params, rule) {
         continue;
       }
       const days = countSpecialCallDays(stay, params, match.exec, ctx.fdp);
+      // סבב שיצא בחודש הקודם: קריאה מיוחדת רק על יממה שלא תוכנן בה סבב, כמו ברומה (28/02–08/03/2026, BUD:
+      // S/C על 01, 06 ו-07/03, ולא על GVA ‏02–03, ‏FCO ‏04–05 ו-VCE ‏08; בעל המוצר, 08/10/2026). יום הנחיתה
+      // של סבב מתוכנן שנוחת אחרי חצות (`shownTo`) הוא מימיו.
+      if (stay.cutAtStart) {
+        const planned = new Set(ctx.planPairings.flatMap((p) => p.shownTo ? [...p.dates, p.shownTo] : p.dates));
+        days.counted = days.counted.filter((d) => !planned.has(d));
+      }
       // כל יממה שמגיעה עליה קריאה מיוחדת היא שורה משלה בטבלת הפירוט (`perDay`), בלי הסבר: הסכום
       // והחוק כבר בשורה (בעל המוצר, 01/10/2026). רק יממה שנספרה אחרי בדיקת הסף מוסברת בשורה שלה
       // (`lastWhy`). יממה שלא עמדה בסף אין לה שורה, ולכן ההסבר עליה בהערות, ביום שלה (`skipped`;
@@ -651,7 +658,7 @@ function special_call(ctx, params, rule) {
       }
       for (const d of days.counted.filter((x) => !moved.has(x))) {
         ctx.expectPairing(match.exec, 'sc', H(params.hours), rule, `${flightsOf(partOf(d))}: יממה ${dayOf(d)}.`,
-          { date: d, dates: [d], perDay: true, explain: days.lastWhy && d === days.counted.at(-1) ? days.lastWhy : '' });
+          { date: d, dates: [d], perDay: true, explain: days.lastWhy && d === days.all.at(-1) ? days.lastWhy : '' });
       }
       continue;
     }
@@ -775,14 +782,19 @@ function extendedPairing(ctx, params, rule, match, answer) {
 /**
  * זמן שהייה מחוץ לבסיס (פרק כ"ה ס' 1.יא), לפי `pairingTimes` עם `away`: מההמראה המתוכננת או
  * בפועל, המוקדמת מביניהן, ועד הנחיתה בפועל בבסיס. זמנים מוחזרים כדקות מתחילת היממה הראשונה,
- * בשעון הבסיס. סבב שחוזר בחודש הבא – עד סוף החודש.
+ * בשעון הבסיס. סבב שחוזר בחודש הבא – עד סוף החודש; סבב שיצא בחודש הקודם – מתחילת החודש.
  */
 function awayFromBase(pairing, tz, monthEnd) {
   const out = pairing.legs.find((l) => l.org === tz.domicile);
   const home = pairing.legs.findLast((l) => l.dst === tz.domicile);
-  if (!out || (!home && !pairing.cutAtEnd)) return { error: 'הסבב לא יוצא מהבסיס או לא חוזר אליו.' };
+  const carried = !out && pairing.cutAtStart;
+  if ((!out && !carried) || (!home && !pairing.cutAtEnd)) return { error: 'הסבב לא יוצא מהבסיס או לא חוזר אליו.' };
   const first = pairing.from;
   const span = pairingTimes(pairing, tz, { away: true });
+  if (carried) {
+    if (span.end == null) return { error: 'חסרים שעת נחיתה בבסיס או משך הטיסה.' };
+    return { first, start: 0, end: span.end - at(first, 0), cutAtStart: true };
+  }
   if (span.start == null) return { error: 'חסרה שעת המראה מהבסיס.' };
   const start = span.start - at(first, 0);
   if (!home) return { first, start, end: (daysBetween(first, monthEnd) + 1) * 1440, cutAtEnd: true };

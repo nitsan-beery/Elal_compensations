@@ -35,6 +35,11 @@ export function buildTimeline(period, plan, exec) {
  * סבב שנחתך בגבול החודש מסומן: `cutAtStart` – הרגל הראשונה בחודש לא יוצאת מהבסיס, או
  * שהיא יצאה עוד בחודש הקודם (`prevMonth`, ראו markCarryIn); `cutAtEnd` – בסוף החודש
  * הסבב עוד לא חזר. החלק השני שלו בדוח של החודש השכן.
+ *
+ * סבב שהרגל הראשונה שלו בחודש אינה יוצאת מהבסיס הוא סגירה של סבב שיצא בחודש הקודם, ולכן הוא
+ * מתחיל ביום הראשון של החודש: כל הימים עד הרגל הזאת הם ימי שהייה מחוץ לבסיס (בעל המוצר,
+ * 08/10/2026; 28/02/2026 LY1229 ל-BUD, והחזרה LY1366 ב-08/03). `carriedFrom` – תאריך הרגל, שממנו
+ * המזהה, כדי שתשובות שנשמרו לפני כן יישארו.
  */
 export function buildPairings(days, domicile, getLegs, fdp = null) {
   const all = days.flatMap((day) => (getLegs(day) ?? []).map((leg) => ({ ...leg, date: day.date })));
@@ -47,7 +52,12 @@ export function buildPairings(days, domicile, getLegs, fdp = null) {
       open = { from: leg.date, to: leg.date, dates: [], legs: [], destinations: [] };
       if (!pairings.length && (leg.org !== domicile || leg.prevMonth)) open.cutAtStart = true;
       // סבב שהתחיל בחודש הקודם מתואר לפי התחנה שבה הוא נמצא בתחילת החודש.
-      if (open.cutAtStart && leg.org !== domicile) open.destinations.push(leg.org);
+      if (open.cutAtStart && leg.org !== domicile) {
+        open.destinations.push(leg.org);
+        open.carriedFrom = leg.date;
+        open.from = days[0].date;
+        open.dates = days.map((d) => d.date).filter((d) => d < leg.date);
+      }
     }
     if (!open.dates.includes(leg.date)) open.dates.push(leg.date);
     open.to = leg.date;
@@ -94,7 +104,7 @@ export function sameFdp(leg, next, fdp) {
 
 function closePairing(pairings, pairing, closed) {
   pairing.closed = closed;
-  const id = `${pairing.from}..${pairing.to}:${pairing.destinations.join('-') || '?'}`;
+  const id = `${pairing.carriedFrom ?? pairing.from}..${pairing.to}:${pairing.destinations.join('-') || '?'}`;
   // שתי טיסות סבב לאותו יעד באותו יום (שתיהן באותו FDP). המזהה משמש לתשובות שנשמרו,
   // ולכן מוסיפים סיומת רק כשיש התנגשות, והמזהים הקיימים לא משתנים.
   const same = pairings.filter((p) => p.id === id || p.id.startsWith(`${id}#`)).length;
@@ -114,6 +124,8 @@ export function matchPairings(planPairings, execPairings) {
 
   for (const p of planPairings) {
     // קודם לפי מספרי הטיסות: שתי טיסות סבב לאותו יעד באותו יום (באותו FDP) נבדלות רק בהם.
+    // סבב שיצא בחודש הקודם (`cutAtStart`) הוא רק המשך של סבב כזה בתכנון, ולא החלפה של סבב שתוכנן בימיו.
+    const overlaps = (a, b) => (!b.cutAtStart || a.cutAtStart) && overlapsDates(a, b);
     let hit = findExec(execPairings, usedExec, (e) => overlaps(p, e) && sameDestinations(p, e) && sameFlights(p, e))
       ?? findExec(execPairings, usedExec, (e) => overlaps(p, e) && sameDestinations(p, e));
     let how = 'exact';
@@ -133,7 +145,7 @@ export function matchPairings(planPairings, execPairings) {
 
 const findExec = (execPairings, used, test) => execPairings.find((e) => !used.has(e) && test(e)) ?? null;
 const firstDate = (m) => (m.plan ?? m.exec).from;
-const overlaps = (a, b) => a.dates.some((d) => b.dates.includes(d));
+const overlapsDates = (a, b) => a.dates.some((d) => b.dates.includes(d));
 const sameDestinations = (a, b) =>
   a.destinations.length > 0 && a.destinations.join() === b.destinations.join();
 const sameFlights = (a, b) => a.legs[0]?.flight != null && a.legs[0].flight === b.legs[0]?.flight;

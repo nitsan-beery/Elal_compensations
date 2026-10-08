@@ -1018,7 +1018,8 @@ function sickCodeTest(supported) {
 }
 
 /** פעילות לא מתוכננת: ביום אחד, או על פני כמה ימים עד הנחיתה בבסיס (בעל המוצר, 08/10/2026). */
-const unplannedLabel = (p) => ((p.shownTo ?? p.to) > p.from ? 'פעילות בימים לא מתוכננים' : 'פעילות ביום לא מתוכנן');
+const unplannedLabel = (p) => (p.carriedFrom ? 'המשך סבב מהחודש הקודם'
+  : (p.shownTo ?? p.to) > p.from ? 'פעילות בימים לא מתוכננים' : 'פעילות ביום לא מתוכנן');
 
 function describeMatch(m) {
   const labels = {
