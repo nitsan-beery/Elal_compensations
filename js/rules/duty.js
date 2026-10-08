@@ -55,7 +55,7 @@ const parseClock = (s) => {
   const m = String(s ?? '').match(/^(\d{1,2}):(\d{2})$/);
   return m ? Number(m[1]) * 60 + Number(m[2]) : null;
 };
-const keyFor = (column) => (column === 'S/C' ? 'sc' : column === 'Credit' ? 'credit' : 'com');
+export const keyFor = (column) => (column === 'S/C' ? 'sc' : column === 'Credit' ? 'credit' : 'com');
 
 /** בתכנון אין משך לרגל: STA − STD, כששעת נחיתה עם ! מומרת לשעון הבסיס לפי airports.js. */
 const planBlock = (l) => {

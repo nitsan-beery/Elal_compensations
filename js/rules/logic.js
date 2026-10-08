@@ -7,7 +7,7 @@
 import { hoursToMin, minToHhmm } from '../time.js';
 import { describePairing, describeRoute, fdpParts } from '../model.js';
 import { stationOffset } from '../airports.js';
-import { DUTY_LOGIC, DUTY_PARAMS, execFdpGroups, amountWord, otherOption, applyOtherReason, extensionDays, landedBefore } from './duty.js';
+import { DUTY_LOGIC, DUTY_PARAMS, execFdpGroups, amountWord, otherOption, applyOtherReason, extensionDays, landedBefore, keyFor } from './duty.js';
 import { overlapDays } from './journal.js';
 
 const H = (hours) => hoursToMin(hours) ?? 0;
@@ -614,17 +614,26 @@ function special_call(ctx, params, rule) {
       const partOf = (d) => parts.findLast((p) => p.from <= d) ?? parts[0];
       if (days.skipped) ctx.note(days.skipped.date, `${flightsOf(match.exec)}: ${days.skipped.why}`, rule, { aside: true });
       if (days.cut) ctx.note(match.exec.from, `${flightsOf(match.exec)}: ${days.cut}`, rule, { aside: true });
-      // יממה שנחתה בה טיסה של סבב אחר: לפי ההסכם פעילות שנייה, בסכום זהה (`landedBefore`).
+      // יממה שנחתה בה טיסה של סבב אחר: לפי ההסכם פעילות שנייה, בסכום זהה (`landedBefore`). הרומה זיכתה
+      // עליה קריאה מיוחדת – הערה בלבד; לא זיכתה – הציפייה היא לפעילות שנייה (בעל המוצר, 08/10/2026).
       const second = ctx.rulesWithLogic('second_unplanned_activity')[0];
+      const moved = new Set();
       for (const d of second ? days.counted : []) {
         const prev = landedBefore(ctx, match.exec, d);
-        if (!prev || !(ctx.reportedOnDate(d, column) > 0)) continue;
+        if (!prev) continue;
         const flightOf = (p) => p.legs.find((l) => l.date === d && l.org === ctx.domicile)?.flight ?? flightsOf(p);
         const landed = prev.legs.findLast((l) => l.dst === ctx.domicile)?.flight ?? flightsOf(prev);
-        ctx.note(d, `${landed} נחתה ביממה הזאת, ולכן על ${flightOf(match.exec)} מגיע בה פיצוי פעילות שנייה באותה יממה, ולא קריאה מיוחדת. ` +
-          'הרומה זיכתה קריאה מיוחדת, והפיצוי בשני המקרים זהה.', second, { aside: true, pairingId: match.exec.id });
+        if (ctx.reportedOnDate(d, column) > 0) {
+          ctx.note(d, `${landed} נחתה ביממה הזאת, ולכן על ${flightOf(match.exec)} מגיע בה פיצוי פעילות שנייה באותה יממה, ולא קריאה מיוחדת. ` +
+            'הרומה זיכתה קריאה מיוחדת, והפיצוי בשני המקרים זהה.', second, { aside: true, pairingId: match.exec.id });
+          continue;
+        }
+        moved.add(d);
+        ctx.expectPairing(match.exec, keyFor(second.logic.params.report_column), H(second.logic.params.hours), second,
+          `${flightOf(match.exec)} לא הייתה בתכנון, ובאותה יממה נחתה ${landed} עם מנוחה חוקית ביניהן`,
+          { date: d, dates: [d], explain: `${landed} נחתה ביממה הזאת.` });
       }
-      for (const d of days.counted) {
+      for (const d of days.counted.filter((x) => !moved.has(x))) {
         ctx.expectPairing(match.exec, 'sc', H(params.hours), rule, `${flightsOf(partOf(d))}: יממה ${dayOf(d)}.`,
           { date: d, dates: [d], perDay: true, explain: days.lastWhy && d === days.counted.at(-1) ? days.lastWhy : '' });
       }
