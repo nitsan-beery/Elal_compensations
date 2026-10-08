@@ -18,6 +18,7 @@ const hm = (v, unit) => (v == null ? '—' : unit === 'count' ? String(v) : minT
 const MONTH_NAMES = ['ינואר', 'פברואר', 'מרץ', 'אפריל', 'מאי', 'יוני', 'יולי', 'אוגוסט', 'ספטמבר', 'אוקטובר', 'נובמבר', 'דצמבר'];
 const monthName = (p) => `${MONTH_NAMES[p.month - 1]} ${p.year}`;
 const KIND_LABEL = { plan: 'קובץ תכנון', exec: 'קובץ ביצוע' };
+const THE_KIND = { plan: 'קובץ התכנון', exec: 'קובץ הביצוע' };
 const MODE_LABEL = { full: 'תכנון וביצוע', plan: 'תכנון בלבד', exec: 'ביצוע בלבד' };
 const CATEGORY_LABEL = { plan: 'תכנון', exec: 'ביצוע', train: 'הדרכה' };
 const KEY_LABEL = { flight: 'קרדיט טיסה', absence: 'קרדיט יום', credit: 'קרדיט', rig: 'Rig', com: 'COM', sc: 'S/C' };
@@ -214,12 +215,22 @@ async function handleFile(file, expected, calToken = null) {
       }
     }
 
-    const key = store.monthKey(parsed.period);
+    // חודש לכל טייס, לפי השם בקובץ (`store.recordKey`). קובץ בלי שם נכנס לחודש הפתוח, כשהוא מאותו חודש.
     const prev = state.record;
+    const samePeriod = prev && store.monthKey(prev.period) === store.monthKey(parsed.period);
+    const person = store.personOf(parsed) ?? (samePeriod ? prev.person : null) ?? null;
+    const key = store.recordKey(parsed.period, person);
     const record = (prev?.key === key ? prev : await safe(() => store.getMonth(key), null))
-      ?? { key, period: parsed.period, plan: null, exec: null, answers: {} };
+      ?? { key, period: parsed.period, person, plan: null, exec: null, answers: {} };
     await reparseStale(record);
-    if (kind === 'exec' && !record.plan) {
+    // קובץ של טייס אחר מהחודש הפתוח: הקובץ השני של החודש הפתוח נסגר, ומחכים לקובץ המתאים (בעל המוצר, 08/10/2026).
+    const other = kind === 'plan' ? 'exec' : 'plan';
+    const otherPilot = samePeriod && prev.key !== key && prev[other] && prev.person && person && prev.person !== person;
+    if (otherPilot) {
+      state.notices.push({ kind: 'warn', text: record[other]
+        ? `${THE_KIND[other]} שהיה פתוח שייך לטייס אחר (${prev.person}). נפתח החודש השמור של ${person}.`
+        : `${THE_KIND[other]} שהיה פתוח שייך לטייס אחר (${prev.person}), ולכן נסגר. העלה את ${THE_KIND[other]} של ${person}.` });
+    } else if (kind === 'exec' && !record.plan) {
       state.notices.push({ kind: 'warn', text: 'אין קובץ תכנון לחודש הזה, ולכן אין השוואה לתכנון. אפשר להעלות אותו עכשיו.' });
     }
     record[kind] = parsed;
@@ -297,7 +308,7 @@ async function runAndSave() {
     if (!r.exec) r.calendarHistory = appendSnapshot(r.calendarHistory ?? (r.calendar ? [r.calendar] : []), fresh);
     r.calendar = fresh;
   }
-  state.result = evaluate({ rulesData: state.rulesData, plan: r.plan, exec: r.exec, answers: r.answers ?? {}, history: historyFor(r.key, months), calendar: r.calendar ?? null,
+  state.result = evaluate({ rulesData: state.rulesData, plan: r.plan, exec: r.exec, answers: r.answers ?? {}, history: historyFor(r, months), calendar: r.calendar ?? null,
     reopen: r.calendarIgnored ?? [], calendarHistory: r.calendarHistory ?? null });
   // שלב שחזר למצב שלפניו יוצא מהשרשרת, יחד עם התשובה עליו (בעל המוצר, 06/10/2026).
   for (const id of state.result.obsoleteAnswers ?? []) delete r.answers?.[id];
@@ -583,7 +594,7 @@ function calendarToken() {
 }
 
 async function calendarRange() {
-  const keys = (await safe(() => store.listMonths(), [])).map((m) => m.key).sort();
+  const keys = (await safe(() => store.listMonths(), [])).map((m) => store.monthKey(m.period)).sort();
   const now = Date.now();
   const day = 864e5;
   const first = keys.length ? Date.parse(`${keys[0]}-01T00:00:00Z`) - 2 * day : now - 400 * day;
@@ -601,11 +612,12 @@ async function disconnectCalendar() {
 }
 
 /**
- * החודשים שלפני `key`, מהחדש לישן, לחלונות של מגבלות החוק שמתחילים לפני החודש (168 שעות,
+ * החודשים של אותו טייס שלפני `record`, מהחדש לישן, לחלונות של מגבלות החוק שמתחילים לפני החודש (168 שעות,
  * 672 שעות, 365 ימים). `months` כבר ממוינים מהחדש לישן.
  */
-function historyFor(key, months) {
-  return months.filter((m) => m.key < key && (m.plan || m.exec)).map((m) => ({ period: m.period, plan: m.plan ?? null, exec: m.exec ?? null }));
+function historyFor(record, months) {
+  const key = store.monthKey(record.period);
+  return months.filter((m) => m.person === record.person && store.monthKey(m.period) < key && (m.plan || m.exec)).map((m) => ({ period: m.period, plan: m.plan ?? null, exec: m.exec ?? null }));
 }
 
 /** שורות ההשוואה שמוצגות. FLT+DH חוזר על הקרדיט של אותן טיסות, ולכן לא מוצג ולא נספר. */
@@ -758,7 +770,7 @@ function renderResults(keepDom = true) {
 
 function renderHead(res) {
   const r = state.record;
-  const emp = r.exec?.employee?.name ?? (r.plan?.employee ? [r.plan.employee.last, r.plan.employee.first].filter(Boolean).join(', ') : '');
+  const emp = r.person ?? store.personOf(r.exec) ?? store.personOf(r.plan) ?? '';
   // פרטי החישוב לא על המסך: בחלון צף במעבר עם העכבר, ובמכשיר בלי עכבר (אייפד) בלחיצה על שם החודש. בהדפסה הם מופיעים.
   const meta = `${MODE_LABEL[res.mode]} · בסיס ${res.domicile ?? '?'}${res.fleet ? ` · צי ${res.fleet}` : ''} · חוקים ${res.rulesVersion}`;
   const hover = matchMedia('(hover: hover)').matches;
@@ -1263,7 +1275,7 @@ function bindResults(root) {
 function currentSummary(m, months) {
   if (!state.rulesData || !(m.plan || m.exec)) return m.summary ?? {};
   try {
-    return summarize(evaluate({ rulesData: state.rulesData, plan: m.plan, exec: m.exec, answers: m.answers ?? {}, history: historyFor(m.key, months), calendar: m.calendar ?? monthCalendar(calendarFacts(), m.period), reopen: m.calendarIgnored ?? [], calendarHistory: m.calendarHistory ?? null }));
+    return summarize(evaluate({ rulesData: state.rulesData, plan: m.plan, exec: m.exec, answers: m.answers ?? {}, history: historyFor(m, months), calendar: m.calendar ?? monthCalendar(calendarFacts(), m.period), reopen: m.calendarIgnored ?? [], calendarHistory: m.calendarHistory ?? null }));
   } catch {
     return m.summary ?? {};
   }
@@ -1286,7 +1298,7 @@ async function renderHistory() {
           m.exec && !s.gaps && !s.questions ? '<span class="tag ok">תואם לרומה</span>' : '',
         ].join(' ');
         return `<li class="month-item">
-          <span class="name">${esc(monthName(m.period))}</span> ${tags}
+          <span class="name">${esc(monthName(m.period))}</span>${m.person ? ` <span class="muted">${esc(m.person)}</span>` : ''} ${tags}
           <span class="small muted">עודכן ${esc(m.updated ? new Date(m.updated).toLocaleDateString('he-IL') : '')}</span>
           <span class="spacer"></span>
           <button class="btn" data-open="${esc(m.key)}">פתח</button>

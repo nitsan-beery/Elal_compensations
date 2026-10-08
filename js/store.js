@@ -1,14 +1,14 @@
 // היסטוריית החודשים על המכשיר (IndexedDB).
 //
-// לכל חודש נשמרים הנתונים שחולצו מהקבצים, התשובות של המשתמש וגרסת החוקים של החישוב האחרון.
+// לכל חודש של כל טייס (`recordKey`) נשמרים הנתונים שחולצו מהקבצים, התשובות של המשתמש וגרסת החוקים של החישוב האחרון.
 // קובצי ה-PDF עצמם נשמרים בנפרד (`files`), כדי שאפשר יהיה לפתוח אותם שוב (בעל המוצר, 29/09/2026),
 // ורשימת החודשים לא טוענת אותם. שום דבר לא יוצא מהמכשיר, חוץ מקובץ גיבוי שהמשתמש מוריד.
 // הגדרות (`settings`) – חיבור היומן וההשלמות ממנו – אינן נכללות בגיבוי.
 
 const DB_NAME = 'elal-compensations';
-const DB_VERSION = 3;
+const DB_VERSION = 4;
 const STORE = 'months';
-const FILES = 'files'; // {key: "2026-07:plan", name, bytes: ArrayBuffer}
+const FILES = 'files'; // {key: "2026-07|BEERY NITSAN:plan", name, bytes: ArrayBuffer}
 const SETTINGS = 'settings'; // {key, value}
 const KINDS = ['plan', 'exec'];
 const BACKUP_FORMAT = 'elal-compensations-backup';
@@ -19,11 +19,12 @@ function openDb() {
   if (dbPromise) return dbPromise;
   dbPromise = new Promise((resolve, reject) => {
     const req = indexedDB.open(DB_NAME, DB_VERSION);
-    req.onupgradeneeded = () => {
+    req.onupgradeneeded = (e) => {
       const db = req.result;
       if (!db.objectStoreNames.contains(STORE)) db.createObjectStore(STORE, { keyPath: 'key' });
       if (!db.objectStoreNames.contains(FILES)) db.createObjectStore(FILES, { keyPath: 'key' });
       if (!db.objectStoreNames.contains(SETTINGS)) db.createObjectStore(SETTINGS, { keyPath: 'key' });
+      if (e.oldVersion > 0 && e.oldVersion < 4) migrateToPerson(req.transaction);
     };
     req.onsuccess = () => {
       // גרסה חדשה של המסד בלשונית אחרת: לסגור, כדי לא לחסום את השדרוג שלה.
@@ -46,18 +47,78 @@ async function tx(mode, fn, name = STORE) {
   });
 }
 
-/** מפתח החודש: "2026-07". */
+/** החודש: "2026-07". */
 export const monthKey = (period) => `${period.year}-${String(period.month).padStart(2, '0')}`;
 
 /**
+ * שם הטייס בקובץ, "שם משפחה שם פרטי" באותיות גדולות ובלי פסיק ("BEERY NITSAN"), או null. התכנון רושם
+ * "for BEERY, NITSAN NetLine" והרומה "Employee: BEERY, NITSAN (…)", ושני הקבצים של אותו טייס נותנים אותו שם.
+ */
+export function personOf(parsed) {
+  const e = parsed?.employee;
+  const raw = e?.name ?? (e?.last ? `${e.last} ${e.first ?? ''}` : null);
+  const name = raw?.toUpperCase().replace(/,/g, ' ').replace(/\s+/g, ' ').trim();
+  return name || null;
+}
+
+/**
+ * מפתח הרשומה: החודש ושם הטייס, "2026-09|BEERY NITSAN". חודש נשמר לכל טייס בנפרד, לפי שם המשפחה והשם
+ * הפרטי, כי יש טייסים עם אותו שם משפחה (בעל המוצר, 08/10/2026). בלי שם בקבצים – החודש בלבד.
+ */
+export const recordKey = (period, person) => (person ? `${monthKey(period)}|${person}` : monthKey(period));
+const KEY_RE = /^\d{4}-\d{2}(\|[^:|]+)?$/;
+
+/**
+ * רשומה שנשמרה לפני שהחודשים הופרדו לפי טייס, במפתח החודש בלבד: המפתח החדש, ו-`kinds` – הקבצים שעוברים
+ * איתה. תכנון ורומה של שני טייסים שונים (תכנון של טייס אחר הועלה לחודש פתוח) – כל קובץ לחודש של הטייס
+ * שלו, והתשובות נשארות עם הרומה.
+ */
+function splitByPerson(m) {
+  const pp = personOf(m.plan);
+  const pe = personOf(m.exec);
+  if (pp && pe && pp !== pe) {
+    return [
+      { record: { ...m, key: recordKey(m.period, pe), person: pe, plan: null, planFile: null }, kinds: ['exec'] },
+      { record: { key: recordKey(m.period, pp), period: m.period, person: pp, plan: m.plan, planFile: m.planFile, exec: null, answers: {}, parseVersion: m.parseVersion, updated: m.updated }, kinds: ['plan'] },
+    ];
+  }
+  const person = m.person ?? pe ?? pp;
+  return [{ record: { ...m, key: recordKey(m.period, person), person }, kinds: KINDS }];
+}
+
+/** שדרוג מגרסה 3: החודשים והקבצים שלהם עוברים למפתח עם שם הטייס (`splitByPerson`). */
+function migrateToPerson(t) {
+  const months = t.objectStore(STORE);
+  const files = t.objectStore(FILES);
+  months.getAll().onsuccess = (ev) => {
+    for (const m of ev.target.result) {
+      const parts = splitByPerson(m);
+      if (parts.length === 1 && parts[0].record.key === m.key) continue;
+      months.delete(m.key);
+      for (const { record, kinds } of parts) {
+        months.put(record);
+        for (const kind of kinds) {
+          files.get(`${m.key}:${kind}`).onsuccess = (fe) => {
+            const f = fe.target.result;
+            if (!f) return;
+            files.delete(f.key);
+            files.put({ ...f, key: `${record.key}:${kind}` });
+          };
+        }
+      }
+    }
+  };
+}
+
+/**
  * רשומת חודש:
- * {key, period, plan, planFile, exec, execFile, answers, rulesVersion, summary, updated}
+ * {key, period, person, plan, planFile, exec, execFile, answers, rulesVersion, summary, updated}
  */
 export const getMonth = (key) => tx('readonly', (s) => s.get(key));
 
 export const listMonths = async () => {
   const all = await tx('readonly', (s) => s.getAll());
-  return all.sort((a, b) => b.key.localeCompare(a.key));
+  return all.sort((a, b) => monthKey(b.period).localeCompare(monthKey(a.period)) || (a.person ?? '').localeCompare(b.person ?? ''));
 };
 
 export const putMonth = (record) => tx('readwrite', (s) => s.put({ ...record, updated: new Date().toISOString() }));
@@ -116,7 +177,8 @@ export async function exportBackup() {
 }
 
 /**
- * שחזור מקובץ גיבוי. חודש שקיים גם על המכשיר נדרס רק אם הגרסה בגיבוי חדשה יותר.
+ * שחזור מקובץ גיבוי. חודש שקיים גם על המכשיר נדרס רק אם הגרסה בגיבוי חדשה יותר. גיבוי מלפני ההפרדה לפי
+ * טייס עובר למפתח החדש (`splitByPerson`).
  * קובץ PDF משוחזר עם החודש שלו, או כשאין במכשיר קובץ לאותו חודש (חודש שנשמר לפני שהקבצים
  * נשמרו). גיבוי מגרסה 1 אינו מכיל קבצים.
  * @returns {Promise<{added:number, replaced:number, skipped:number, files:number}>}
@@ -127,17 +189,23 @@ export async function importBackup(data) {
   }
   const counts = { added: 0, replaced: 0, skipped: 0, files: 0 };
   const taken = new Set();
+  const moved = new Map(); // "2026-07:plan" בגיבוי מלפני ההפרדה לפי טייס → המפתח החדש של החודש (`splitByPerson`)
   for (const m of data.months) {
-    if (!m?.key || !/^\d{4}-\d{2}$/.test(m.key)) { counts.skipped++; continue; }
-    const existing = await getMonth(m.key);
-    if (existing && (existing.updated ?? '') >= (m.updated ?? '')) { counts.skipped++; continue; }
-    await tx('readwrite', (s) => s.put(m));
-    taken.add(m.key);
-    counts[existing ? 'replaced' : 'added']++;
+    if (!m?.key || !KEY_RE.test(m.key) || !m.period) { counts.skipped++; continue; }
+    for (const { record, kinds } of splitByPerson(m)) {
+      for (const kind of kinds) moved.set(`${m.key}:${kind}`, record.key);
+      const existing = await getMonth(record.key);
+      if (existing && (existing.updated ?? '') >= (record.updated ?? '')) { counts.skipped++; continue; }
+      await tx('readwrite', (s) => s.put(record));
+      taken.add(record.key);
+      counts[existing ? 'replaced' : 'added']++;
+    }
   }
   for (const f of Array.isArray(data.files) ? data.files : []) {
-    const [key, kind] = String(f?.key ?? '').split(':');
-    if (!/^\d{4}-\d{2}$/.test(key) || !KINDS.includes(kind) || typeof f.data !== 'string') continue;
+    const full = String(f?.key ?? '');
+    const kind = full.slice(full.lastIndexOf(':') + 1);
+    const key = moved.get(full) ?? full.slice(0, full.lastIndexOf(':'));
+    if (!KEY_RE.test(key) || !KINDS.includes(kind) || typeof f.data !== 'string') continue;
     if (!taken.has(key) && await getFile(key, kind)) continue;
     await putFile(key, kind, f.name ?? '', fromBase64(f.data));
     counts.files++;
