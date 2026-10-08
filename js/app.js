@@ -1368,9 +1368,31 @@ async function renderHistory() {
       renderHistory();
     });
   }
+  // במחשב (Edge/Chrome) חלון "שמירה בשם", כדי לבחור איפה לשמור (בעל המוצר, 08/10/2026); בלעדיו (Safari) – הורדה רגילה.
+  // החלון נפתח לפני איסוף הנתונים, כי הדפדפן מתיר אותו רק מיד אחרי הלחיצה.
   $('[data-action="backup"]', root)?.addEventListener('click', async () => {
-    const data = await store.exportBackup();
-    download(`elal-compensations-backup-${new Date().toISOString().slice(0, 10)}.json`, JSON.stringify(data), 'application/json');
+    const name = `elal-compensations-backup-${new Date().toISOString().slice(0, 10)}.json`;
+    if (!window.showSaveFilePicker) {
+      download(name, JSON.stringify(await store.exportBackup()), 'application/json');
+      return;
+    }
+    let handle;
+    try {
+      handle = await window.showSaveFilePicker({
+        suggestedName: name,
+        types: [{ description: 'גיבוי נתונים', accept: { 'application/json': ['.json'] } }],
+      });
+    } catch (err) {
+      if (err.name !== 'AbortError') alert(`הגיבוי נכשל: ${err.message}`);
+      return;
+    }
+    try {
+      const writable = await handle.createWritable();
+      await writable.write(JSON.stringify(await store.exportBackup()));
+      await writable.close();
+    } catch (err) {
+      alert(`הגיבוי נכשל: ${err.message}`);
+    }
   });
   // כל החודשים השמורים, עם התשובות וקובצי ה-PDF; חיבור היומן נשאר (בעל המוצר, 08/10/2026).
   $('[data-action="clear"]', root)?.addEventListener('click', async () => {
