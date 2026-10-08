@@ -1015,6 +1015,9 @@ function sickCodeTest(supported) {
   return (c) => exact.has(c) || prefixes.some((p) => c.startsWith(p));
 }
 
+/** פעילות לא מתוכננת: ביום אחד, או על פני כמה ימים עד הנחיתה בבסיס (בעל המוצר, 08/10/2026). */
+const unplannedLabel = (p) => ((p.shownTo ?? p.to) > p.from ? 'פעילות בימים לא מתוכננים' : 'פעילות ביום לא מתוכנן');
+
 function describeMatch(m) {
   const labels = {
     exact: 'בוצע כמתוכנן',
@@ -1033,7 +1036,8 @@ function describeMatch(m) {
   const added = m.plan?.addedInCalendar ? (m.exec ? 'סבב שנוסף ביומן, ובמקומו בוצע סבב אחר' : 'סבב שנוסף ביומן ולא בוצע') : null;
   return {
     how: m.how,
-    label: added ?? labels[m.how] ?? m.how,
+    label: added ?? (m.how === 'unplanned' ? unplannedLabel(m.exec) : labels[m.how] ?? m.how),
+    lastDay: m.exec ? m.exec.shownTo ?? m.exec.to : null,
     date: (m.plan ?? m.exec).from,
     planId: m.plan?.id ?? null,
     execId: m.exec?.id ?? null,
@@ -1110,7 +1114,8 @@ function splitChangesByFdp(out, matches, ctx, fdp) {
     if (!m || !ctx.pairingHandledBy(m.exec, 'special_call')) return [c];
     const parts = fdpParts(m.exec, fdp);
     if (parts.length < 2) return [c];
-    return parts.map((p, i) => ({ ...c, date: p.from, until: parts[i + 1]?.from ?? null, exec: describePairing(p) }));
+    return parts.map((p, i) => ({ ...c, date: p.from, until: parts[i + 1]?.from ?? null, exec: describePairing(p),
+      label: unplannedLabel(p), lastDay: p.shownTo ?? p.to }));
   });
 }
 
@@ -1180,6 +1185,7 @@ function explainChanges(out, supported) {
       const items = new Set();
       // זיכוי יומי על כמה ימים: במספר המדויק וברבים ("קרדיט 2 ימי מחלה"; בעל המוצר, 07/10/2026).
       const days = new Map();
+      const callDays = new Set();
       for (const e of out.expectations) {
         const logic = logicOf.get(e.ruleId);
         if (!CHANGE_DUE_LOGIC.has(logic)) continue;
@@ -1193,7 +1199,16 @@ function explainChanges(out, supported) {
           items.add(`absence:${e.ruleId}`);
           continue;
         }
+        if (logic === 'special_call') callDays.add(e.date);
         items.add(DUE_WORDING[logic] ?? e.shortTitle ?? e.ruleTitle);
+      }
+      // קריאה מיוחדת על כל יום של שורה שמשתרעת על כמה ימים, עד הנחיתה בבסיס (בעל המוצר, 08/10/2026;
+      // ‏BCN ‏23–25/09/2026). כשיום אחד לא עמד בסף – בלי התוספת, וההערה על היום ההוא בהערות.
+      const rowDays = [];
+      const end = c.until ? new Date(Date.parse(c.until) - 86400000).toISOString().slice(0, 10) : c.lastDay;
+      for (let d = c.date; end && d <= end; d = new Date(Date.parse(d) + 86400000).toISOString().slice(0, 10)) rowDays.push(d);
+      if (rowDays.length > 1 && rowDays.every((d) => callDays.has(d)) && items.delete(DUE_WORDING.special_call)) {
+        items.add(`${DUE_WORDING.special_call} על כל אחד מהימים`);
       }
       const dayWording = ({ e, dates }) => {
         const one = e.shortTitle ?? e.ruleTitle;
