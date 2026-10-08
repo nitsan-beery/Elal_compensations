@@ -240,8 +240,8 @@ function absence_day_credit(ctx, params, rule) {
     params = { ...params, plan_codes: [...(params.plan_codes ?? []), ...confirmed],
       report_codes: [...(params.report_codes ?? []), ...confirmed.map((c) => c.slice(0, 5))] };
   }
-  // `note_code_upgrade`: החוק שקוד התכנון שלו יכול לעבור בביצוע לקוד של חוק אחר (SBY_L → SBY_S).
-  if (params.confirm_code_prefixes?.length || params.note_code_upgrade) noteUpgrade(ctx, params, rule, credit);
+  // קוד תכנון שעבר בביצוע לקוד של חוק אחר (SBY_L → SBY_S) מזוכה לפי הביצוע, בלי הערה: הסכום כבר
+  // בטבלה (בעל המוצר, 08/10/2026).
   const onFlightDay = new Set();
   for (const day of ctx.timeline) {
     if (!matchesCode(day, params, ctx)) continue;
@@ -358,23 +358,6 @@ function askUnconfirmedCodes(ctx, params, rule) {
     } else {
       ctx.explainCode(c.code, c.dates, `${params.confirm_label} – ${value} ליום (${rule.title})`);
     }
-  }
-}
-
-/**
- * יום שבתכנון קוד החוק ובביצוע קוד של חוק זיכוי יומי אחר (הכן רגיל שעבר להכן מיידי): הזיכוי
- * לפי הביצוע, והחוק של קוד הביצוע כבר צופה אותו.
- */
-function noteUpgrade(ctx, params, rule, credit) {
-  if (!ctx.hasExec) return;
-  for (const day of ctx.timeline) {
-    if (!(day.plan?.codes ?? []).some((c) => codeIn(c, params.plan_codes, params.plan_code_prefixes))) continue;
-    if (matchesCode(day, params, ctx)) continue;
-    const other = ctx.execCodes(day).map((c) => ({ c, r: ctx.rulesWithLogic('absence_day_credit').find((r) => r !== rule &&
-      codeIn(c, r.logic.params?.report_codes, r.logic.params?.report_code_prefixes)) })).find((x) => x.r);
-    if (!other) continue;
-    ctx.note(day.date, `בתכנון ${rule.title} (${minToHhmm(credit)}), ובביצוע ${other.c}: ${other.r.title} ` +
-      `(${minToHhmm(H(other.r.logic.params.credit_hours))}). הזיכוי לפי הביצוע.`, rule);
   }
 }
 
@@ -1761,7 +1744,7 @@ export const LOGIC = {
 export const KNOWN_PARAMS = {
   credit_from_scheduled: [],
   min_slip_credit: ['min_credit_hours', 'per_fdp', 'legal_rest_hours', 'report_minutes_before_std'],
-  absence_day_credit: ['plan_codes', 'report_codes', 'plan_code_prefixes', 'report_code_prefixes', 'report_flag_column', 'credit_hours', 'tab_hours', 'requires_assigned_activity', 'flight_day_takes_higher', 'away_flag_on_pairing_start', 'confirm_code_prefixes', 'confirm_label', 'confirm_answer', 'note_code_upgrade', 'exclude_codes'],
+  absence_day_credit: ['plan_codes', 'report_codes', 'plan_code_prefixes', 'report_code_prefixes', 'report_flag_column', 'credit_hours', 'tab_hours', 'requires_assigned_activity', 'flight_day_takes_higher', 'away_flag_on_pairing_start', 'confirm_code_prefixes', 'confirm_label', 'confirm_answer', 'exclude_codes'],
   unpaid_leave_days: ['plan_codes', 'report_codes', 'plan_code_prefixes', 'report_code_prefixes'],
   vacation_credit_balance: ['per_day_hours', 'days_full_rate', 'monthly_max_hours', 'yearly_cap_days', 'taper_table', 'taper_table_complete', 'taper_monthly_totals'],
   absence_month_cap: ['cap_hours'],
