@@ -619,14 +619,25 @@ function special_call(ctx, params, rule) {
     // החלפה מרצוני והוספה בהסכמה (לפי תשובת המשתמש): S/C שהרומה רשמה על הסבב אינו הופך אותו לקריאה מיוחדת,
     // והוא מוצג כפיצוי שאף חוק אינו מסביר (DME ‏11/03/2026 שהוחלף מרצון ב-FRA ‏10–12/03; בעל המוצר, 08/10/2026).
     const consented = ['voluntary_swap', 'added'].includes(answer?.value);
-    if ((reported > 0 && !consented) || answer?.value === 'special_call' || companyLinked || training || bid || cancelledPlan) {
-      ctx.markPairing(match.exec, 'special_call');
+    const because = answer?.value === 'special_call' || companyLinked || training || bid || cancelledPlan;
+    if ((reported > 0 && !consented) || because) {
       const stay = awayFromBase(match.exec, ctx.tz, ctx.timeline.at(-1).date);
       if (stay.error) {
+        ctx.markPairing(match.exec, 'special_call');
         ctx.review(`${describePairing(match.exec)}: ${stay.error} לא ניתן לספור יממות לקריאה המיוחדת. דורש בדיקה ידנית.`, rule);
         continue;
       }
       const days = countSpecialCallDays(stay, params, match.exec, ctx.fdp);
+      // S/C ברומה שייך ליום שבו נרשם, ולא לסבב כולו (בעל המוצר, 08/10/2026): כשרק הוא הסיבה לקריאה המיוחדת,
+      // יממה שתוכנן בה סבב (שלא בוטל ללא קרדיט) נספרת רק כשהרומה רשמה S/C עליה. בלי יממה כזאת – אין קריאה
+      // מיוחדת, וה-S/C מוצג כפיצוי שאף חוק אינו מסביר (FRA ‏10–12/03/2026: S/C רק על 12/03).
+      if (!because) {
+        const planned = new Set(ctx.planPairings.filter((p) => !ctx.pairingHandledBy(p, 'cancelled_no_compensation'))
+          .flatMap((p) => p.shownTo ? [...p.dates, p.shownTo] : p.dates));
+        days.counted = days.counted.filter((d) => !planned.has(d) || ctx.reportedOnDate(d, column) > 0);
+        if (!days.counted.length) continue;
+      }
+      ctx.markPairing(match.exec, 'special_call');
       // סבב שיצא בחודש הקודם: קריאה מיוחדת רק על יממה שלא תוכנן בה סבב, כמו ברומה (28/02–08/03/2026, BUD:
       // S/C על 01, 06 ו-07/03, ולא על GVA ‏02–03, ‏FCO ‏04–05 ו-VCE ‏08; בעל המוצר, 08/10/2026). יום הנחיתה
       // של סבב מתוכנן שנוחת אחרי חצות (`shownTo`) הוא מימיו.
@@ -747,7 +758,8 @@ function extendedPairing(ctx, params, rule, match, answer) {
   if (!days.length && !ext.second.length) return false;
   const id = `extended:${exec.id}`;
   const second = ctx.rulesWithLogic('second_unplanned_activity')[0]?.logic.params;
-  const paid = (!days.length || ctx.paidOn(exec, params.report_column ?? 'S/C', 'sc', days.length * H(params.hours))) &&
+  // S/C לפי יום: כל יממה שנוספה, ולא הסכום על הסבב (בעל המוצר, 08/10/2026).
+  const paid = days.every((d) => ctx.paidOnDate(d, params.report_column ?? 'S/C', 'sc', H(params.hours))) &&
     (!ext.second.length || ctx.paidOn(exec, second.report_column ?? 'COM', 'com', ext.second.length * H(second.hours)));
   // סבב שהוחלף באותם ימים בשינוי ביוזמת החברה או בזכייה במכרז: התשובה עליו כבר אומרת שהימים הנוספים
   // אינם בהסכמה, ועל יום שלא תוכנן בו כלום מגיעה קריאה מיוחדת, כמו ב-`companySwapToFreeDay` (בעל המוצר,
@@ -1662,8 +1674,10 @@ function standby_end_for_bid(ctx, params, rule) {
       const pairing = match.exec;
       const id = `standby_bid:${pairing.id}`;
       // הדוח כבר מזכה את הקריאה המיוחדת: זו זכייה במכרז, ואין מה לשאול.
-      const answer = ctx.answer(id) ??
-        (ctx.paidOn(pairing, sc?.logic?.params?.report_column ?? 'S/C', 'sc', bidAmount(pairing, ctx, sc)) ? { value: 'standby_bid' } : null);
+      // לפי יום: הרומה זיכתה S/C על כל יממה שמגיעה עליה קריאה מיוחדת (בעל המוצר, 08/10/2026).
+      const bidDays = scDays(pairing, ctx, sc);
+      const answer = ctx.answer(id) ?? (bidDays.length &&
+        bidDays.every((d) => ctx.paidOnDate(d, sc.logic.params?.report_column ?? 'S/C', 'sc', H(sc.logic.params?.hours))) ? { value: 'standby_bid' } : null);
       const range = run.length === 1 ? dayOf(run[0]) : `⁦${dayOf(run[0])}–${dayOf(run.at(-1))}⁩`;
       if (!answer) {
         ctx.markPairing(pairing, 'standby_bid_pending');
@@ -1791,13 +1805,11 @@ function bidHint(pairing, ctx, sc) {
   return `קריאה מיוחדת: ${n === 1 ? 'יממה אחת' : `${n} יממות`}, ${minToHhmm(n * H(p.hours))} ב-${p.report_column ?? 'S/C'}`;
 }
 
-/** הסכום שזכייה במכרז הייתה מזכה בו, לבדיקה אם הדוח כבר זיכה אותו. 0 כשאי אפשר לחשב. */
-function bidAmount(pairing, ctx, sc) {
-  if (!sc) return 0;
-  const p = sc.logic.params ?? {};
+/** היממות שמגיעה עליהן קריאה מיוחדת על סבב (`countSpecialCallDays`); ריק כשאי אפשר לספור. */
+function scDays(pairing, ctx, sc) {
+  if (!sc) return [];
   const stay = awayFromBase(pairing, ctx.tz, ctx.timeline.at(-1).date);
-  if (stay.error) return 0;
-  return countSpecialCallDays(stay, p, pairing, ctx.fdp).counted.length * H(p.hours);
+  return stay.error ? [] : countSpecialCallDays(stay, sc.logic.params ?? {}, pairing, ctx.fdp).counted;
 }
 
 export const LOGIC = {

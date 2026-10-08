@@ -1383,7 +1383,6 @@ function legal_crew_composition(ctx, params, rule) {
 function stay_extension(ctx, params, rule) {
   if (!ctx.hasPlan || !ctx.hasExec) return;
   const key = keyFor(params.report_column);
-  const own = ctx.rulesWithLogic('stay_extension').map((r) => r.id);
   for (const m of ctx.matches) {
     if (!m.plan || !m.exec) continue;
     const planned = pairingTimes(m.plan, ctx.tz).end;
@@ -1395,10 +1394,13 @@ function stay_extension(ctx, params, rule) {
       `${minToHhmm(actual - planned)} אחרי המתוכנן (${ddmm(dateOf(planned))} ${hhmm(planned)})`;
     const unplanned = [];
     for (let d = addDays(dateOf(planned), 1); d <= dateOf(actual); d = addDays(d, 1)) unplanned.push(d);
+    // יממה בחודש הבא אינה ברומה של החודש הזה.
+    const inMonth = unplanned.filter((d) => ctx.timeline.some((x) => x.date === d));
     const id = `stay_extension:${m.exec.id}`;
     const answered = ctx.answer(id);
-    // הדוח כבר מזכה את הסכום הגבוה שאפשרי כאן: אין פער, ולא שואלים.
-    const a = answered ?? (ctx.paidOn(m.exec, params.report_column, key, unplanned.length * H(params.hours), own) ? { value: 'company' } : null);
+    // הדוח כבר מזכה את הסכום הגבוה שאפשרי כאן: אין פער, ולא שואלים. לפי יום: על כל יממה לא מתוכננת, ולא
+    // הסכום על הסבב (בעל המוצר, 08/10/2026).
+    const a = answered ?? (inMonth.length && inMonth.every((d) => ctx.paidOnDate(d, params.report_column, key, H(params.hours))) ? { value: 'company' } : null);
     if (!a) {
       ctx.ask({
         id,
@@ -1417,13 +1419,19 @@ function stay_extension(ctx, params, rule) {
     if (a.value === 'voluntary') {
       ctx.note(dateOf(actual), `${what}. מרצונך, לפי תשובתך: אין פיצוי.`, rule);
     } else if (a.value === 'force_majeure') {
-      ctx.expectPairing(m.exec, key, params.capped_days * H(params.hours), rule,
-        `${what}. אירוע שלא בשליטת החברה, לפי תשובתך: קריאה מיוחדת על ${params.over_hours} השעות הראשונות ` +
-        `(${params.capped_days} יממות). מגיע גם אש"ל לכל התקופה, ובתקופה הזאת אין זיכוי שהייה בחו"ל.`);
+      // כל יממה בשורה משלה, כמו בקריאה מיוחדת (`perDay`): היממות הראשונות שאחרי יום החזרה המתוכנן.
+      const why = `${what}. אירוע שלא בשליטת החברה, לפי תשובתך: קריאה מיוחדת על ${params.over_hours} השעות הראשונות ` +
+        `(${params.capped_days} יממות). מגיע גם אש"ל לכל התקופה, ובתקופה הזאת אין זיכוי שהייה בחו"ל.`;
+      for (const d of unplanned.slice(0, params.capped_days).filter((x) => inMonth.includes(x))) {
+        ctx.expectPairing(m.exec, key, H(params.hours), rule, why,
+          { date: d, dates: [d], perDay: true, explain: `אירוע שלא בשליטת החברה: ${params.over_hours} השעות הראשונות.` });
+      }
     } else if (a.value === 'company') {
-      ctx.expectPairing(m.exec, key, unplanned.length * H(params.hours), rule,
-        `${what}. ${unplanned.length === 1 ? 'יממה לא מתוכננת' : `${unplanned.length} יממות לא מתוכננות`} ` +
-        `(${unplanned.map(ddmm).join(', ')}), ${answered ? 'לפי תשובתך' : `לפי מה שהרומה מזכה`}.`);
+      const why = `${what}. ${unplanned.length === 1 ? 'יממה לא מתוכננת' : `${unplanned.length} יממות לא מתוכננות`} ` +
+        `(${unplanned.map(ddmm).join(', ')}), ${answered ? 'לפי תשובתך' : `לפי מה שהרומה מזכה`}.`;
+      for (const d of inMonth) {
+        ctx.expectPairing(m.exec, key, H(params.hours), rule, why, { date: d, dates: [d], perDay: true, explain: 'יממה לא מתוכננת.' });
+      }
     }
   }
 }
