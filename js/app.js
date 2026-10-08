@@ -377,9 +377,14 @@ function calendarParts(c) {
   if (!c) {
     return { label: '<span class="cal-label">יומן: לא מחובר</span>', buttons: '<button type="button" class="btn" data-cal="connect">חיבור יומן</button>', infoHtml: '' };
   }
-  // יומן של טייס אחר: בחודש שלו אין "מעודכן ל…", פרטי היומן וכפתור עדכון, רק ניתוק (בעל המוצר, 08/10/2026).
+  // יומן של טייס אחר: בחודש שלו, במקום "יומן מעודכן ל…", ההודעה שהיומן שייך לטייס אחר, ובלי פרטי היומן
+  // וכפתור עדכון – רק ניתוק (בעל המוצר, 08/10/2026).
   if (foreignCalendar(state.record)) {
-    return { label: '', buttons: '<button type="button" class="btn" data-cal="disconnect">ניתוק יומן</button>', infoHtml: '' };
+    return {
+      label: `<span class="cal-label">היומן המחובר שייך לטייס אחר${state.calForeign ? ` (${esc(state.calForeign)})` : ''}, ולכן אינו משמש בחודש הזה.</span>`,
+      buttons: '<button type="button" class="btn" data-cal="disconnect">ניתוק יומן</button>',
+      infoHtml: '',
+    };
   }
   const n = state.result?.calendarCrew ?? 0;
   const when = state.calBusy ? 'מתעדכן…' : c.synced ? `מעודכן ל-${stamp(c.synced)}` : 'עוד לא עודכן';
@@ -422,8 +427,9 @@ function renderCalendarBar() {
   const notices = [];
   if (state.calError) notices.push(`<div class="notice bad">${esc(state.calError)}</div>`);
   else if (c?.synced && !c.facts?.flights?.length) notices.push(`<div class="notice warn">${esc(CAL_NO_DATA)}</div>`);
-  // יומן של טייס אחר: אינו משמש בחודש, ושאר ההודעות על היומן אינן נוגעות לו (בעל המוצר, 08/10/2026).
-  else if (c && state.result && state.calForeign) notices.push(`<div class="notice info">היומן המחובר שייך לטייס אחר (${esc(state.calForeign)}), ולכן אינו משמש בחודש הזה.</div>`);
+  // יומן של טייס אחר: אינו משמש בחודש, ושאר ההודעות על היומן אינן נוגעות לו. ההודעה על כך בשורת היומן,
+  // במקום "יומן מעודכן ל…" (`calendarParts`; בעל המוצר, 08/10/2026).
+  else if (c && state.result && state.calForeign) { /* בשורת היומן */ }
   // ביומן אין אף טיסה מהחודש הפתוח (בעל המוצר, 04/10/2026).
   // כשהמשתמש ענה על הרכב הצוות, ההודעה אומרת שההרכבים מהתשובות (בעל המוצר, 04/10/2026).
   else if (c && !state.calBusy && state.result?.calendarNoMonth) {
