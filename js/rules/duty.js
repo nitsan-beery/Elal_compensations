@@ -208,6 +208,24 @@ export function extensionDays(ctx, match) {
 }
 
 /**
+ * סבב אחר שנחת ביממה `d` אחרי חצות (המריא ביום שלפני), עם מנוחה חוקית עד היציאה של `exec`: טיסה
+ * שנוחתת אחרי חצות היא פעילות טיסה ביממה שבה נחתה, ולכן על היממה הזאת מגיע פיצוי פעילות שנייה
+ * (2024 ס' 42.6) ולא קריאה מיוחדת. הסכום זהה, ו-`special_call` רק רושמת על כך הערה (בעל המוצר,
+ * 08/10/2026; רון: LY2524 נחתה ב-23/09 ב-02:36, ו-LY391 יצאה ב-17:45). null כשאין.
+ */
+export function landedBefore(ctx, exec, d) {
+  const params = ctx.rulesWithLogic('second_unplanned_activity')[0]?.logic.params;
+  const span = execSpan(exec, ctx.domicile, false);
+  if (!params || span.start == null) return null;
+  return ctx.execPairings.find((o) => {
+    if (o === exec || o.dates.includes(d)) return false;
+    const so = execSpan(o, ctx.domicile, false);
+    return so.end != null && so.end < span.start && dateOf(so.end) === d &&
+      legalRestBetween(so, span, params.report_minutes_before_std ?? 0, ctx.legalRest?.postMin) >= H(params.legal_rest_hours);
+  }) ?? null;
+}
+
+/**
  * טיסה או סימולטור שלא היו בתכנון, באותה יממה שבה אצ"א ביצע טיסה או סימולטור אחרים.
  * לא כולל פעילות קרקע, ולא שתי פעילויות באותו FDP (פחות ממנוחה חוקית ביניהן).
  */
