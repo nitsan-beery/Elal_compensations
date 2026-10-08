@@ -576,6 +576,7 @@ function wrapDelta(delta) {
 /** קריאה מיוחדת. S/C בדוח הוא הסימן שהטיסה לא הייתה מתוכננת. */
 function special_call(ctx, params, rule) {
   const column = params.report_column ?? 'S/C';
+  for (const { date, pairing } of ctx.reportDays) askReportDay(ctx, date, pairing, rule);
   for (const match of ctx.matches) {
     if (!match.exec || ctx.pairingHandledBy(match.exec, 'stay_extension')) continue;
     // הופעל מכוננות (לפי תשובתו): אין קריאה מיוחדת, גם כשהדוח רשם S/C.
@@ -598,7 +599,7 @@ function special_call(ctx, params, rule) {
     if (match.plan && !cancelledPlan && !training && !bid && extendedPairing(ctx, params, rule, match, answer)) continue;
     if (reported > 0 || answer?.value === 'special_call' || companyLinked || training || bid || cancelledPlan) {
       ctx.markPairing(match.exec, 'special_call');
-      const stay = awayFromBase(match.exec, ctx.domicile, ctx.timeline.at(-1).date);
+      const stay = awayFromBase(match.exec, ctx.domicile, ctx.timeline.at(-1).date, ctx.reportStay(match.exec));
       if (stay.error) {
         ctx.review(`${describePairing(match.exec)}: ${stay.error} לא ניתן לספור יממות לקריאה המיוחדת. דורש בדיקה ידנית.`, rule);
         continue;
@@ -641,6 +642,34 @@ function special_call(ctx, params, rule) {
       applyOtherReason(ctx, answer, rule, { what: 'פעילות ביום שלא תוכננה בו פעילות', date: match.exec.from, pairing: match.exec });
     }
   }
+}
+
+/**
+ * יום ברומה בלי טיסה, עם TAB, אחרי סבב שנחת לפני חצות (`attachReportTails` ב-js/rules/evaluate.js):
+ * הקבצים אינם מסבירים למה שייכות השעות, ולא מנחשים (בעל המוצר, 08/10/2026). "המשך" מצרף את היום
+ * לסבב, והשהייה והקריאה המיוחדת נספרות לפיו; תשובה אחרת – בדיקה ידנית.
+ */
+function askReportDay(ctx, date, pairing, rule) {
+  const id = `report_day:${date}`;
+  const answer = ctx.answer(id);
+  const values = ctx.timeline.find((d) => d.date === date)?.exec?.values ?? {};
+  const cells = ['Credit', 'TAB'].filter((c) => values[c]?.min).map((c) => `${c} ${minToHhmm(values[c].min)}`).join(', ');
+  if (answer?.value === 'other') {
+    ctx.review(`${dayOf(date)}: ברומה ${cells} בלי טיסה – "${answer.text}". דורש בדיקה ידנית.`, rule);
+    return;
+  }
+  if (answer) return;
+  ctx.ask({
+    id,
+    date,
+    title: `${dayOf(date)}: ברומה ${cells} בלי טיסה`,
+    body: `הסבב ${describePairing(pairing)} נחת לפני חצות, ולכן לא ברור למה שייכות השעות האלה. מה קרה?`,
+    options: [
+      { value: 'continued', label: `הנחיתה של ${pairing.legs.at(-1).flight ?? flightsOf(pairing)} נדחתה ליום הזה`, hint: 'השהייה נמשכת עד היום הזה' },
+      { value: 'other', label: 'משהו אחר', needsText: true },
+    ],
+    ruleId: rule.id,
+  });
 }
 
 /**
@@ -713,17 +742,23 @@ function extendedPairing(ctx, params, rule, match, answer) {
  * הטיסה. הרגל רשומה בדוח תחת יום ההמראה בשעון הבסיס, גם כשבשעון המקומי ההמראה כבר
  * ביום הבא (אומת: LY336 ב-16/07; LY5110 ב-06/01, 25/01 ו-29/01/2026, המראה אחרי חצות בטביליסי).
  */
-function awayFromBase(pairing, domicile, monthEnd) {
+function awayFromBase(pairing, domicile, monthEnd, reported = null) {
   const out = pairing.legs.find((l) => l.org === domicile);
   const home = [...pairing.legs].reverse().find((l) => l.dst === domicile);
   if (!out || (!home && !pairing.cutAtEnd)) return { error: 'הסבב לא יוצא מהבסיס או לא חוזר אליו.' };
 
   const first = pairing.from;
-  const depClock = [out.std, out.atd].filter((t) => t != null);
-  if (!depClock.length) return { error: 'חסרה שעת המראה מהבסיס.' };
-  const start = daysBetween(first, out.date) * 1440 + Math.min(...depClock);
+  const sched = out.std ?? out.atd;
+  if (sched == null) return { error: 'חסרה שעת המראה מהבסיס.' };
+  // המראה בפועל לפני ה-STD מקדימה את תחילת השהייה. ATD שנראה מוקדם ביותר משלוש שעות הוא עיכוב
+  // שעבר את חצות (STD 23:50, ‏ATD 00:20), ואינו משנה את תחילת השהייה.
+  const early = out.std != null && out.atd != null ? mod(out.std - out.atd, 1440) : 0;
+  const start = daysBetween(first, out.date) * 1440 + sched - (early <= 180 ? early : 0);
   // הסבב חוזר בחודש הבא: בחודש הזה נספרות היממות עד סוף החודש.
   if (!home) return { first, start, end: (daysBetween(first, monthEnd) + 1) * 1440, cutAtEnd: true };
+  // יש רומה: סוף השהייה לפי היום האחרון של הסבב בה וה-TAB שלו (`ctx.reportStay`), כי הרגל רשומה ביום
+  // ה-STD גם כשהמריאה בפועל אחרי חצות (24–25/09/2026: LY392 ‏BCN-TLV, ‏ATD 00:01, ‏ATA 05:16).
+  if (reported) return { first, start, end: daysBetween(first, reported.date) * 1440 + reported.min };
 
   const arrClock = home.ata ?? home.sta;
   const dur = home.ata != null ? (home.actDur ?? home.skdDur) : home.skdDur;
@@ -1699,7 +1734,7 @@ function standbyDayRule(ctx, planCode) {
 function bidHint(pairing, ctx, sc) {
   if (!sc) return 'קריאה מיוחדת על ימי הטיסה';
   const p = sc.logic.params ?? {};
-  const stay = awayFromBase(pairing, ctx.domicile, ctx.timeline.at(-1).date);
+  const stay = awayFromBase(pairing, ctx.domicile, ctx.timeline.at(-1).date, ctx.reportStay(pairing));
   if (stay.error) return `קריאה מיוחדת על ימי הטיסה, ב-${p.report_column ?? 'S/C'}`;
   const n = countSpecialCallDays(stay, p, pairing, ctx.fdp).counted.length;
   return `קריאה מיוחדת: ${n === 1 ? 'יממה אחת' : `${n} יממות`}, ${minToHhmm(n * H(p.hours))} ב-${p.report_column ?? 'S/C'}`;
@@ -1709,7 +1744,7 @@ function bidHint(pairing, ctx, sc) {
 function bidAmount(pairing, ctx, sc) {
   if (!sc) return 0;
   const p = sc.logic.params ?? {};
-  const stay = awayFromBase(pairing, ctx.domicile, ctx.timeline.at(-1).date);
+  const stay = awayFromBase(pairing, ctx.domicile, ctx.timeline.at(-1).date, ctx.reportStay(pairing));
   if (stay.error) return 0;
   return countSpecialCallDays(stay, p, pairing, ctx.fdp).counted.length * H(p.hours);
 }

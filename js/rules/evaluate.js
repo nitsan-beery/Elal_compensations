@@ -82,6 +82,7 @@ export function evaluate({ rulesData, plan = null, exec = null, answers = {}, hi
   const fdp = slip?.legal_rest_hours != null
     ? { legalRestMin: slip.legal_rest_hours * 60, reportMin: slip.report_minutes_before_std ?? 0, postMin: legalRest?.postMin ?? 0 } : null;
   const execPairings = exec ? buildPairings(timeline, domicile, (d) => d.exec?.legs, fdp) : [];
+  const reportDays = exec ? attachReportTails(execPairings, timeline, domicile, codes, answers) : [];
   const dependentAnswers = {};
   // ההחלפות עם טיסה אחרת (`splitSwappedElsewhere`) והפעילות במקום סבב (`explainByActivity`) – אחרי
   // שהשרשרת מהיומן הוסיפה את התשובות שלה, לפני החוקים.
@@ -117,7 +118,7 @@ export function evaluate({ rulesData, plan = null, exec = null, answers = {}, hi
 
   const assumed = new Map(); // planId → ערכי התשובה שהאפליקציה הניחה בלי לשאול
   const ctx = makeContext({ out, timeline, domicile, codes, holidays: rulesData.holidays ?? {}, answers, plan, exec, supported, matches, planPairings,
-    period, fleet, fdp, assumed, calendarAnswer: (id) => (reopen.includes(id) ? null : cal.answer(id)), calendarFirstDay: cal.firstDay,
+    period, fleet, fdp, assumed, reportDays, calendarAnswer: (id) => (reopen.includes(id) ? null : cal.answer(id)), calendarFirstDay: cal.firstDay,
     // בלי דוח ביצוע, הסבבים המתוכננים משמשים לחישוב הקרדיט והרי"ג הצפויים.
     execPairings: exec ? execPairings : planPairings });
   ctx.legalRest = legalRest;
@@ -628,7 +629,7 @@ function calendarFacts(calendar, domicile) {
 
 // ---------- ctx: מה שהלוגיקות רואות ----------
 
-function makeContext({ out, timeline, domicile, codes, holidays, answers, plan, exec, supported, matches, planPairings, period, fleet, execPairings, fdp, assumed, calendarAnswer, calendarFirstDay }) {
+function makeContext({ out, timeline, domicile, codes, holidays, answers, plan, exec, supported, matches, planPairings, period, fleet, execPairings, fdp, assumed, reportDays = [], calendarAnswer, calendarFirstDay }) {
   const absenceBy = new Map(); // date → Set(ruleId)
   const pairingTags = new Map(); // pairing.id → Set(tag)
   const askedIds = new Set();
@@ -837,6 +838,24 @@ function makeContext({ out, timeline, domicile, codes, holidays, answers, plan, 
 
     /** הימים שבהם הסבב רשום בדוח, כולל יום שהקרדיט התפצל אליו: הימים של השורה שלו בפירוט. */
     reportDates: (pairing) => reportDates(pairing, timeline, domicile),
+
+    /** ימים ברומה בלי טיסה, עם TAB, אחרי סבב שנחת לפני חצות: נשאלים (`attachReportTails`). */
+    reportDays,
+
+    /**
+     * סוף השהייה מחוץ לבסיס לפי הרומה (`awayFromBase`): היום האחרון של הסבב ברומה, והדקות בו. הרומה
+     * כבר חישבה אותן ב-TAB של היום, לפי הזמנים בפועל; כשסבב אחר יוצא באותו יום, ה-TAB של שניהם, והחלק
+     * של הסבב שנחת הוא מחצות עד הנחיתה (בעל המוצר, 08/10/2026). null בלי רומה, בסבב של יום אחד, או בלי TAB.
+     */
+    reportStay(pairing) {
+      if (!exec || !execPairings.includes(pairing)) return null;
+      const home = pairing.legs.findLast((l) => l.dst === domicile);
+      const date = reportDates(pairing, timeline, domicile).at(-1);
+      if (!home || date === pairing.from) return null;
+      const shared = execPairings.some((p) => p !== pairing && p.dates.includes(date));
+      const min = shared ? (home.ata ?? home.sta) : dayOf(timeline, date)?.exec?.values?.TAB?.min;
+      return min ? { date, min } : null;
+    },
 
     /** סכום עמודה בדוח על ימי הסבב, כולל יום שהקרדיט התפצל אליו (`columnDates`). */
     reportedOn(pairing, column) {
@@ -1397,18 +1416,64 @@ function reportedCells(day) {
 
 /**
  * ימי הדוח של סבב: ימי הרגליים, ועוד היום שאחריו אם הנחיתה בבסיס עברה את חצות.
- * הקרדיט של רגל כזו מתפצל בדוח בין שני הימים (אומת: LY336, 16–17/07).
+ * הקרדיט של רגל כזו מתפצל בדוח בין שני הימים (אומת: LY336, 16–17/07). סבב ברומה שימי ההמשך
+ * שלו כבר נקבעו (`reportTail`, `attachReportTails`) – לפיהם.
  */
 function reportDates(pairing, timeline, domicile) {
   const dates = [...pairing.dates];
+  if (pairing.reportTail) return [...dates, ...pairing.reportTail.filter((d) => !dates.includes(d))];
   const last = pairing.legs.at(-1);
   if (last?.dst === domicile) {
-    const crossesSked = last.sta != null && last.skdDur != null && last.sta - last.skdDur < 0;
-    const crossesAct = last.ata != null && last.actDur != null && last.ata - last.actDur < 0;
     const next = timeline[timeline.findIndex((d) => d.date === pairing.to) + 1];
-    if ((crossesSked || crossesAct) && next && !dates.includes(next.date)) dates.push(next.date);
+    if (crossesMidnight(last) && next && !dates.includes(next.date)) dates.push(next.date);
   }
   return dates;
+}
+
+/** רגל שהמריאה לפני חצות ונחתה אחריו, לפי הזמנים המתוכננים או בפועל (בשעון של כל שדה). */
+const crossesMidnight = (leg) => (leg.sta != null && leg.skdDur != null && leg.sta - leg.skdDur < 0) ||
+  (leg.ata != null && leg.actDur != null && leg.ata - leg.actDur < 0);
+
+/**
+ * הימים שאחרי סבב שהרומה רושמת עליו (`pairing.reportTail`). הרומה רושמת את הרגל ביום ה-STD, ואת
+ * השעות שאחרי חצות ביום שאחריו, בלי שורת רגל (25/09/2026: LY392 מ-BCN, ‏STD 22:40, המריאה ב-00:01 ונחתה
+ * ב-05:16; ב-25/09 Credit 04:25 ו-TAB 05:16). יום כזה, וכל יום שאחריו בלי טיסה, עם TAB או Credit ובלי
+ * קוד, הוא המשך של השהייה: עיכוב של יותר מיממה מקבל קריאה מיוחדת על כל יממה נוספת (בעל המוצר,
+ * 08/10/2026). יום כזה אחרי סבב שנחת לפני חצות אינו מוסבר בקבצים, ונשאל (`report_day:` בחוק הקריאה
+ * המיוחדת); בתשובה "המשך" הוא נוסף לסבב. כמה סבבים שמסתיימים באותו יום נבדקים כולם (17/06/2024).
+ * @returns {{date: string, pairing: object}[]} הימים שנשאלים
+ */
+function attachReportTails(execPairings, timeline, domicile, codes, answers) {
+  const index = new Map(timeline.map((d, i) => [d.date, i]));
+  const inOther = (date, self) => execPairings.some((p) => p !== self && (p.dates.includes(date) || (p.from < date && date < p.to)));
+  const loose = (day) => !!day && !(day.exec?.legs ?? []).length && !(day.exec?.sims ?? []).length &&
+    !!(day.exec?.values?.TAB?.min || day.exec?.values?.Credit?.min) && !execCodesOf(day, codes).length;
+  const extend = (p, i) => {
+    for (; loose(timeline[i]) && !inOther(timeline[i].date, p); i++) p.reportTail.push(timeline[i].date);
+  };
+  const waiting = [];
+  for (const p of execPairings) {
+    p.reportTail = [];
+    const last = p.legs.at(-1);
+    if (last?.dst !== domicile || p.cutAtEnd) continue;
+    const i = index.get(p.to) + 1;
+    const next = timeline[i];
+    if (!next || p.dates.includes(next.date)) continue;
+    if (crossesMidnight(last)) {
+      p.reportTail.push(next.date);
+      // יום ההמשך שסבב אחר יוצא בו אינו עיכוב שנמשך.
+      if (!inOther(next.date, p)) extend(p, i + 1);
+    } else if (loose(next) && !inOther(next.date, p)) waiting.push({ p, i });
+  }
+  const tails = new Set(execPairings.flatMap((p) => p.reportTail));
+  const asked = [];
+  for (const { p, i } of waiting) {
+    const date = timeline[i].date;
+    if (tails.has(date) || asked.some((a) => a.date === date)) continue;
+    if (answers[`report_day:${date}`]?.value === 'continued') extend(p, i);
+    else asked.push({ date, pairing: p });
+  }
+  return asked;
 }
 
 /** העמודות שמתפצלות ליום שאחרי נחיתה אחרי חצות, יחד עם הקרדיט. */
