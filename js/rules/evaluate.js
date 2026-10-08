@@ -838,9 +838,9 @@ function makeContext({ out, timeline, domicile, codes, holidays, answers, plan, 
     /** הימים שבהם הסבב רשום בדוח, כולל יום שהקרדיט התפצל אליו: הימים של השורה שלו בפירוט. */
     reportDates: (pairing) => reportDates(pairing, timeline, domicile),
 
-    /** סכום עמודה בדוח על ימי הסבב, כולל יום שהקרדיט התפצל אליו. */
+    /** סכום עמודה בדוח על ימי הסבב, כולל יום שהקרדיט התפצל אליו (`columnDates`). */
     reportedOn(pairing, column) {
-      return reportDates(pairing, timeline, domicile)
+      return columnDates(pairing, column, timeline, domicile, execPairings)
         .reduce((s, date) => s + (dayOf(timeline, date)?.exec?.values?.[column]?.min ?? 0), 0);
     },
 
@@ -867,7 +867,7 @@ function makeContext({ out, timeline, domicile, codes, holidays, answers, plan, 
      */
     paidOn(pairing, column, key, min, except = []) {
       if (!exec || !min) return false;
-      const reported = reportDates(pairing, timeline, domicile)
+      const reported = columnDates(pairing, column, timeline, domicile, execPairings)
         .reduce((s, date) => s + (dayOf(timeline, date)?.exec?.values?.[column]?.min ?? 0), 0);
       const explained = out.expectations
         .filter((e) => e.pairingId === pairing.id && e.key === key && !except.includes(e.ruleId)).reduce((s, e) => s + e.min, 0);
@@ -1401,6 +1401,20 @@ function reportDates(pairing, timeline, domicile) {
     if ((crossesSked || crossesAct) && next && !dates.includes(next.date)) dates.push(next.date);
   }
   return dates;
+}
+
+/** העמודות שמתפצלות ליום שאחרי נחיתה אחרי חצות, יחד עם הקרדיט. */
+const SPLIT_COLUMNS = ['Credit', 'FLT', 'DH', 'PDFT', 'TAB', 'ABR'];
+
+/**
+ * הימים שבהם עמודה בדוח שייכת לסבב. יום שהקרדיט התפצל אליו, וסבב אחר יוצא בו, נספר רק לעמודות
+ * שמתפצלות: פיצוי שהרומה רשמה בו (S/C, ‏COM, ‏Rig) שייך לסבב שיוצא (22–23/09/2026: LY2524 מ-PRG
+ * נחתה אחרי חצות, וה-S/C של 23/09 הוא של BCN שיצאה באותו יום, ולא קריאה מיוחדת על PRG).
+ */
+function columnDates(pairing, column, timeline, domicile, execPairings) {
+  const dates = reportDates(pairing, timeline, domicile);
+  if (SPLIT_COLUMNS.includes(column)) return dates;
+  return dates.filter((d) => pairing.dates.includes(d) || !execPairings.some((p) => p !== pairing && p.dates.includes(d)));
 }
 
 const dayOf = (timeline, date) => timeline.find((d) => d.date === date);
