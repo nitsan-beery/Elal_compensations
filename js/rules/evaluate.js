@@ -8,7 +8,7 @@
 
 import { LOGIC, LOGIC_ORDER } from './logic.js';
 import { rulesInEffect, partitionRules, rulesByLogic, classifyCode } from './catalog.js';
-import { buildTimeline, buildPairings, markCarryIn, matchPairings, describePairing, describeRoute, pairingParts, fdpParts } from '../model.js';
+import { buildTimeline, buildPairings, markCarryIn, matchPairings, describePairing, describeRoute, pairingParts, fdpParts, sameFdp } from '../model.js';
 import { hoursToMin, minToHhmm } from '../time.js';
 import { OPTIONAL_COLUMNS } from '../pdf/exec.js';
 import { checkLegalLimits, restDefinition, delayFitsFdp, baseReportMinutes } from './legal.js';
@@ -195,8 +195,9 @@ export function evaluate({ rulesData, plan = null, exec = null, answers = {}, hi
   }
   if (journal && mode === 'full') applyJournal(journal, { ctx, matches, execPairings, answers });
   if (mode === 'full') matches.splice(0, matches.length, ...splitSwappedElsewhere(matches, answers, dependentAnswers));
+  explainByCarriedStay(matches, fdp);
   explainByActivity(matches, timeline, codes, sickCodeTest(supported), movableCodeTest(supported));
-  out.changes = matches.map(describeMatch);
+  out.changes = mergeCarriedStay(matches.map(describeMatch), matches);
   // פעילות קרקע במקום סבב: הזיכוי עליה בא מחוק הקוד שלה. קוד שאף חוק נתמך לא מכסה – לבדיקה ידנית.
   const covered = new Set(supported.flatMap((r) => [...(r.logic.params?.plan_codes ?? []), ...(r.logic.params?.report_codes ?? [])]));
   const coveredPrefixes = supported.flatMap((r) => [...(r.logic.params?.plan_code_prefixes ?? []), ...(r.logic.params?.report_code_prefixes ?? [])]);
@@ -230,6 +231,10 @@ export function evaluate({ rulesData, plan = null, exec = null, answers = {}, hi
   showSwaps(out, answers, assumed);
   splitChangesByFdp(out, matches, ctx, fdp);
   explainChanges(out, supported);
+  for (const c of out.changes.filter((x) => x.carriedOver)) {
+    c.notes.push({ message: c.carriedOver.length > 1 ? 'הסבבים שתוכננו בימי השהייה לא בוצעו: לא מגיע עליהם קרדיט.'
+      : 'הסבב שתוכנן בימי השהייה לא בוצע: לא מגיע עליו קרדיט.', byUser: false });
+  }
   if (journal && mode === 'full') chainNotes(out, journal, answers);
   if (mode === 'full') addedNotes(out, answers);
   explainCompensations(out);
@@ -997,6 +1002,44 @@ function explainByActivity(matches, timeline, codes, isSick, isMovable) {
       : kinds.has('standby') ? 'replaced_by_standby'
       : 'replaced_by_leave';
   }
+}
+
+/**
+ * סבב מתוכנן שיוצא לפני שסבב מהחודש הקודם (`cutAtStart`) חזר לבסיס, או ביום הנחיתה בלי מנוחה חוקית אחריה:
+ * לא היה אפשר לבצע אותו, ולכן לא שואלים מה קרה בו (`carried_over`). אין עליו קרדיט, והקריאה המיוחדת רק
+ * על הימים שלא תוכנן בהם סבב (`special_call`). כך גם כשהסבב מהחודש הקודם היה בתכנון (בעל המוצר,
+ * 08/10/2026; 28/02–08/03/2026 BUD, ובימיו GVA, ‏FCO ו-VCE).
+ */
+function explainByCarriedStay(matches, fdp) {
+  for (const stay of matches.map((m) => m.exec).filter((e) => e?.cutAtStart)) {
+    const landed = stay.closed ? stay.shownTo ?? stay.to : null;
+    for (const m of matches) {
+      const first = m.plan?.legs[0];
+      if (m.how !== 'cancelled' || !first) continue;
+      if (landed && first.date > landed) continue;
+      if (landed && first.date === landed && !sameFdp(stay.legs.at(-1), first, fdp)) continue;
+      m.how = 'carried_over';
+      m.carriedBy = stay;
+    }
+  }
+}
+
+/**
+ * הסבבים שלא בוצעו בגלל שהייה בסבב מהחודש הקודם (`explainByCarriedStay`) בשורה אחת עם הסבב הזה בטבלת
+ * השינויים: בצד התכנון הם, ובצד הביצוע הסבב (בעל המוצר, 08/10/2026).
+ */
+function mergeCarriedStay(changes, matches) {
+  const over = matches.filter((m) => m.how === 'carried_over');
+  if (!over.length) return changes;
+  for (const c of changes) {
+    const plans = over.filter((m) => m.carriedBy.id === c.execId).map((m) => m.plan);
+    if (!plans.length) continue;
+    c.carriedOver = plans.map((p) => p.id);
+    c.plan = [c.plan, ...plans.map(describePairing)].filter(Boolean).join(', ');
+    // הסבב מהחודש הקודם היה בתכנון: הוא התארך לימים של סבבים אחרים.
+    if (c.how === 'exact') Object.assign(c, { how: 'extended', label: 'הסבב התארך' });
+  }
+  return changes.filter((c) => c.how !== 'carried_over');
 }
 
 /** קוד כוננות: כל קוד שמתחיל ב-SBY. כוננות אינה פעילות קרקע, גם ש-SBY_S/SBY_L ברשימת הקודים ל-`ground_activity` (בעל המוצר, 27/09/2026). */

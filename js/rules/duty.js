@@ -650,6 +650,7 @@ function cancelStatus(ctx, planPairing) {
   if (!m) return 'unknown';
   if (m.byLeave) return 'no'; // היעדרות ומחלה אינן ביוזמת החברה
   if (m.how === 'replaced_by_ground' || m.how === 'replaced_by_standby') return 'company'; // החברה הציבה אותו לפעילות קרקע או לכוננות
+  if (m.how === 'carried_over') return 'company'; // הצוות עוד היה בחו"ל, בסבב מהחודש הקודם (`explainByCarriedStay`)
   // שרשרת מהיומן: השלב הראשון, זה שהוציא את הסבב מהשיבוץ, קובע (`reduceChain`; בעל המוצר, 06/10/2026).
   const count = ctx.answerFor(m)?.count;
   if (count) {
