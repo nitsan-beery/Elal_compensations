@@ -758,21 +758,22 @@ function renderResults(keepDom = true) {
 
 function renderHead(res) {
   const r = state.record;
-  const emp = r.exec?.employee?.name ?? (r.plan?.employee ? `${r.plan.employee.last} ${r.plan.employee.first ?? ''}` : '');
+  const emp = r.exec?.employee?.name ?? (r.plan?.employee ? [r.plan.employee.last, r.plan.employee.first].filter(Boolean).join(', ') : '');
   // פרטי החישוב לא על המסך: בחלון צף במעבר עם העכבר, ובמכשיר בלי עכבר (אייפד) בלחיצה על שם החודש. בהדפסה הם מופיעים.
   const meta = `${MODE_LABEL[res.mode]} · בסיס ${res.domicile ?? '?'}${res.fleet ? ` · צי ${res.fleet}` : ''} · חוקים ${res.rulesVersion}`;
   const hover = matchMedia('(hover: hover)').matches;
+  // שם הטייס ליד שם החודש, לפני היומן; "ייצוא PDF" בכרטיס הסיכום, וכאן רק כשאין כזה (בעל המוצר, 08/10/2026).
   return `<div class="card">
     <div class="result-head">
       <h2${hover ? ` title="${esc(meta)}"` : ''}>${hover ? '' : '<button type="button" class="cal-toggle" data-action="head-info">'}${esc(monthName(res.period))}${hover ? '' : '</button>'}</h2>
+      ${emp.trim() ? `<span class="head-name">${esc(emp.trim())}</span>` : ''}
       <span class="meta head-meta">${esc(meta)}</span>
       <span class="cal-inline no-print" id="head-cal"></span>
-      <span class="spacer"></span>
-      <button class="btn no-print" data-action="print">ייצוא PDF</button>
+      ${hasTotals(res) ? '' : `<span class="spacer"></span>${PRINT_BUTTON}`}
     </div>
     <div class="no-print" id="head-cal-info"></div>
     ${hover ? '' : `<p class="small muted no-print" data-head-info hidden>${esc(meta)}</p>`}
-    <p class="print-only small">${esc(emp)} · הופק ${esc(new Date().toLocaleDateString('he-IL'))}</p>
+    <p class="print-only small">הופק ${esc(new Date().toLocaleDateString('he-IL'))}</p>
     ${res.mode === 'plan' ? '<p class="small muted">בלי קובץ ביצוע אין השוואה מול מה שזוכה. מוצגים הקרדיט והפיצויים הצפויים לפי התכנון.</p>' : ''}
   </div>`;
 }
@@ -928,14 +929,17 @@ function renderQuestion(q, i) {
 const gapClass = (diff) => (diff > 0 ? 'gain' : 'bad');
 const signed = (min) => (min > 0 ? '+' : '') + minToHhmm(min);
 
+const PRINT_BUTTON = '<button class="btn no-print" data-action="print">ייצוא PDF</button>';
+const hasTotals = (res) => res.totals.length > 0 || !!res.freeDays;
+
 function renderTotals(res) {
   const fd = res.freeDays;
-  if (!res.totals.length && !fd) return '';
+  if (!hasTotals(res)) return '';
   // כל עוד יש שאלות פתוחות, פער בסיכום אינו ממצא: הצפוי תלוי בתשובות.
   const pending = res.questions.length > 0;
   const days = res.totals.length ? dayCounts(res.expectations) : [];
   return `<div class="card">
-    <h2>${res.totals.length ? 'סיכום' : 'סיכום חודשי'}</h2>
+    <h2>${res.totals.length ? 'סיכום' : 'סיכום חודשי'}<span class="spacer"></span>${PRINT_BUTTON}</h2>
     <div class="totals">${res.totals.map((t) => {
       const gap = `פער <span class="num">${signed(t.reported - t.expected)}</span>`;
       const status = t.ok === true ? '✓' : t.ok === false ? (pending ? `ממתין · ${gap}` : `✗ ${gap}`) : '';
