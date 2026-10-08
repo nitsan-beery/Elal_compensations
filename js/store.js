@@ -6,9 +6,9 @@
 // הגדרות (`settings`) – חיבור היומן וההשלמות ממנו – אינן נכללות בגיבוי.
 
 const DB_NAME = 'elal-compensations';
-const DB_VERSION = 4;
+const DB_VERSION = 5;
 const STORE = 'months';
-const FILES = 'files'; // {key: "2026-07|BEERY NITSAN:plan", name, bytes: ArrayBuffer}
+const FILES = 'files'; // {key: "2026-07|52616:plan", name, bytes: ArrayBuffer}
 const SETTINGS = 'settings'; // {key, value}
 const KINDS = ['plan', 'exec'];
 const BACKUP_FORMAT = 'elal-compensations-backup';
@@ -24,7 +24,7 @@ function openDb() {
       if (!db.objectStoreNames.contains(STORE)) db.createObjectStore(STORE, { keyPath: 'key' });
       if (!db.objectStoreNames.contains(FILES)) db.createObjectStore(FILES, { keyPath: 'key' });
       if (!db.objectStoreNames.contains(SETTINGS)) db.createObjectStore(SETTINGS, { keyPath: 'key' });
-      if (e.oldVersion > 0 && e.oldVersion < 4) migrateToPerson(req.transaction);
+      if (e.oldVersion > 0 && e.oldVersion < 5) migrateToPilot(req.transaction);
     };
     req.onsuccess = () => {
       // גרסה חדשה של המסד בלשונית אחרת: לסגור, כדי לא לחסום את השדרוג שלה.
@@ -61,39 +61,77 @@ export function personOf(parsed) {
   return name || null;
 }
 
-/**
- * מפתח הרשומה: החודש ושם הטייס, "2026-09|BEERY NITSAN". חודש נשמר לכל טייס בנפרד, לפי שם המשפחה והשם
- * הפרטי, כי יש טייסים עם אותו שם משפחה (בעל המוצר, 08/10/2026). בלי שם בקבצים – החודש בלבד.
- */
-export const recordKey = (period, person) => (person ? `${monthKey(period)}|${person}` : monthKey(period));
-const KEY_RE = /^\d{4}-\d{2}(\|[^:|]+)?$/;
+/** מספר העובד, בלי אפסים מובילים, או null: "(052616)" ברומה, "TLVELY/CREW/052616/…" בתכנון, "OPR 052616" ביומן. */
+export const staffId = (raw) => (raw == null || !/^\d+$/.test(String(raw)) ? null : String(raw).replace(/^0+(?=\d)/, ''));
 
-/**
- * רשומה שנשמרה לפני שהחודשים הופרדו לפי טייס, במפתח החודש בלבד: המפתח החדש, ו-`kinds` – הקבצים שעוברים
- * איתה. תכנון ורומה של שני טייסים שונים (תכנון של טייס אחר הועלה לחודש פתוח) – כל קובץ לחודש של הטייס
- * שלו, והתשובות נשארות עם הרומה.
- */
-function splitByPerson(m) {
-  const pp = personOf(m.plan);
-  const pe = personOf(m.exec);
-  if (pp && pe && pp !== pe) {
-    return [
-      { record: { ...m, key: recordKey(m.period, pe), person: pe, plan: null, planFile: null }, kinds: ['exec'] },
-      { record: { key: recordKey(m.period, pp), period: m.period, person: pp, plan: m.plan, planFile: m.planFile, exec: null, answers: {}, parseVersion: m.parseVersion, updated: m.updated }, kinds: ['plan'] },
-    ];
-  }
-  const person = m.person ?? pe ?? pp;
-  return [{ record: { ...m, key: recordKey(m.period, person), person }, kinds: KINDS }];
+/** הטייס של קובץ: {staff, person}. */
+export const pilotOf = (parsed) => ({ staff: staffId(parsed?.employee?.id), person: personOf(parsed) });
+
+/** אותו טייס: לפי מספר העובד כשהוא ידוע בשניהם, ואחרת לפי השם. לא ידוע באחד מהם – לא נחשב שונה. */
+export function samePilot(a, b) {
+  if (a?.staff && b?.staff) return a.staff === b.staff;
+  if (a?.person && b?.person) return a.person === b.person;
+  return true;
 }
 
-/** שדרוג מגרסה 3: החודשים והקבצים שלהם עוברים למפתח עם שם הטייס (`splitByPerson`). */
-function migrateToPerson(t) {
+/**
+ * מפתח הרשומה: החודש ומספר העובד, "2026-09|52616". חודש נשמר לכל טייס בנפרד, לפי מספר העובד, כי שמות
+ * יכולים לחזור (בעל המוצר, 08/10/2026). השם נשמר ברשומה (`person`) ומוצג בחודשים השמורים. בלי מספר
+ * עובד בקבצים – השם, ובלי שניהם – החודש בלבד.
+ */
+export const recordKey = (period, { staff, person } = {}) => {
+  const who = staff ?? person;
+  return who ? `${monthKey(period)}|${who}` : monthKey(period);
+};
+const KEY_RE = /^\d{4}-\d{2}(\|[^:|]+)?$/;
+
+/** מספר העובד לפי השם, מכל הרשומות שיש בהן מספר: לתכנון שנקרא לפני שמספר העובד נקרא ממנו. */
+function staffByName(months) {
+  const map = new Map();
+  for (const m of months) {
+    for (const p of [m.exec, m.plan]) {
+      const { staff, person } = pilotOf(p);
+      if (staff && person && !map.has(person)) map.set(person, staff);
+    }
+  }
+  return map;
+}
+
+/**
+ * הרשומה במפתח הנכון (`recordKey`), עם `staff` ו-`person`, ו-`kinds` – הקבצים שעוברים איתה. רשומה
+ * מלפני ההפרדה לפי טייס (במפתח החודש) או לפי שם (במפתח השם). תכנון ורומה של שני טייסים שונים (תכנון של
+ * טייס אחר הועלה לחודש פתוח) – כל קובץ לחודש של הטייס שלו, והתשובות נשארות עם הרומה.
+ */
+function splitByPilot(m, names = new Map()) {
+  const who = (parsed) => {
+    const p = pilotOf(parsed);
+    return { staff: p.staff ?? names.get(p.person) ?? null, person: p.person };
+  };
+  const pp = who(m.plan);
+  const pe = who(m.exec);
+  if (m.plan && m.exec && !samePilot(pp, pe)) {
+    return [
+      { record: { ...m, key: recordKey(m.period, pe), ...pe, plan: null, planFile: null }, kinds: ['exec'] },
+      { record: { key: recordKey(m.period, pp), period: m.period, ...pp, plan: m.plan, planFile: m.planFile, exec: null, answers: {}, parseVersion: m.parseVersion, updated: m.updated }, kinds: ['plan'] },
+    ];
+  }
+  const pilot = { staff: pe.staff ?? pp.staff ?? m.staff ?? null, person: pe.person ?? pp.person ?? m.person ?? null };
+  return [{ record: { ...m, key: recordKey(m.period, pilot), ...pilot }, kinds: KINDS }];
+}
+
+/** שדרוג מגרסה 3 או 4: החודשים והקבצים שלהם עוברים למפתח של מספר העובד (`splitByPilot`). */
+function migrateToPilot(t) {
   const months = t.objectStore(STORE);
   const files = t.objectStore(FILES);
   months.getAll().onsuccess = (ev) => {
-    for (const m of ev.target.result) {
-      const parts = splitByPerson(m);
-      if (parts.length === 1 && parts[0].record.key === m.key) continue;
+    const all = ev.target.result;
+    const names = staffByName(all);
+    for (const m of all) {
+      const parts = splitByPilot(m, names);
+      if (parts.length === 1 && parts[0].record.key === m.key) {
+        months.put(parts[0].record);
+        continue;
+      }
       months.delete(m.key);
       for (const { record, kinds } of parts) {
         months.put(record);
@@ -111,8 +149,22 @@ function migrateToPerson(t) {
 }
 
 /**
+ * רשומה שהמפתח שלה השתנה אחרי קריאה מחדש של הקבצים (תכנון שנקרא לפני שמספר העובד נקרא ממנו): עוברת,
+ * עם הקבצים שלה, למפתח החדש. מחזירה את הרשומה המעודכנת.
+ */
+export async function rekeyMonth(record) {
+  const [{ record: next }] = splitByPilot(record);
+  if (next.key === record.key || await getMonth(next.key)) return Object.assign(record, next, { key: record.key });
+  const files = await Promise.all(KINDS.map((kind) => getFile(record.key, kind)));
+  await deleteMonth(record.key);
+  await tx('readwrite', (s) => s.put(next));
+  for (const [i, kind] of KINDS.entries()) if (files[i]) await putFile(next.key, kind, files[i].name, files[i].bytes);
+  return Object.assign(record, next);
+}
+
+/**
  * רשומת חודש:
- * {key, period, person, plan, planFile, exec, execFile, answers, rulesVersion, summary, updated}
+ * {key, period, staff, person, plan, planFile, exec, execFile, answers, rulesVersion, summary, updated}
  */
 export const getMonth = (key) => tx('readonly', (s) => s.get(key));
 
@@ -178,7 +230,7 @@ export async function exportBackup() {
 
 /**
  * שחזור מקובץ גיבוי. חודש שקיים גם על המכשיר נדרס רק אם הגרסה בגיבוי חדשה יותר. גיבוי מלפני ההפרדה לפי
- * טייס עובר למפתח החדש (`splitByPerson`).
+ * טייס עובר למפתח החדש (`splitByPilot`).
  * קובץ PDF משוחזר עם החודש שלו, או כשאין במכשיר קובץ לאותו חודש (חודש שנשמר לפני שהקבצים
  * נשמרו). גיבוי מגרסה 1 אינו מכיל קבצים.
  * @returns {Promise<{added:number, replaced:number, skipped:number, files:number}>}
@@ -189,10 +241,11 @@ export async function importBackup(data) {
   }
   const counts = { added: 0, replaced: 0, skipped: 0, files: 0 };
   const taken = new Set();
-  const moved = new Map(); // "2026-07:plan" בגיבוי מלפני ההפרדה לפי טייס → המפתח החדש של החודש (`splitByPerson`)
+  const moved = new Map(); // "2026-07:plan" בגיבוי מלפני ההפרדה לפי טייס → המפתח החדש של החודש (`splitByPilot`)
+  const names = staffByName(data.months.filter((m) => m?.period));
   for (const m of data.months) {
     if (!m?.key || !KEY_RE.test(m.key) || !m.period) { counts.skipped++; continue; }
-    for (const { record, kinds } of splitByPerson(m)) {
+    for (const { record, kinds } of splitByPilot(m, names)) {
       for (const kind of kinds) moved.set(`${m.key}:${kind}`, record.key);
       const existing = await getMonth(record.key);
       if (existing && (existing.updated ?? '') >= (record.updated ?? '')) { counts.skipped++; continue; }

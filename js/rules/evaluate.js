@@ -506,7 +506,9 @@ export function monthCalendar(facts, period) {
   const from = Date.UTC(period.year, period.month - 1, 1) - 2 * 864e5;
   const to = Date.UTC(period.year, period.month, 1) + 2 * 864e5;
   const inMonth = (iso) => { const t = Date.parse(iso); return t >= from && t < to; };
-  return { flights: (facts.flights ?? []).filter((f) => inMonth(f.std)), standby: (facts.standby ?? []).filter((s) => inMonth(s.start)), ...range };
+  // `owner`: מספר העובד של בעל היומן (`calendarOwner` ב-js/calendar.js), כדי לדעת אחר כך מאיזה יומן זה נשמר.
+  return { flights: (facts.flights ?? []).filter((f) => inMonth(f.std)), standby: (facts.standby ?? []).filter((s) => inMonth(s.start)), ...range,
+    ...(facts.owner && { owner: facts.owner }) };
 }
 
 const crewClass = (pilots) => (pilots >= 4 ? 'double' : pilots === 3 ? 'augmented' : 'single');

@@ -5,8 +5,8 @@
 // ושעות הכוננות. התכנון תמיד מקובץ התכנון והביצוע מהרומה, גם כשהיומן רושם משהו אחר.
 //
 // פרטיות: הקריאה היא מהדפדפן ישירות ל-Google Calendar API, בהרשאת קריאה בלבד. תיאור האירועים
-// (שמות וטלפונים של הצוות) מפוענח בזיכרון ואינו נשמר: על המכשיר נשמרים רק מספר הטייסים לכל טיסה
-// ושעות הכוננות (`parseEvents`), והם אינם נכללים בגיבוי. ספריית ההתחברות של גוגל נטענת רק
+// (שמות וטלפונים של הצוות) מפוענח בזיכרון ואינו נשמר: על המכשיר נשמרים רק מספר הטייסים לכל טיסה,
+// שעות הכוננות (`parseEvents`) ומספר העובד של בעל היומן (`calendarOwner`), והם אינם נכללים בגיבוי. ספריית ההתחברות של גוגל נטענת רק
 // כשמתחברים או מעדכנים, כך שמי שלא חיבר יומן אינו פונה לגוגל כלל.
 
 const GIS_SRC = 'https://accounts.google.com/gsi/client';
@@ -151,20 +151,23 @@ export async function findOrganizerCalendars(token, calendars, timeMin, timeMax)
 }
 
 /**
- * ההשלמות מכל היומנים בטווח: {flights, standby} (`parseEvents`). טיסה שמופיעה בכמה יומנים נלקחת
+ * ההשלמות מכל היומנים בטווח: {flights, standby, owner} (`parseEvents`, ‏`calendarOwner`). טיסה שמופיעה בכמה יומנים נלקחת
  * מהראשון ברשימה, שהוא החדש.
  */
 export async function fetchFacts(token, calendarIds, timeMin, timeMax) {
   const out = { flights: [], standby: [] };
   const seen = new Set();
+  const all = [];
   for (const id of calendarIds) {
     const items = await pages(token, `calendars/${encodeURIComponent(id)}/events`, {
       timeMin, timeMax, singleEvents: true, maxResults: 2500, fields: 'items(summary,description,start,end,status),nextPageToken',
     });
+    all.push(...items);
     const facts = parseEvents(items);
     for (const f of facts.flights) if (!seen.has(`${f.flight}|${f.std}`)) { seen.add(`${f.flight}|${f.std}`); out.flights.push(f); }
     for (const s of facts.standby) if (!seen.has(`${s.code}|${s.start}`)) { seen.add(`${s.code}|${s.start}`); out.standby.push(s); }
   }
+  out.owner = calendarOwner(all);
   return out;
 }
 
@@ -210,6 +213,40 @@ export function parseEvents(items) {
 function utc(dateTime) {
   const ms = Date.parse(dateTime ?? '');
   return Number.isNaN(ms) ? null : new Date(ms).toISOString();
+}
+
+/**
+ * מספר העובד של בעל היומן, בלי אפסים מובילים, או null: מי שמופיע ברשימת ה-Cockpit של הסבבים, כי הוא
+ * בכל הטיסות שלו (בעל המוצר, 08/10/2026). רק הוא נשמר, ולא המספרים של שאר הצוות. הספירה סלחנית – לפחות
+ * 80% מהסבבים, ויותר מכל מספר אחר – כדי שסבב שבו הוא לא ברשימה לא יבטל את הזיהוי. פחות משלושה סבבים,
+ * או שני מספרים שמופיעים באותה מידה: לא ידוע.
+ */
+export function calendarOwner(items) {
+  const counts = new Map();
+  let slips = 0;
+  for (const ev of items ?? []) {
+    if (ev.status === 'cancelled' || !(ev.description ?? '').includes(SLIP_MARK)) continue;
+    const ids = cockpitIds(ev.description.split(/\r?\n/));
+    if (!ids.size) continue;
+    slips++;
+    for (const id of ids) counts.set(id, (counts.get(id) ?? 0) + 1);
+  }
+  const [first, second] = [...counts.entries()].sort((a, b) => b[1] - a[1]);
+  if (slips < 3 || !first || first[1] < 0.8 * slips || (second && second[1] === first[1])) return null;
+  return first[0];
+}
+
+/** מספרי העובדים ברשימת ה-Cockpit ("OPR 012345 CAP …", ‏"DHD 012345 …"), בלי אפסים מובילים. */
+function cockpitIds(lines) {
+  const ids = new Set();
+  const i = lines.findIndex((l) => /^\s*Cockpit:\s*$/.test(l));
+  if (i < 0) return ids;
+  for (const l of lines.slice(i + 1)) {
+    if (!l.trim() || /:\s*$/.test(l)) break;
+    const m = l.match(/^\s*[A-Z]{2,4}\s+(\d{3,})\s/);
+    if (m) ids.add(m[1].replace(/^0+(?=\d)/, ''));
+  }
+  return ids;
 }
 
 function cockpitCount(lines) {

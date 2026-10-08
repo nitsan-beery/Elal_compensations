@@ -70,6 +70,7 @@ const state = {
   calBusy: false,
   calInfo: false,
   calGaps: null, // {key, items}: פערים שהעדכון האחרון מהיומן מצא בחודש הפתוח (`calendarGaps`)
+  calForeign: null, // שם בעל היומן המחובר, כשהוא טייס אחר מזה של החודש הפתוח (`foreignCalendar`)
   calError: null,
 };
 
@@ -171,21 +172,26 @@ const PARSERS = { plan: parsePlan, exec: parseExec };
 // גרסת הקריאה של קובצי ה-PDF. הנתונים שחולצו נשמרים בחודש, ולכן שינוי בקריאה (עמודה שנוספה, קוד שמתווסף
 // לעמודה אחרת) מעלה אותה, וחודש שנשמר בגרסה קודמת נקרא מחדש מהקבצים השמורים כשהוא נפתח (בעל המוצר,
 // 08/10/2026: HHM ב-COM של היום, ספטמבר 2026 של רון).
-const PARSE_VERSION = 1;
+// 2: מספר העובד בתכנון (בעל המוצר, 08/10/2026).
+const PARSE_VERSION = 2;
 
 async function reparseStale(record) {
   if (record.parseVersion === PARSE_VERSION) return;
+  let changed = false;
   for (const kind of Object.keys(PARSERS)) {
     if (!record[kind]) continue;
     const file = await safe(() => store.getFile(record.key, kind), null);
     if (!file) continue; // חודש שנשמר לפני שהקבצים נשמרו: נשאר כמו שנקרא
     try {
       record[kind] = await PARSERS[kind](new Uint8Array(file.bytes));
+      changed = true;
     } catch (err) {
       console.error(err);
     }
   }
   record.parseVersion = PARSE_VERSION;
+  // מה שנקרא מחדש יכול לתת מספר עובד שלא היה (תכנון), ואז החודש עובר למפתח שלו.
+  if (changed) await safe(() => store.rekeyMonth(record));
 }
 
 /**
@@ -215,27 +221,32 @@ async function handleFile(file, expected, calToken = null) {
       }
     }
 
-    // חודש לכל טייס, לפי השם בקובץ (`store.recordKey`). קובץ בלי שם נכנס לחודש הפתוח, כשהוא מאותו חודש.
+    // חודש לכל טייס, לפי מספר העובד בקובץ (`store.recordKey`; בעל המוצר, 08/10/2026). קובץ שלא נמצא בו
+    // מספר עובד או שם נכנס לחודש הפתוח, כשהוא מאותו חודש.
     const prev = state.record;
     const samePeriod = prev && store.monthKey(prev.period) === store.monthKey(parsed.period);
-    const person = store.personOf(parsed) ?? (samePeriod ? prev.person : null) ?? null;
-    const key = store.recordKey(parsed.period, person);
+    const found = store.pilotOf(parsed);
+    const pilot = samePeriod && store.samePilot(prev, found)
+      ? { staff: found.staff ?? prev.staff ?? null, person: found.person ?? prev.person ?? null }
+      : found;
+    const key = store.recordKey(parsed.period, pilot);
     const record = (prev?.key === key ? prev : await safe(() => store.getMonth(key), null))
-      ?? { key, period: parsed.period, person, plan: null, exec: null, answers: {} };
+      ?? { key, period: parsed.period, ...pilot, plan: null, exec: null, answers: {} };
     await reparseStale(record);
     // קובץ של טייס אחר מהחודש הפתוח: הקובץ השני של החודש הפתוח נסגר, ומחכים לקובץ המתאים (בעל המוצר, 08/10/2026).
     const other = kind === 'plan' ? 'exec' : 'plan';
-    const otherPilot = samePeriod && prev.key !== key && prev[other] && prev.person && person && prev.person !== person;
-    if (otherPilot) {
+    if (samePeriod && prev.key !== record.key && prev[other] && !store.samePilot(prev, pilot)) {
+      const was = prev.person ?? `מספר עובד ${prev.staff}`;
+      const now = pilot.person ?? `מספר עובד ${pilot.staff}`;
       state.notices.push({ kind: 'warn', text: record[other]
-        ? `${THE_KIND[other]} שהיה פתוח שייך לטייס אחר (${prev.person}). נפתח החודש השמור של ${person}.`
-        : `${THE_KIND[other]} שהיה פתוח שייך לטייס אחר (${prev.person}), ולכן נסגר. העלה את ${THE_KIND[other]} של ${person}.` });
+        ? `${THE_KIND[other]} שהיה פתוח שייך לטייס אחר (${was}). נפתח החודש השמור של ${now}.`
+        : `${THE_KIND[other]} שהיה פתוח שייך לטייס אחר (${was}), ולכן נסגר. העלה את ${THE_KIND[other]} של ${now}.` });
     } else if (kind === 'exec' && !record.plan) {
       state.notices.push({ kind: 'warn', text: 'אין קובץ תכנון לחודש הזה, ולכן אין השוואה לתכנון. אפשר להעלות אותו עכשיו.' });
     }
     record[kind] = parsed;
     record[`${kind}File`] = file.name;
-    await safe(() => store.putFile(key, kind, file.name, bytes));
+    await safe(() => store.putFile(record.key, kind, file.name, bytes));
     dropFileLink(kind);
     state.record = record;
     await runAndSave();
@@ -301,7 +312,12 @@ async function runAndSave() {
   const months = await safe(() => store.listMonths(), []);
   // ההשלמות מהיומן נשמרות בחודש, ונשארות בו גם אחרי ניתוק (בעל המוצר, 04/10/2026). יומן שאין בו
   // דבר מהחודש אינו מוחק את מה שנשמר. טיסה שירדה מהיומן אינה נשמרת (בעל המוצר, 06/10/2026).
-  const fresh = monthCalendar(calendarFacts(), r.period);
+  // יומן של טייס אחר אינו משמש, ומה שנשמר ממנו בחודש נמחק (`calendarFor`; בעל המוצר, 08/10/2026).
+  const { saved, fresh } = calendarFor(r);
+  if (saved !== (r.calendar ?? null)) { r.calendar = null; r.calendarHistory = null; }
+  const owner = calendarFacts()?.owner;
+  state.calForeign = foreignCalendar(r)
+    ? months.find((m) => m.staff === owner)?.person ?? `מספר עובד ${owner}` : null;
   if (fresh?.flights.length || fresh?.standby.length) {
     // לפני הרומה: תמונה של החודש מהיומן, לשרשרת השינויים (`appendSnapshot`; בעל המוצר, 06/10/2026). חודש
     // שנשמר לפני כן מתחיל מהיומן ששמור בו.
@@ -330,6 +346,24 @@ const CAL_CLIENT = 'calendar-client';
 const CAL_NO_DATA = 'לא נמצאו ביומן נתוני סבבים. ייתכן שחובר יומן לא מתאים, או שהיומן מתאים אבל לא בוצע בו סנכרון דרך האורגנייזר.';
 
 const calendarFacts = () => state.calendar?.facts ?? null;
+
+/**
+ * היומן המחובר שייך לטייס אחר מזה של החודש: מספר העובד של בעל היומן (`calendarOwner`) שונה ממספר העובד
+ * בקבצים (בעל המוצר, 08/10/2026). כשאחד מהם לא ידוע – היומן משמש, כמו קודם.
+ */
+const foreignCalendar = (r) => {
+  const owner = calendarFacts()?.owner;
+  return !!(owner && r?.staff && owner !== r.staff);
+};
+
+/**
+ * היומן של חודש: `saved` – מה שנשמר בו, ו-`fresh` – החודש ביומן המחובר. ביומן של טייס אחר אין `fresh`,
+ * ומה שנשמר נשאר רק כשהוא מהיומן של הטייס עצמו (`owner`): מה שנשמר בלי בעלים בא מהיומן של המכשיר הזה.
+ */
+function calendarFor(r) {
+  if (!foreignCalendar(r)) return { saved: r.calendar ?? null, fresh: monthCalendar(calendarFacts(), r.period) };
+  return { saved: r.calendar?.owner === r.staff ? r.calendar : null, fresh: null };
+}
 // חיבור שנשמר לפני 03/10/2026, ליומן אחד.
 const calendarSetting = (c) => (c && !c.calendars ? { ...c, calendars: [{ id: c.calendarId, name: c.calendarName }] } : c);
 const pad2 = (n) => String(n).padStart(2, '0');
@@ -384,6 +418,8 @@ function renderCalendarBar() {
   const notices = [];
   if (state.calError) notices.push(`<div class="notice bad">${esc(state.calError)}</div>`);
   else if (c?.synced && !c.facts?.flights?.length) notices.push(`<div class="notice warn">${esc(CAL_NO_DATA)}</div>`);
+  // יומן של טייס אחר: אינו משמש בחודש, ושאר ההודעות על היומן אינן נוגעות לו (בעל המוצר, 08/10/2026).
+  else if (c && state.result && state.calForeign) notices.push(`<div class="notice info">היומן המחובר שייך לטייס אחר (${esc(state.calForeign)}), ולכן אינו משמש בחודש הזה.</div>`);
   // ביומן אין אף טיסה מהחודש הפתוח (בעל המוצר, 04/10/2026).
   // כשהמשתמש ענה על הרכב הצוות, ההודעה אומרת שההרכבים מהתשובות (בעל המוצר, 04/10/2026).
   else if (c && !state.calBusy && state.result?.calendarNoMonth) {
@@ -566,7 +602,7 @@ async function syncCalendar(pending = calendarToken()) {
     const facts = await calendar.fetchFacts(token, cals.map((x) => x.id), timeMin, timeMax);
     // הפערים נבדקים מול החודש הפתוח בלבד (בעל המוצר, 04/10/2026), לפני שהיומן המעודכן נשמר בו.
     const r = state.record;
-    state.calGaps = r && state.result ? { key: r.key, items: calendarGaps({ prev: r.calendar, fresh: monthCalendar(facts, r.period), domicile: state.result.domicile, period: r.period }) } : null;
+    state.calGaps = r && state.result && !(facts.owner && r.staff && facts.owner !== r.staff) ? { key: r.key, items: calendarGaps({ prev: r.calendar, fresh: monthCalendar(facts, r.period), domicile: state.result.domicile, period: r.period }) } : null;
     const hint = all.find((x) => x.primary)?.id ?? c.hint ?? null;
     state.calendar = { ...c, calendars: cals, hint, facts: { ...facts, from: timeMin }, synced: new Date().toISOString() };
     await safe(() => store.putSetting(CAL_SETTING, state.calendar));
@@ -617,7 +653,7 @@ async function disconnectCalendar() {
  */
 function historyFor(record, months) {
   const key = store.monthKey(record.period);
-  return months.filter((m) => m.person === record.person && store.monthKey(m.period) < key && (m.plan || m.exec)).map((m) => ({ period: m.period, plan: m.plan ?? null, exec: m.exec ?? null }));
+  return months.filter((m) => store.samePilot(m, record) && store.monthKey(m.period) < key && (m.plan || m.exec)).map((m) => ({ period: m.period, plan: m.plan ?? null, exec: m.exec ?? null }));
 }
 
 /** שורות ההשוואה שמוצגות. FLT+DH חוזר על הקרדיט של אותן טיסות, ולכן לא מוצג ולא נספר. */
@@ -1274,8 +1310,9 @@ function bindResults(root) {
 /** הסיכום של חודש שמור לפי החוקים והקוד הנוכחיים, ולא זה שנשמר בהרצה האחרונה שלו. */
 function currentSummary(m, months) {
   if (!state.rulesData || !(m.plan || m.exec)) return m.summary ?? {};
+  const cal = calendarFor(m);
   try {
-    return summarize(evaluate({ rulesData: state.rulesData, plan: m.plan, exec: m.exec, answers: m.answers ?? {}, history: historyFor(m, months), calendar: m.calendar ?? monthCalendar(calendarFacts(), m.period), reopen: m.calendarIgnored ?? [], calendarHistory: m.calendarHistory ?? null }));
+    return summarize(evaluate({ rulesData: state.rulesData, plan: m.plan, exec: m.exec, answers: m.answers ?? {}, history: historyFor(m, months), calendar: cal.saved ?? cal.fresh, reopen: m.calendarIgnored ?? [], calendarHistory: cal.saved ? m.calendarHistory ?? null : null }));
   } catch {
     return m.summary ?? {};
   }

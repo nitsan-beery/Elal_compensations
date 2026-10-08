@@ -65,6 +65,8 @@ function parseHeader(page, warnings) {
   const text = pageText(page);
   const period = text.match(/Period:\s*(\d{2})([A-Za-z]{3})(\d{2})\s*-\s*(\d{2})([A-Za-z]{3})(\d{2})/);
   const employee = text.match(/\bfor\s+([A-Z][A-Z'\- ]*),\s*([A-Z][A-Z'\- ]*?)\s+NetLine/);
+  // מספר העובד, בכותרת העמוד: "TLVELY/CREW/052616/0162" (כמו "(052616)" ברומה).
+  const staff = text.match(/\/CREW\/(\d+)\//);
   const printed = text.match(/printed by\s+(\S+)\s+(\d{2}[A-Za-z]{3}\d{2}\s+\d{2}:\d{2})/);
 
   if (!period) {
@@ -78,7 +80,7 @@ function parseHeader(page, warnings) {
   }
 
   return {
-    employee: employee ? { last: employee[1].trim(), first: employee[2].trim() } : null,
+    employee: employee ? { last: employee[1].trim(), first: employee[2].trim(), id: staff?.[1] ?? null } : null,
     period: { year, month, from: Number(period[1]), to: Number(period[4]) },
     printed: printed ? { by: printed[1], at: printed[2] } : null,
   };
