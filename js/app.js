@@ -377,6 +377,10 @@ function calendarParts(c) {
   if (!c) {
     return { label: '<span class="cal-label">יומן: לא מחובר</span>', buttons: '<button type="button" class="btn" data-cal="connect">חיבור יומן</button>', infoHtml: '' };
   }
+  // יומן של טייס אחר: בחודש שלו אין "מעודכן ל…", פרטי היומן וכפתור עדכון, רק ניתוק (בעל המוצר, 08/10/2026).
+  if (foreignCalendar(state.record)) {
+    return { label: '', buttons: '<button type="button" class="btn" data-cal="disconnect">ניתוק יומן</button>', infoHtml: '' };
+  }
   const n = state.result?.calendarCrew ?? 0;
   const when = state.calBusy ? 'מתעדכן…' : c.synced ? `מעודכן ל-${stamp(c.synced)}` : 'עוד לא עודכן';
   const noData = c.synced && !c.facts?.flights?.length;
@@ -586,7 +590,8 @@ async function connectCalendar(clientId, cals, { manual = false } = {}) {
  */
 async function syncCalendar(pending = calendarToken()) {
   const c = state.calendar;
-  if (!c || state.calBusy || !pending) return;
+  // יומן של טייס אחר אינו מתעדכן בחודש של טייס אחר (בעל המוצר, 08/10/2026).
+  if (!c || state.calBusy || !pending || foreignCalendar(state.record)) return;
   state.calBusy = true;
   state.calError = null;
   renderCalendarBar();
@@ -1355,7 +1360,8 @@ async function renderHistory() {
 
   for (const b of root.querySelectorAll('[data-open]')) {
     b.addEventListener('click', async () => {
-      const calToken = calendarToken();
+      // בחודש של טייס אחר היומן אינו מתעדכן, ולכן גם לא מבקשים הרשאה.
+      const calToken = foreignCalendar(months.find((m) => m.key === b.dataset.open)) ? null : calendarToken();
       await openMonth(b.dataset.open);
       if (calToken) syncCalendar(calToken);
     });
