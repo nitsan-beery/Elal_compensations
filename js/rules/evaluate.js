@@ -244,6 +244,9 @@ export function evaluate({ rulesData, plan = null, exec = null, answers = {}, hi
   const opLegs = (legs) => (legs ?? []).filter((l) => l.flight && !l.dh && !l.dhd && l.type !== 'DHO' && l.type !== 'DHX');
   const monthKeys = new Set(timeline.flatMap((d) => opLegs(exec ? d.exec?.legs : d.plan?.legs).map((l) => `${d.date}|${l.flight}`)));
   out.monthFlights = monthKeys.size;
+  // יום הנחיתה בבסיס לפי מזהה הסבב, כשהוא אחרי יום ה-STD של הרגל האחרונה: לתיאור הסבב ב"תשובות שנשמרו",
+  // שם הסבב מתואר מהמזהה (בעל המוצר, 08/10/2026).
+  out.landingDays = Object.fromEntries([...planPairings, ...execPairings].filter((p) => p.shownTo).map((p) => [p.id, p.shownTo]));
   // בתכנון לבד: מה שהיומן מראה אחרת מהתכנון (בעל המוצר, 04/10/2026), עם השרשרת מתחת לכל שינוי (06/10/2026).
   out.calendarChanges = journal && mode === 'plan' ? journalRows(journal, out) : null;
   // שלבים שחזרו למצב שלפניהם: התשובות עליהם נמחקות מהחודש (בעל המוצר, 06/10/2026).

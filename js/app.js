@@ -167,6 +167,26 @@ function setupUploads() {
 
 const PARSERS = { plan: parsePlan, exec: parseExec };
 
+// גרסת הקריאה של קובצי ה-PDF. הנתונים שחולצו נשמרים בחודש, ולכן שינוי בקריאה (עמודה שנוספה, קוד שמתווסף
+// לעמודה אחרת) מעלה אותה, וחודש שנשמר בגרסה קודמת נקרא מחדש מהקבצים השמורים כשהוא נפתח (בעל המוצר,
+// 08/10/2026: HHM ב-COM של היום, ספטמבר 2026 של רון).
+const PARSE_VERSION = 1;
+
+async function reparseStale(record) {
+  if (record.parseVersion === PARSE_VERSION) return;
+  for (const kind of Object.keys(PARSERS)) {
+    if (!record[kind]) continue;
+    const file = await safe(() => store.getFile(record.key, kind), null);
+    if (!file) continue; // חודש שנשמר לפני שהקבצים נשמרו: נשאר כמו שנקרא
+    try {
+      record[kind] = await PARSERS[kind](new Uint8Array(file.bytes));
+    } catch (err) {
+      console.error(err);
+    }
+  }
+  record.parseVersion = PARSE_VERSION;
+}
+
 /**
  * קריאת קובץ. אם הקובץ הועלה לאזור הלא נכון, מזהים אותו לפי התוכן ומעבירים.
  */
@@ -198,6 +218,7 @@ async function handleFile(file, expected, calToken = null) {
     const prev = state.record;
     const record = (prev?.key === key ? prev : await safe(() => store.getMonth(key), null))
       ?? { key, period: parsed.period, plan: null, exec: null, answers: {} };
+    await reparseStale(record);
     if (kind === 'exec' && !record.plan) {
       state.notices.push({ kind: 'warn', text: 'אין קובץ תכנון לחודש הזה, ולכן אין השוואה לתכנון. אפשר להעלות אותו עכשיו.' });
     }
@@ -692,6 +713,7 @@ function summarize(res) {
 async function openMonth(key, { quiet = false } = {}) {
   const record = await safe(() => store.getMonth(key), null);
   if (!record) return;
+  await reparseStale(record);
   state.record = record;
   state.notices = [];
   state.filter = 'comp';
@@ -1114,13 +1136,17 @@ function describeQuestionId(id) {
   return `${QUESTION_KIND[kind] ?? kind} ${what}`;
 }
 
-/** "2026-07-21..2026-07-22:ATH" → "21/07–22/07 ATH". "2026-08-03:LY373" (טיסה) → "03/08 LY373". */
+/**
+ * "2026-07-21..2026-07-22:ATH" → "21/07–22/07 ATH". "2026-08-03:LY373" (טיסה) → "03/08 LY373". סבב שנחת בבסיס
+ * אחרי חצות – עד יום הנחיתה, כמו בטבלת השינויים (`landingDays`; בעל המוצר, 08/10/2026).
+ */
 function describePairingId(id) {
   const leg = String(id).match(/^(\d{4}-\d{2}-\d{2}):(.+)$/);
   if (leg) return `⁦${ddmm(leg[1])} ${leg[2]}⁩`;
   const m = String(id).match(/^(\d{4}-\d{2}-\d{2})\.\.(\d{4}-\d{2}-\d{2}):(.*)$/);
   if (!m) return id;
-  return `⁦${m[1] === m[2] ? ddmm(m[1]) : `${ddmm(m[1])}–${ddmm(m[2])}`} ${m[3]}⁩`;
+  const to = state.result?.landingDays?.[id] ?? m[2];
+  return `⁦${m[1] === to ? ddmm(m[1]) : `${ddmm(m[1])}–${ddmm(to)}`} ${m[3]}⁩`;
 }
 
 function bindResults(root) {
