@@ -616,7 +616,10 @@ function special_call(ctx, params, rule) {
     // והחלפה מרצוני אינן מזכות בקריאה מיוחדת.
     const companyLinked = companySwapToFreeDay(match, answer);
     if (match.plan && !cancelledPlan && !training && !bid && extendedPairing(ctx, params, rule, match, answer)) continue;
-    if (reported > 0 || answer?.value === 'special_call' || companyLinked || training || bid || cancelledPlan) {
+    // החלפה מרצוני והוספה בהסכמה (לפי תשובת המשתמש): S/C שהרומה רשמה על הסבב אינו הופך אותו לקריאה מיוחדת,
+    // והוא מוצג כפיצוי שאף חוק אינו מסביר (DME ‏11/03/2026 שהוחלף מרצון ב-FRA ‏10–12/03; בעל המוצר, 08/10/2026).
+    const consented = ['voluntary_swap', 'added'].includes(answer?.value);
+    if ((reported > 0 && !consented) || answer?.value === 'special_call' || companyLinked || training || bid || cancelledPlan) {
       ctx.markPairing(match.exec, 'special_call');
       const stay = awayFromBase(match.exec, ctx.tz, ctx.timeline.at(-1).date);
       if (stay.error) {
