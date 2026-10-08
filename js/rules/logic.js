@@ -550,6 +550,31 @@ function long_flight_day(ctx, params, rule) {
   }
 }
 
+/**
+ * מאיץ הדרכה לבוחנים (2024 ס' 12): סליפ הדרכה הוא סבב שבעמודת DD ברומה רשום באחת מהרגליים שלו
+ * קוד מ-`dd_codes` (MAZ, ‏RCR; בעל המוצר, 08/10/2026). הסליפים נספרים לפי ההמראה מישראל, כך שסבב
+ * שיצא בחודש הקודם אינו נספר. מהסליפ ה-`slip_threshold[צי]` בחודש – `hours` על כל סליפ.
+ * אומת: מאי 2025, הסליפ השביעי (BUS ‏22/05) → COM 02:30.
+ */
+function examiner_training_boost(ctx, params, rule) {
+  if (!ctx.hasExec) return;
+  const threshold = params.slip_threshold?.[ctx.fleet];
+  const codes = params.dd_codes ?? [];
+  const slips = ctx.execPairings
+    .filter((p) => !p.cutAtStart && p.legs.some((l) => (l.dd ?? '').split(',').some((c) => codes.includes(c.trim()))))
+    .sort((a, b) => a.from.localeCompare(b.from));
+  if (!slips.length) return;
+  if (threshold == null) {
+    ctx.review(`${rule.title}: ${slips.length} סליפי הדרכה בחודש, ואין ב-rules.json סף לצי ${ctx.fleet ?? 'לא ידוע'}. דורש בדיקה ידנית.`, rule);
+    return;
+  }
+  slips.forEach((pairing, i) => {
+    if (i + 1 < threshold) return;
+    ctx.expectPairing(pairing, keyFor(params.report_column), H(params.hours), rule,
+      `${describePairing(pairing)}: סליפ הדרכה ${i + 1} בחודש`, { explain: `סליפ ההדרכה ה-${i + 1} בחודש.` });
+  });
+}
+
 /** הפרש בין שעון לשעון, כשנחיתה אחרי חצות שייכת ליום הבא. */
 function wrapDelta(delta) {
   if (delta < -720) return delta + 1440;
@@ -1751,6 +1776,7 @@ export const LOGIC = {
   absence_month_cap,
   late_landing_home,
   long_flight_day,
+  examiner_training_boost,
   special_call,
   higher_of_planned_performed,
   lost_hours_credit,
@@ -1778,6 +1804,7 @@ export const KNOWN_PARAMS = {
   absence_month_cap: ['cap_hours'],
   late_landing_home: ['grace_minutes', 'step_minutes', 'hours_per_step', 'note_from_minutes'],
   long_flight_day: ['over_flight_hours', 'hours'],
+  examiner_training_boost: ['dd_codes', 'slip_threshold', 'hours', 'report_column'],
   special_call: ['hours', 'report_column', 'second_day_min_gap_hours', 'second_day_min_hours', 'ask_user_if_no_sc'],
   higher_of_planned_performed: ['requires_user_answer', 'excluded_when_special_call', 'excluded_when_voluntary_swap', 'shortfall_column'],
   lost_hours_credit: ['requires_user_answer', 'credit_column', 'include_min_slip_credit', 'answer_value', 'answer_label', 'merged_answer_values', 'fleets', 'plan_aircraft'],
@@ -1822,6 +1849,7 @@ export const LOGIC_ORDER = [
   'special_date_activity',
   'white_flight',
   'ulh_flight',
+  'examiner_training_boost',
   // קיצור המנוחה במיאמי מסמן את הסבב, ושני חוקי הדחייה של ס' 24.4 נשענים על הסימון.
   'short_rest_miami',
   'miami_delay',

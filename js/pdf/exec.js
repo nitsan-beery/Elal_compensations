@@ -244,7 +244,7 @@ function readLegRow(row, cols) {
     flight: c.Flt && c.Flt !== '0' ? 'LY' + c.Flt : null,
     seq: c.Seq ?? null,
     dhd: c.DHD ?? null,
-    dd: c.DD ?? null, // חסר משמעות, נשמר לתצוגה בלבד
+    dd: c.DD ?? null, // MAZ ו-RCR מסמנים סליפ הדרכה של בוחן (examiner_training_boost); השאר חסר משמעות
     org: c.ORG ?? null,
     dst: c.DST ?? null,
     pos: c.POS ?? null,
