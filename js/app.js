@@ -798,9 +798,8 @@ function renderAlerts(res) {
   }
   if (res.unknownCodes.length) {
     const open = res.unknownCodes.some((u) => !u.answer);
-    out.push(`<div class="notice ${open ? 'bad' : 'warn'}"><strong>קודים שהאפליקציה לא מכירה</strong>
+    out.push(`<div class="notice ${open ? 'bad' : 'warn'}"><strong>${esc(unknownCodesMessage(res))}</strong>
       <ul class="codes">${res.unknownCodes.map(renderUnknownCode).join('')}</ul>
-      <p class="small">כדי שהאפליקציה תדע מה מגיע על קוד חדש, ולא תשאל עליו שוב, צריך להוסיף אותו ל-<span class="num">rules.json</span>: לרשימת הקודים, ולפרמטרים של החוק שמזכה עליו. הפרטים כאן הם מה שדרוש לעדכון.</p>
       <button class="btn no-print" data-action="copy-codes">העתק פרטים</button></div>`);
   }
   if (res.reviews.length) {
@@ -818,7 +817,11 @@ function renderUnknownCode(u) {
   return `<li><span class="num">${esc(u.code)}</span> ${esc(whereOf(u))}, בתאריכים ${u.dates.map(ddmm).join(', ')}${lines}</li>`;
 }
 
-const whereOf = (u) => (u.where === 'both' ? 'בתכנון ובביצוע' : u.where === 'plan' ? 'בתכנון' : 'בביצוע');
+/** הכותרת: קודים ועמודות לא מוכרים, ולמי להעביר (בעל המוצר, 08/10/2026). */
+const unknownCodesMessage = (res) =>
+  `האפליקציה זיהתה קודים לא מוכרים (${[...new Set(res.unknownCodes.map((u) => u.code))].join(', ')}) אנא העבר לניצן לבדיקה`;
+
+const whereOf = (u) => (u.column ? 'עמודה ברומה' : u.where === 'both' ? 'בתכנון ובביצוע' : u.where === 'plan' ? 'בתכנון' : 'בביצוע');
 
 /** שורות הפירוט של קוד לא מוכר, בלי HTML: אותן שורות מוצגות ומועתקות. */
 function unknownCodeLines(u) {
@@ -832,7 +835,7 @@ function unknownCodeLines(u) {
 
 /** הפרטים כטקסט, להעתקה ולשליחה לעדכון האפליקציה. */
 function unknownCodesText(res) {
-  const head = `קודים שהאפליקציה לא מכירה – ${monthName(res.period)} · חוקים ${res.rulesVersion}`;
+  const head = `${unknownCodesMessage(res)} – ${monthName(res.period)} · חוקים ${res.rulesVersion}`;
   const items = res.unknownCodes.map((u) => [
     `${u.code} ${whereOf(u)}, בתאריכים ${u.dates.map(ddmm).join(', ')}`,
     ...unknownCodeLines(u).map((l) => `  ${l}`),

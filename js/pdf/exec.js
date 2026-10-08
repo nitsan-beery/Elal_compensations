@@ -5,10 +5,18 @@
 // העמודות משתנות מחודש לחודש: מופיעות רק עמודות שיש להן ערך באותו חודש.
 
 import { extractPages, toRows, centerX, pageText } from './extract.js';
-import { hhmmToMin, toNumber, isoDate, daysInMonth } from '../time.js';
+import { hhmmToMin, minToHhmm, toNumber, isoDate, daysInMonth } from '../time.js';
 
 /** עמודות שהאפליקציה יודעת להשתמש בהן. חסרה אחת – מדווחים, לא מנחשים. */
-const KNOWN_DAY_COLUMNS = ['Day', 'Src', 'Details', 'Credit', 'Rig', 'FLT', 'TAB', 'DH', 'SIMD', 'SIM', 'CORS', 'VAC', 'SICK', 'SCKFM', 'SBY', 'MEAL', 'COM', 'S/C', 'PDFT', 'ABR', 'MPPD', 'PICK', 'P'];
+const KNOWN_DAY_COLUMNS = ['Day', 'Src', 'Details', 'Credit', 'Rig', 'FLT', 'TAB', 'DH', 'SIMD', 'SIM', 'CORS', 'VAC', 'SICK', 'SCKFM', 'SBY', 'MEAL', 'COM', 'HHM', 'S/C', 'PDFT', 'ABR', 'MPPD'];
+/** עמודות שאינן נוגעות לקרדיט ולפיצויים: לא נקראות ולא מוצגות (בעל המוצר, 08/10/2026). */
+const IGNORED_DAY_COLUMNS = ['PICK', 'PICKUP', 'IPP'];
+/**
+ * עמודות פיצוי שהסיכום של הרומה סופר בתוך COM: HHM הוא הפיצוי על נחיתה מאוחרת בארץ (בעל המוצר,
+ * 08/10/2026; ספטמבר 2026: HHM 00:30 ב-24/09, ובסיכום COM 00:30 ו-HHM 00:30, בלי COM באף יום).
+ * הערך שלהן מתווסף ל-COM של היום.
+ */
+const COM_PARTS = ['HHM'];
 const LEG_COLUMNS = ['Details', 'Flt', 'Seq', 'DHD', 'DD', 'ORG', 'DST', 'POS', 'STD', 'STA', 'ATD', 'ATA', 'SkdFlt', 'ActFlt', 'SkdDur', 'ActDur', 'Time', 'Occ'];
 
 /** עמודות שהחוקים נשענים עליהן. היעדרן מדווח למשתמש. */
@@ -40,10 +48,18 @@ export async function parseExec(data) {
   let legCols = null;
   const legColumns = new Set();
   let current = null;
+  const unknownColumns = new Set();
 
   for (const page of pages) {
     for (const row of toRows(page.items)) {
-      if (isDayHeaderRow(row)) { dayCols = buildColumnMap(row, KNOWN_DAY_COLUMNS); legCols = null; continue; }
+      if (isDayHeaderRow(row)) {
+        // גם עמודה שמתעלמים ממנה, או שאינה מוכרת, נכנסת למפה, כדי שהערכים שלה לא יישויכו לעמודה שלידה.
+        const unknown = row.map((i) => i.s).filter((s) => isUnknownColumn(s));
+        unknown.forEach((c) => unknownColumns.add(c));
+        dayCols = buildColumnMap(row, [...KNOWN_DAY_COLUMNS, ...IGNORED_DAY_COLUMNS, ...unknown]);
+        legCols = null;
+        continue;
+      }
       if (isLegHeaderRow(row)) { legCols = buildColumnMap(row, LEG_COLUMNS); Object.keys(legCols).forEach((c) => legColumns.add(c)); continue; }
       if (!dayCols) continue; // עדיין בכותרת הדוח
 
@@ -65,7 +81,7 @@ export async function parseExec(data) {
     }
   }
 
-  const present = dayCols ? Object.keys(dayCols) : [];
+  const present = dayCols ? Object.keys(dayCols).filter((c) => KNOWN_DAY_COLUMNS.includes(c)) : [];
   const missing = REQUIRED_COLUMNS.filter((c) => !present.includes(c));
   if (!dayCols) throw new Error('לא נמצאה טבלת הימים ברומת הביצוע.');
   // הגרסה המקופלת של הרומה: מסלול בעמודת Details (TLV-MXP) בלי שורות טיסה. בלי מספרים ושעות אין מה להשוות.
@@ -84,6 +100,8 @@ export async function parseExec(data) {
     ...header,
     columns: present,
     missingColumns: missing,
+    // עמודות בטבלת הימים שהאפליקציה אינה מכירה: מוצגות למשתמש עם הקודים הלא מוכרים (`collectUnknownCodes`).
+    unknownColumns: [...unknownColumns],
     legColumns: [...legColumns],
     days,
     totals: pickBestTotals(totalsRows),
@@ -133,7 +151,16 @@ const isLegHeaderRow = (row) => {
   return t.includes('STD') && t.includes('ATA') && t.includes('ORG');
 };
 
-/** כותרת → מרכז אופקי. רק עמודות שהקוד מכיר; עמודה חדשה תדווח כלא מוכרת. */
+/**
+ * עמודה בכותרת שאינה מוכרת ואינה ברשימת ההתעלמות. בפורמט ה-iPad הכותרת הימנית נחתכת ("PI", ‏"AB",
+ * ‏"PD"), ולכן תחילית של עמודה מוכרת אינה עמודה חדשה.
+ */
+function isUnknownColumn(s) {
+  const named = [...KNOWN_DAY_COLUMNS, ...IGNORED_DAY_COLUMNS];
+  return !!s && !named.some((c) => c === s || c.startsWith(s));
+}
+
+/** כותרת → מרכז אופקי, לעמודות שברשימה. */
 function buildColumnMap(row, known) {
   const map = {};
   for (const it of row) if (known.includes(it.s)) map[it.s] = centerX(it);
@@ -177,8 +204,15 @@ function fillDayRow(day, row, cols) {
   day.src = cells.Src ?? null;
   day.details = cells.Details ?? null;
   for (const [col, raw] of Object.entries(cells)) {
-    if (col === 'Day' || col === 'Src' || col === 'Details') continue;
+    if (col === 'Day' || col === 'Src' || col === 'Details' || IGNORED_DAY_COLUMNS.includes(col)) continue;
     day.values[col] = parseValue(raw);
+  }
+  for (const part of COM_PARTS) {
+    const v = day.values[part];
+    if (v?.kind !== 'duration') continue;
+    const min = (day.values.COM?.min ?? 0) + v.min;
+    day.values.COM = { kind: 'duration', min, raw: minToHhmm(min) };
+    delete day.values[part];
   }
 }
 

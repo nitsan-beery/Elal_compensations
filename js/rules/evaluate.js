@@ -108,7 +108,7 @@ export function evaluate({ rulesData, plan = null, exec = null, answers = {}, hi
     questions: [],
     // תשובות שנשאלו רק בגלל תשובה אחרת: שינוי שלה מוחק גם אותן (`splitSwappedElsewhere`).
     dependentAnswers,
-    unknownCodes: collectUnknownCodes(timeline, codes, supported),
+    unknownCodes: collectUnknownCodes(timeline, codes, supported, exec?.unknownColumns),
     comparison: [],
     totals: [],
     freeDays: null,
@@ -1360,8 +1360,10 @@ function isIgnoredPlanCode(code, codes) {
  * קוד שאינו מוכר מוצג למשתמש עם כל מה שיש עליו בקבצים: התאריכים, ומה שהדוח רשם באותם ימים.
  * זה מה שדרוש כדי לעדכן את `rules.json` לפי הקוד החדש (בקשת בעל המוצר, 23/09/2026).
  * `answer` מתווסף אחר כך, אם המשתמש נשאל על הקוד וענה (`ctx.explainCode`).
+ * עמודה בטבלת הימים ברומה שהאפליקציה אינה מכירה (`unknownColumns` מ-js/pdf/exec.js) מוצגת באותה
+ * רשימה (`column`), עם הימים שיש בה ערך, ולא נזרקת בשקט (בעל המוצר, 08/10/2026; HHM בספטמבר 2026).
  */
-function collectUnknownCodes(timeline, codes, supported) {
+function collectUnknownCodes(timeline, codes, supported, unknownColumns = []) {
   const found = new Map();
   const add = (code, where, day) => {
     const k = `${where}|${code}`;
@@ -1374,6 +1376,12 @@ function collectUnknownCodes(timeline, codes, supported) {
   for (const day of timeline) {
     for (const c of day.plan?.codes ?? []) if (classifyCode(c, codes, supported) === 'unknown') add(c, 'plan', day);
     for (const c of execCodesOf(day, codes)) if (classifyCode(c, codes, supported) === 'unknown') add(c, 'exec', day);
+  }
+  for (const col of unknownColumns) {
+    const days = timeline.filter((d) => { const v = d.exec?.values?.[col]; return v && (v.min || v.count || v.raw); });
+    if (!days.length) continue;
+    found.set(`column|${col}`, { code: col, where: 'exec', column: true, dates: days.map((d) => d.date),
+      report: days.map((d) => ({ date: d.date, text: reportedCells(d) })) });
   }
   return [...found.values()];
 }
