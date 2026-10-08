@@ -704,7 +704,11 @@ function extendedPairing(ctx, params, rule, match, answer) {
   const second = ctx.rulesWithLogic('second_unplanned_activity')[0]?.logic.params;
   const paid = (!days.length || ctx.paidOn(exec, params.report_column ?? 'S/C', 'sc', days.length * H(params.hours))) &&
     (!ext.second.length || ctx.paidOn(exec, second.report_column ?? 'COM', 'com', ext.second.length * H(second.hours)));
-  const a = ctx.answer(id) ?? (paid ? { value: 'company' } : null);
+  // סבב שהוחלף באותם ימים בשינוי ביוזמת החברה או בזכייה במכרז: התשובה עליו כבר אומרת שהימים הנוספים
+  // אינם בהסכמה, ועל יום שלא תוכנן בו כלום מגיעה קריאה מיוחדת, כמו ב-`companySwapToFreeDay` (בעל המוצר,
+  // 08/10/2026; רון, ספטמבר 2026: WAW ב-10/09 שהוחלף ב-BCN ‏09–11/09).
+  const swapped = match.how === 'dates' && ['replaced', 'bid'].includes(answer?.value);
+  const a = ctx.answer(id) ?? (paid || swapped ? { value: 'company' } : null);
   const list = ext.days.map(dayOf).join(', ');
   if (!a) {
     const due = [days.length ? 'קריאה מיוחדת' : null, ext.second.length ? 'פיצוי על פעילות שנייה באותה יממה' : null].filter(Boolean);
@@ -728,7 +732,7 @@ function extendedPairing(ctx, params, rule, match, answer) {
   }
   for (const d of days) {
     ctx.expectPairing(exec, 'sc', H(params.hours), rule, `${flightsOf(exec)}: יממה ${dayOf(d)}.`,
-      { date: d, dates: [d], perDay: true, explain: 'הסבב התארך ליום שלא תוכנן בו כלום.' });
+      { date: d, dates: [d], perDay: true, explain: swapped ? '' : 'הסבב התארך ליום שלא תוכנן בו כלום.' });
   }
   return true;
 }
@@ -897,11 +901,14 @@ function higher_of_planned_performed(ctx, params, rule) {
     const paidOn = extra <= 0 ? null
       : findShortfallPaid(ctx, m, extra, column, reportColumn) ?? findShortfallPaid(ctx, m, extra, column, reportColumn, true);
     const moved = paidOn && paidOn !== exec ? paidOn : null;
-    const sc = alsoSc ? ' וקריאה מיוחדת על הטיסה שבוצעה' : '';
+    // הטיסה שבוצעה באותם ימים נמשכה גם לימים שלא תוכנן בהם כלום: קריאה מיוחדת עליהם (`extendedPairing`).
+    const freeDays = !alsoSc && ['replaced', 'bid'].includes(answer?.value) && match.exec === exec ? extensionDays(ctx, match)?.free ?? [] : [];
+    const sc = alsoSc ? ' וקריאה מיוחדת על הטיסה שבוצעה'
+      : freeDays.length ? `${which ? ',' : ''} וקריאה מיוחדת על ${freeDays.map(dayOf).join(' ועל ')}` : '';
     // `pairingId`: רק בשורה של הסבב, ולא מתחת לטיסה אחרת שבוצעה באותם ימים.
     ctx.note(match.plan.from, `${swapWord(answer)}: קרדיט של הטיסה הארוכה מבין השתיים${which}${sc}.`, rule, { pairingId: match.plan.id });
-    // ביום של הטיסה שבוצעה, כשהוא אחר.
-    if (exec.from !== match.plan.from) ctx.note(exec.from, `${swapWord(answer)}: קרדיט על הטיסה שבוצעה${sc ? ' וקריאה מיוחדת' : ''}.`, rule, { pairingId: exec.id });
+    // ביום של הטיסה שבוצעה, כשהוא אחר ובשורה משלו.
+    if (exec.from !== match.plan.from && match.exec !== exec) ctx.note(exec.from, `${swapWord(answer)}: קרדיט על הטיסה שבוצעה${sc ? ' וקריאה מיוחדת' : ''}.`, rule, { pairingId: exec.id });
     if (extra <= 0) continue;
 
     const where = moved ? `, ונרשם על ${describePairing(moved)}` : '';
