@@ -108,6 +108,19 @@ async function init() {
 function registerServiceWorker() {
   if (!('serviceWorker' in navigator) || location.protocol === 'file:') return;
   navigator.serviceWorker.register('sw.js').catch(() => { /* האפליקציה עובדת גם בלי */ });
+  showVersion();
+  navigator.serviceWorker.addEventListener('controllerchange', showVersion);
+}
+
+/**
+ * מספר הגרסה בכותרת החלון, אחרי השם (בעל המוצר, 08/10/2026): באפליקציה המותקנת במחשב "… - מה מגיע לי v173".
+ * המספר הוא של המטמון של ה-service worker (`CACHE` ב-sw.js), שעולה בכל שינוי בקבצי האפליקציה, כך שאין
+ * מספר נוסף לעדכן. בזמן עדכון יש שני מטמונים, והחדש הוא הגבוה.
+ */
+async function showVersion() {
+  const keys = await caches.keys().catch(() => []);
+  const version = Math.max(0, ...keys.map((k) => Number(k.match(/^elal-compensations-v(\d+)$/)?.[1] ?? 0)));
+  if (version) document.title = `מה מגיע לי v${version}`;
 }
 
 function showBanner(kind, html) {
