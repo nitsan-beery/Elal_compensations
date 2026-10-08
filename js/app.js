@@ -876,7 +876,8 @@ function legalNote(res) {
 function renderAlerts(res) {
   const out = [];
   if (res.warnings.length) {
-    out.push(`<div class="notice warn"><strong>אזהרות</strong><ul>${res.warnings.map((w) => `<li>${esc(w)}</li>`).join('')}</ul></div>`);
+    // בלי כותרת "אזהרות" ובלי תבליטים: רק ההודעות, כל אחת בשורה משלה (בעל המוצר, 08/10/2026).
+    out.push(`<div class="notice warn">${res.warnings.map((w) => `<div>${esc(w)}</div>`).join('')}</div>`);
   }
   if (res.unknownCodes.length) {
     const open = res.unknownCodes.some((u) => !u.answer);
