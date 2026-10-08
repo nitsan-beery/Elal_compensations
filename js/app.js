@@ -1263,7 +1263,7 @@ async function renderHistory() {
     </div>
     <div class="card">
       <h2>גיבוי ושחזור</h2>
-      <p class="small muted">קובץ הגיבוי מכיל את קובצי התכנון והביצוע, את הנתונים שחולצו מהם ואת התשובות שלך, כולל שמות, מספרי טלפון ומספרי סבבים. שמור אותו במקום פרטי. אפשר להעביר איתו את החודשים השמורים בין ה‑iPad למחשב.</p>
+      <p class="small muted">קובץ הגיבוי מכיל את קובצי התכנון והביצוע, את הנתונים שחולצו מהם ואת התשובות שלך. שמור אותו במקום פרטי. אפשר להעביר איתו את החודשים השמורים בין ה‑iPad למחשב.</p>
       <div class="row">
         <button class="btn" data-action="backup" ${months.length ? '' : 'disabled'}>גיבוי נתונים</button>
         <label class="btn">שחזר מקובץ<input type="file" accept="application/json,.json" hidden data-action="restore"></label>
