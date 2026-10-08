@@ -1362,7 +1362,7 @@ async function renderHistory() {
   }
   for (const b of root.querySelectorAll('[data-delete]')) {
     b.addEventListener('click', async () => {
-      if (!confirm('למחוק את החודש מהחודשים השמורים? התשובות שנתת עליו יימחקו.')) return;
+      if (!await confirmDialog('למחוק את החודש מהחודשים השמורים? התשובות שנתת עליו יימחקו.', 'מחק')) return;
       await store.deleteMonth(b.dataset.delete);
       if (state.record?.key === b.dataset.delete) { state.record = null; state.result = null; state.notices = []; renderUploadState(); renderResults(); }
       renderHistory();
@@ -1375,8 +1375,8 @@ async function renderHistory() {
   ));
   // כל החודשים השמורים, עם התשובות וקובצי ה-PDF; חיבור היומן נשאר (בעל המוצר, 08/10/2026).
   $('[data-action="clear"]', root)?.addEventListener('click', async () => {
-    if (!confirm(`למחוק את כל החודשים השמורים (${months.length})? הנתונים יימחקו מהמכשיר. ` +
-      'ניתן יהיה לשחזר אותם רק מקובץ גיבוי. מומלץ לשמור את הנתונים לפני מחיקה.')) return;
+    if (!await confirmDialog(`למחוק את כל החודשים השמורים (${months.length})? הנתונים יימחקו מהמכשיר. ` +
+      'ניתן יהיה לשחזר אותם רק מקובץ גיבוי. מומלץ לשמור את הנתונים לפני מחיקה.', 'מחק')) return;
     await store.clearMonths();
     if (state.record) { state.record = null; state.result = null; state.notices = []; }
     for (const kind of Object.keys(PARSERS)) dropFileLink(kind);
@@ -1398,6 +1398,23 @@ async function renderHistory() {
       alert(`השחזור נכשל: ${err.message}`);
     }
     renderHistory();
+  });
+}
+
+/**
+ * חלון אישור עם הכפתורים `okLabel` ו"ביטול", במקום `confirm` של הדפדפן, שהכפתורים בו OK ו-Cancel (בעל המוצר, 08/10/2026).
+ * הפוקוס על "ביטול", כך ש-Enter או Esc אינם מוחקים.
+ */
+function confirmDialog(message, okLabel) {
+  const dlg = document.createElement('dialog');
+  dlg.className = 'dialog no-print';
+  dlg.innerHTML = `<form method="dialog"><p>${esc(message)}</p>
+    <div class="row"><button class="btn danger" value="ok">${esc(okLabel)}</button>
+      <button class="btn" value="cancel" autofocus>ביטול</button></div></form>`;
+  document.body.append(dlg);
+  return new Promise((resolve) => {
+    dlg.addEventListener('close', () => { dlg.remove(); resolve(dlg.returnValue === 'ok'); });
+    dlg.showModal();
   });
 }
 
