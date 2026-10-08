@@ -83,6 +83,7 @@ export function evaluate({ rulesData, plan = null, exec = null, answers = {}, hi
     ? { legalRestMin: slip.legal_rest_hours * 60, reportMin: slip.report_minutes_before_std ?? 0, postMin: legalRest?.postMin ?? 0 } : null;
   const execPairings = exec ? buildPairings(timeline, domicile, (d) => d.exec?.legs, fdp) : [];
   const reportDays = exec ? attachReportTails(execPairings, timeline, domicile, codes, answers) : [];
+  markLandingDays(planPairings, execPairings, timeline, domicile, plan?.stationOffsets ?? null);
   const dependentAnswers = {};
   // ההחלפות עם טיסה אחרת (`splitSwappedElsewhere`) והפעילות במקום סבב (`explainByActivity`) – אחרי
   // שהשרשרת מהיומן הוסיפה את התשובות שלה, לפני החוקים.
@@ -1482,6 +1483,31 @@ function reportEnd(pairing, execPairings, timeline, domicile) {
   const shared = execPairings.some((p) => p !== pairing && p.dates.includes(date));
   const min = shared ? (home.ata ?? home.sta) : dayOf(timeline, date)?.exec?.values?.TAB?.min;
   return min ? { date, min } : null;
+}
+
+/**
+ * יום הנחיתה בבסיס, לתיאור הסבב (`shownTo`, ‏`describePairing`): סבב שחוזר אחרי חצות מתואר עד היום
+ * שבו נחת, בשני הצדדים (בעל המוצר, 08/10/2026; ‏LY392 מ-BCN: 23/09–25/09, ולא 23/09–24/09). בביצוע –
+ * היום האחרון שהרומה רושמת על הסבב (`reportDates`, כולל עיכוב של יותר מיממה; בסוף החודש – הרגל
+ * חוצה את חצות); בתכנון – "+1" ליד שעת הנחיתה, או המראה בשעון הבסיס אחרי שעת הנחיתה. ה-`skdDur` של
+ * רגל בתכנון אינו משמש כאן: בטיסת לילה הוא ה-FT של כל הסבב (LY5110 מ-TBS ב-15/04/2025: 6:56).
+ * רגל שהמריאה ביום שלפני שורת הרגל ("-1") כבר רשומה ביום הנחיתה.
+ */
+function markLandingDays(planPairings, execPairings, timeline, domicile, stationOffsets) {
+  const dayAfter = (date) => new Date(Date.parse(date) + 86400000).toISOString().slice(0, 10);
+  for (const p of execPairings) {
+    const last = reportDates(p, timeline, domicile).at(-1);
+    const leg = p.legs.at(-1);
+    if (last > p.to) p.shownTo = last;
+    else if (!p.cutAtEnd && leg?.dst === domicile && crossesMidnight(leg) && p.to === timeline.at(-1)?.date) p.shownTo = dayAfter(p.to);
+  }
+  const at = { domicile, stationOffsets };
+  for (const p of planPairings) {
+    const leg = p.legs.at(-1);
+    if (p.cutAtEnd || leg?.dst !== domicile || !leg.dep || !leg.arr || leg.arr.foreign || leg.dep.prevDay) continue;
+    const off = leg.dep.foreign ? stationOffsetAt(at, leg.org, leg.date) : 0;
+    if (leg.arr.nextDay || (off != null && leg.dep.min - off > leg.arr.min)) p.shownTo = dayAfter(p.to);
+  }
 }
 
 /** העמודות שמתפצלות ליום שאחרי נחיתה אחרי חצות, יחד עם הקרדיט. */

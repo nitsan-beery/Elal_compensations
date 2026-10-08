@@ -208,7 +208,8 @@ function readTimedRow(c, anchorItem) {
   const [depRaw, arrRaw] = a && /\s/.test(a) ? a.split(/\s+/) : [a, b];
   const m = arrRaw?.match(/^(!?\d{4})(?:\+(\d))?([A-Z]{3})?$/);
   const dep = clockToMin(depRaw);
-  return { org, dep: dep && prevDay ? { ...dep, prevDay } : dep, arr: clockToMin(m ? m[1] : arrRaw), dst: m?.[3] ?? null };
+  const arr = clockToMin(m ? m[1] : arrRaw);
+  return { org, dep: dep && prevDay ? { ...dep, prevDay } : dep, arr: arr && m?.[2] ? { ...arr, nextDay: Number(m[2]) } : arr, dst: m?.[3] ?? null };
 }
 
 // ---------- משך רגלי DH ----------

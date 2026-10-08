@@ -146,7 +146,9 @@ export function describePairing(p) {
   if (!p) return '—';
   const parts = pairingParts(p);
   if (parts.length > 1) return parts.map(describePairing).join(' + ');
-  const when = p.from === p.to ? dayOf(p.from) : `${dayOf(p.from)}–${dayOf(p.to)}`;
+  // עד יום הנחיתה בבסיס (`shownTo`), ולא עד יום ה-STD של הרגל האחרונה (בעל המוצר, 08/10/2026).
+  const to = p.shownTo ?? p.to;
+  const when = p.from === to ? dayOf(p.from) : `${dayOf(p.from)}–${dayOf(to)}`;
   return `⁦${when} ${describeRoute(p)}⁩`;
 }
 
@@ -170,7 +172,8 @@ export function pairingParts(p) {
     parts.at(-1).push(leg);
   });
   if (parts.length < 2) return [p];
-  return parts.map((legs) => ({ from: legs[0].date, to: legs.at(-1).date, dates: [...new Set(legs.map((l) => l.date))], legs }));
+  return parts.map((legs, i) => ({ from: legs[0].date, to: legs.at(-1).date, dates: [...new Set(legs.map((l) => l.date))], legs,
+    ...(i === parts.length - 1 && p.shownTo ? { shownTo: p.shownTo } : {}) }));
 }
 
 const isAirReturnLeg = (l) => l.org != null && l.org === l.dst;
@@ -189,7 +192,8 @@ export function fdpParts(p, fdp) {
     parts.at(-1).push(leg);
   });
   if (parts.length < 2) return [p];
-  return parts.map((legs) => ({ from: legs[0].date, to: legs.at(-1).date, dates: [...new Set(legs.map((l) => l.date))], legs }));
+  return parts.map((legs, i) => ({ from: legs[0].date, to: legs.at(-1).date, dates: [...new Set(legs.map((l) => l.date))], legs,
+    ...(i === parts.length - 1 && p.shownTo ? { shownTo: p.shownTo } : {}) }));
 }
 
 /**

@@ -52,6 +52,12 @@ export function calendarView(calendar, domicile, period) {
   const covered = [...byDate.keys(), ...standby.map((x) => x.date)].sort();
   if (!covered.length) return null;
   const pairings = buildPairings([...byDate.keys()].sort().map((date) => ({ date, legs: byDate.get(date) })), domicile, (d) => d.legs);
+  // תיאור הסבב עד יום הנחיתה בבסיס, כמו בתכנון ובביצוע (`markLandingDays` ב-js/rules/evaluate.js).
+  for (const p of pairings) {
+    const leg = p.legs.at(-1);
+    const landed = leg?.dst === domicile && leg.staAbs != null ? new Date(Math.floor(leg.staAbs / 1440) * 86400000).toISOString().slice(0, 10) : null;
+    if (landed > p.to) p.shownTo = landed;
+  }
   // תחילת הטווח שנקרא מהיומן (`from`), כשהיא ידועה: סבב בימים הראשונים של החודש שאין בהם כלום ביומן
   // ירד ממנו, ולא "עוד לא נקרא".
   const from = calendar.from ? baseTime(calendar.from, domicile)?.date : null;
