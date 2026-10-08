@@ -386,6 +386,17 @@ function calendarParts(c) {
       infoHtml: '',
     };
   }
+  // ביומן אין אף טיסה מהחודש הפתוח: גם זה בשורת היומן, במקום "יומן מעודכן ל…", ולא כאזהרה (בעל המוצר,
+  // 08/10/2026). כשהמשתמש ענה על הרכב הצוות, ההודעה אומרת שההרכבים מהתשובות (04/10/2026).
+  if (!state.calBusy && state.result?.calendarNoMonth) {
+    const answered = Object.keys(state.record?.answers ?? {}).some((id) => /^(crew|night_crew|white):/.test(id));
+    return {
+      label: `<span class="cal-label">לא נמצאו ביומן טיסות של החודש הזה.${answered ? ' הרכבי הצוותים נלקחו מהתשובות שנתת.' : ''} ודא שבוצע סנכרון של היומן מהאורגנייזר.</span>`,
+      buttons: `<button type="button" class="btn" data-cal="sync">עדכון</button>
+    <button type="button" class="btn" data-cal="disconnect">ניתוק יומן</button>`,
+      infoHtml: '',
+    };
+  }
   const n = state.result?.calendarCrew ?? 0;
   const when = state.calBusy ? 'מתעדכן…' : c.synced ? `מעודכן ל-${stamp(c.synced)}` : 'עוד לא עודכן';
   const noData = c.synced && !c.facts?.flights?.length;
@@ -427,15 +438,8 @@ function renderCalendarBar() {
   const notices = [];
   if (state.calError) notices.push(`<div class="notice bad">${esc(state.calError)}</div>`);
   else if (c?.synced && !c.facts?.flights?.length) notices.push(`<div class="notice warn">${esc(CAL_NO_DATA)}</div>`);
-  // יומן של טייס אחר: אינו משמש בחודש, ושאר ההודעות על היומן אינן נוגעות לו. ההודעה על כך בשורת היומן,
-  // במקום "יומן מעודכן ל…" (`calendarParts`; בעל המוצר, 08/10/2026).
-  else if (c && state.result && state.calForeign) { /* בשורת היומן */ }
-  // ביומן אין אף טיסה מהחודש הפתוח (בעל המוצר, 04/10/2026).
-  // כשהמשתמש ענה על הרכב הצוות, ההודעה אומרת שההרכבים מהתשובות (בעל המוצר, 04/10/2026).
-  else if (c && !state.calBusy && state.result?.calendarNoMonth) {
-    const answered = Object.keys(state.record?.answers ?? {}).some((id) => /^(crew|night_crew|white):/.test(id));
-    notices.push(`<div class="notice warn">לא נמצאו ביומן טיסות של החודש הזה.${answered ? ' הרכבי הצוותים נלקחו מהתשובות שנתת.' : ''} ודא שבוצע סנכרון של היומן מהאורגנייזר.</div>`);
-  }
+  // יומן של טייס אחר, וחודש שאין ביומן אף טיסה שלו: ההודעה בשורת היומן, במקום "יומן מעודכן ל…"
+  // (`calendarParts`; בעל המוצר, 08/10/2026).
   // בתכנון לבד, טיסה שירדה מהיומן היא שינוי בסבב, והוא נשאל בשאלה עליו. לכן אין עליה הודעה (בעל
   // המוצר, 06/10/2026).
   const gaps = (state.calGaps && state.calGaps.key === state.record?.key ? state.calGaps.items : [])
