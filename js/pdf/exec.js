@@ -8,9 +8,9 @@ import { extractPages, toRows, centerX, pageText } from './extract.js';
 import { hhmmToMin, minToHhmm, toNumber, isoDate, daysInMonth } from '../time.js';
 
 /** עמודות שהאפליקציה יודעת להשתמש בהן. חסרה אחת – מדווחים, לא מנחשים. */
-const KNOWN_DAY_COLUMNS = ['Day', 'Src', 'Details', 'Credit', 'Rig', 'FLT', 'TAB', 'DH', 'SIMD', 'SIM', 'CORS', 'VAC', 'SICK', 'SCKFM', 'SBY', 'MEAL', 'COM', 'HHM', 'S/C', 'PDFT', 'ABR', 'MPPD'];
+const KNOWN_DAY_COLUMNS = ['Day', 'Src', 'Details', 'Credit', 'Rig', 'FLT', 'TAB', 'DH', 'SIMD', 'SIM', 'CORS', 'VAC', 'SICK', 'SCKFM', 'SBY', 'MEAL', 'COM', 'HHM', 'S/C', 'PDFT', 'ABR'];
 /** עמודות שאינן נוגעות לקרדיט ולפיצויים: לא נקראות ולא מוצגות (בעל המוצר, 08/10/2026). */
-const IGNORED_DAY_COLUMNS = ['PICK', 'PICKUP', 'IPP'];
+const IGNORED_DAY_COLUMNS = ['PICK', 'PICKUP', 'IPP', 'NHTL', 'SLS', 'SLSAVE', 'MPPD'];
 /**
  * עמודות פיצוי שהסיכום של הרומה סופר בתוך COM: HHM הוא הפיצוי על נחיתה מאוחרת בארץ (בעל המוצר,
  * 08/10/2026; ספטמבר 2026: HHM 00:30 ב-24/09, ובסיכום COM 00:30 ו-HHM 00:30, בלי COM באף יום).
