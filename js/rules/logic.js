@@ -1158,8 +1158,19 @@ function cancelled_no_compensation(ctx, params, rule) {
  */
 function wouldAssumeCancelled(ctx, match) {
   if (!match.exec) return !!paidLostHours(ctx, match.plan);
+  return paidCallOnPlanDays(ctx, match) > 0;
+}
+
+/**
+ * הקריאה המיוחדת שהרומה זיכתה על הסבב שבוצע, רק בימים של הסבב המתוכנן: קריאה מיוחדת ביום אחר אינה
+ * אומרת דבר על המתוכנן (בעל המוצר, 08/10/2026; DME ‏11/03/2026 – ‏LY860 מ-FRA נחתה באיחור ב-12/03 ב-01:05,
+ * יום שתוכנן פנוי, והקריאה המיוחדת על 12/03 בלבד).
+ */
+function paidCallOnPlanDays(ctx, match) {
   const sc = ctx.rulesWithLogic('special_call')[0]?.logic?.params?.report_column ?? 'S/C';
-  return ctx.reportedOn(match.exec, sc) > 0;
+  const days = (p) => (p.shownTo ? [...p.dates, p.shownTo] : p.dates);
+  const planned = new Set(days(match.plan));
+  return [...new Set(days(match.exec))].filter((d) => planned.has(d)).reduce((s, d) => s + ctx.reportedOnDate(d, sc), 0);
 }
 
 /**
@@ -1271,13 +1282,13 @@ function claimLabel(ctx, entry, planLabel, execLabel, planMatch) {
 /**
  * הדוח כבר זיכה, ולכן מניחים את התשובה המזכה ולא שואלים (החלטת בעל המוצר, 23/09/2026):
  * על סבב שלא בוצע – השעות שהפסיד, ש-`lost_hours_credit` רושם; על סבב שבמקומו בוצע סבב אחר –
- * קריאה מיוחדת על הסבב שבוצע, שפירושה שהמתוכנן בוטל. זיכוי של ההפרש בלבד אינו מספיק, כי הוא
+ * קריאה מיוחדת על הסבב שבוצע, באחד מימי הסבב המתוכנן (`paidCallOnPlanDays`), שפירושה שהמתוכנן בוטל.
+ * זיכוי של ההפרש בלבד אינו מספיק, כי הוא
  * מתאים גם להחלפה וגם לשעות שהפסיד, ולכן עליו שואלים (בקשת בעל המוצר, 24/09/2026).
  */
 function assumeCancelled(ctx, match, rule) {
   if (!match.exec) return !!paidLostHours(ctx, match.plan);
-  const sc = ctx.rulesWithLogic('special_call')[0]?.logic?.params?.report_column ?? 'S/C';
-  if (!ctx.reportedOn(match.exec, sc)) return false;
+  if (!paidCallOnPlanDays(ctx, match)) return false;
   noteCancelled(ctx, match, rule, `הרומה מזכה קריאה מיוחדת על ${describePairing(match.exec)}`);
   ctx.assumeAnswer(match.plan, 'cancelled');
   return true;
