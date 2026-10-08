@@ -1371,7 +1371,7 @@ async function renderHistory() {
   $('[data-action="backup"]', root)?.addEventListener('click', () => saveFile(
     `elal-compensations-backup-${new Date().toISOString().slice(0, 10)}.json`,
     async () => JSON.stringify(await store.exportBackup()),
-    { type: 'application/json', description: 'גיבוי נתונים' },
+    { type: 'application/json', description: 'חודשים שמורים' },
   ));
   // כל החודשים השמורים, עם התשובות וקובצי ה-PDF; חיבור היומן נשאר (בעל המוצר, 08/10/2026).
   $('[data-action="clear"]', root)?.addEventListener('click', async () => {
