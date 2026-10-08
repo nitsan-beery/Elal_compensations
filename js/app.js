@@ -1368,32 +1368,11 @@ async function renderHistory() {
       renderHistory();
     });
   }
-  // במחשב (Edge/Chrome) חלון "שמירה בשם", כדי לבחור איפה לשמור (בעל המוצר, 08/10/2026); בלעדיו (Safari) – הורדה רגילה.
-  // החלון נפתח לפני איסוף הנתונים, כי הדפדפן מתיר אותו רק מיד אחרי הלחיצה.
-  $('[data-action="backup"]', root)?.addEventListener('click', async () => {
-    const name = `elal-compensations-backup-${new Date().toISOString().slice(0, 10)}.json`;
-    if (!window.showSaveFilePicker) {
-      download(name, JSON.stringify(await store.exportBackup()), 'application/json');
-      return;
-    }
-    let handle;
-    try {
-      handle = await window.showSaveFilePicker({
-        suggestedName: name,
-        types: [{ description: 'גיבוי נתונים', accept: { 'application/json': ['.json'] } }],
-      });
-    } catch (err) {
-      if (err.name !== 'AbortError') alert(`הגיבוי נכשל: ${err.message}`);
-      return;
-    }
-    try {
-      const writable = await handle.createWritable();
-      await writable.write(JSON.stringify(await store.exportBackup()));
-      await writable.close();
-    } catch (err) {
-      alert(`הגיבוי נכשל: ${err.message}`);
-    }
-  });
+  $('[data-action="backup"]', root)?.addEventListener('click', () => saveFile(
+    `elal-compensations-backup-${new Date().toISOString().slice(0, 10)}.json`,
+    async () => JSON.stringify(await store.exportBackup()),
+    { type: 'application/json', description: 'גיבוי נתונים' },
+  ));
   // כל החודשים השמורים, עם התשובות וקובצי ה-PDF; חיבור היומן נשאר (בעל המוצר, 08/10/2026).
   $('[data-action="clear"]', root)?.addEventListener('click', async () => {
     if (!confirm(`למחוק את כל החודשים השמורים (${months.length})? הנתונים, התשובות שנתת וקובצי ה-PDF יימחקו מהמכשיר, ` +
@@ -1420,6 +1399,34 @@ async function renderHistory() {
     }
     renderHistory();
   });
+}
+
+/**
+ * שמירת קובץ: במחשב (Edge/Chrome) חלון "שמירה בשם", כדי לבחור איפה לשמור (בעל המוצר, 08/10/2026);
+ * בלעדיו (Safari, Firefox) – הורדה רגילה. `make` בונה את התוכן רק אחרי החלון, כי הדפדפן מתיר אותו רק מיד אחרי הלחיצה.
+ */
+async function saveFile(name, make, { type, description }) {
+  if (!window.showSaveFilePicker) {
+    download(name, await make(), type);
+    return;
+  }
+  let handle;
+  try {
+    handle = await window.showSaveFilePicker({
+      suggestedName: name,
+      types: [{ description, accept: { [type]: [name.slice(name.lastIndexOf('.'))] } }],
+    });
+  } catch (err) {
+    if (err.name !== 'AbortError') alert(`השמירה נכשלה: ${err.message}`);
+    return;
+  }
+  try {
+    const writable = await handle.createWritable();
+    await writable.write(await make());
+    await writable.close();
+  } catch (err) {
+    alert(`השמירה נכשלה: ${err.message}`);
+  }
 }
 
 function download(name, content, type) {
@@ -1560,16 +1567,16 @@ function renderRuleList() {
 }
 
 /** הקובץ המקורי כמו שהוא בשרת, כדי לשמור על הפורמט. בלי רשת – מהעותק השמור. */
-async function exportRulesJson() {
-  let text;
-  try {
-    const res = await fetch(new URL('../rules.json', import.meta.url), { cache: 'no-cache' });
-    if (!res.ok) throw new Error();
-    text = await res.text();
-  } catch {
-    text = JSON.stringify(state.rulesData, null, 2);
-  }
-  download('rules.json', text, 'application/json');
+function exportRulesJson() {
+  return saveFile('rules.json', async () => {
+    try {
+      const res = await fetch(new URL('../rules.json', import.meta.url), { cache: 'no-cache' });
+      if (!res.ok) throw new Error();
+      return await res.text();
+    } catch {
+      return JSON.stringify(state.rulesData, null, 2);
+    }
+  }, { type: 'application/json', description: 'קובץ החוקים' });
 }
 
 /** כל החוקים כגיליון Excel, בלי קשר לחיפוש ולסינון שבמסך. */
@@ -1594,5 +1601,6 @@ function exportRulesXlsx() {
     r.logic?.id,
   ]);
   const blob = xlsxBlob(header, rows, { sheet: 'חוקים', widths: [30, 10, 50, 30, 25, 11, 11, 10, 7, 40, 40, 28, 24] });
-  download(`rules-${state.rulesData.rules_version}.xlsx`, blob);
+  return saveFile(`rules-${state.rulesData.rules_version}.xlsx`, () => blob,
+    { type: blob.type, description: 'גיליון Excel' });
 }
