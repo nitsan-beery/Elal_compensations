@@ -104,7 +104,10 @@ function execSpan(pairing, domicile, planned) {
   if (home && !pairing.cutAtEnd) {
     const ends = [];
     if (home.sta != null && home.skdDur != null) ends.push(at(home.date, mod(home.sta - home.skdDur, 1440)) + home.skdDur);
-    if (!planned && home.ata != null && (home.actDur ?? home.skdDur) != null) {
+    // הנחיתה בפועל: לפי היום האחרון של הסבב ברומה וה-TAB שלו (`reportEnd` ב-js/rules/evaluate.js),
+    // כי הרגל רשומה ביום ה-STD גם כשהמריאה בפועל אחרי חצות (24–25/09/2026: LY392, ‏ATA 05:16 ב-25/09).
+    if (!planned && pairing.reportEnd) ends.push(at(pairing.reportEnd.date, pairing.reportEnd.min));
+    else if (!planned && home.ata != null && (home.actDur ?? home.skdDur) != null) {
       const dur = home.actDur ?? home.skdDur;
       ends.push(at(home.date, mod(home.ata - dur, 1440)) + dur);
     }

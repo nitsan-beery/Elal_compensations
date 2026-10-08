@@ -847,15 +847,7 @@ function makeContext({ out, timeline, domicile, codes, holidays, answers, plan, 
      * כבר חישבה אותן ב-TAB של היום, לפי הזמנים בפועל; כשסבב אחר יוצא באותו יום, ה-TAB של שניהם, והחלק
      * של הסבב שנחת הוא מחצות עד הנחיתה (בעל המוצר, 08/10/2026). null בלי רומה, בסבב של יום אחד, או בלי TAB.
      */
-    reportStay(pairing) {
-      if (!exec || !execPairings.includes(pairing)) return null;
-      const home = pairing.legs.findLast((l) => l.dst === domicile);
-      const date = reportDates(pairing, timeline, domicile).at(-1);
-      if (!home || date === pairing.from) return null;
-      const shared = execPairings.some((p) => p !== pairing && p.dates.includes(date));
-      const min = shared ? (home.ata ?? home.sta) : dayOf(timeline, date)?.exec?.values?.TAB?.min;
-      return min ? { date, min } : null;
-    },
+    reportStay: (pairing) => (exec && execPairings.includes(pairing) ? pairing.reportEnd ?? null : null),
 
     /** סכום עמודה בדוח על ימי הסבב, כולל יום שהקרדיט התפצל אליו (`columnDates`). */
     reportedOn(pairing, column) {
@@ -1473,7 +1465,23 @@ function attachReportTails(execPairings, timeline, domicile, codes, answers) {
     if (answers[`report_day:${date}`]?.value === 'continued') extend(p, i);
     else asked.push({ date, pairing: p });
   }
+  for (const p of execPairings) p.reportEnd = reportEnd(p, execPairings, timeline, domicile);
   return asked;
+}
+
+/**
+ * סוף השהייה מחוץ לבסיס לפי הרומה (`pairing.reportEnd`; `awayFromBase` ב-js/rules/logic.js, `execSpan`
+ * ב-js/rules/duty.js): היום האחרון של הסבב ברומה, והדקות בו. הרומה כבר חישבה אותן ב-TAB של היום, לפי
+ * הזמנים בפועל; כשסבב אחר יוצא באותו יום, ה-TAB של שניהם, והחלק של הסבב שנחת הוא מחצות עד הנחיתה
+ * (בעל המוצר, 08/10/2026). null בסבב של יום אחד, או בלי TAB.
+ */
+function reportEnd(pairing, execPairings, timeline, domicile) {
+  const home = pairing.legs.findLast((l) => l.dst === domicile);
+  const date = reportDates(pairing, timeline, domicile).at(-1);
+  if (!home || pairing.cutAtEnd || date === pairing.from) return null;
+  const shared = execPairings.some((p) => p !== pairing && p.dates.includes(date));
+  const min = shared ? (home.ata ?? home.sta) : dayOf(timeline, date)?.exec?.values?.TAB?.min;
+  return min ? { date, min } : null;
 }
 
 /** העמודות שמתפצלות ליום שאחרי נחיתה אחרי חצות, יחד עם הקרדיט. */
