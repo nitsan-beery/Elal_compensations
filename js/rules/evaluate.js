@@ -1820,9 +1820,10 @@ function checkMissingData(plan, exec, warnings) {
     const incomplete = [];
     for (const d of Object.values(exec.days ?? {})) {
       for (const l of d.legs ?? []) {
-        // DHX היא DH בחברה אחרת, ואין לה מספר טיסה של אל על (Flt 0).
+        // DHX היא DH בחברה אחרת, ואין לה מספר טיסה של אל על (Flt 0). ברגל DH בלי ATD ו-ATA אין
+        // אזהרה: נחיתה מאוחרת שהרומה זיכתה מוסברת מתחת לטיסה (`late_landing_home`; בעל המוצר, 08/10/2026).
         const gaps = Object.entries(EXEC_LEG_FIELDS)
-          .filter(([c, f]) => l[f] == null && exec.legColumns?.includes(c) && !(c === 'Flt' && l.type === 'DHX'))
+          .filter(([c, f]) => l[f] == null && exec.legColumns?.includes(c) && !(c === 'Flt' && l.type === 'DHX') && !(l.dhd && (c === 'ATD' || c === 'ATA')))
           .map(([c]) => c);
         if (gaps.length) incomplete.push(`${dm(d.date)} ${l.flight ?? ''} (${gaps.join(', ')})`.replace('  ', ' '));
       }
