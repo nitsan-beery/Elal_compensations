@@ -1270,7 +1270,7 @@ async function renderHistory() {
       <div class="row">
         <button class="btn" data-action="backup" ${months.length ? '' : 'disabled'}>גיבוי נתונים</button>
         <label class="btn">שחזר מקובץ<input type="file" accept="application/json,.json" hidden data-action="restore"></label>
-        <button class="btn danger" data-action="clear" ${months.length ? '' : 'disabled'}>ניקוי הנתונים</button>
+        <button class="btn danger" data-action="clear" ${months.length ? '' : 'disabled'}>מחק הכל</button>
       </div>
     </div>`;
 
