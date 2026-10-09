@@ -118,6 +118,7 @@ export function evaluate({ rulesData, plan = null, exec = null, answers = {}, hi
     totals: [],
     freeDays: null,
     perDiem: null,
+    hotelWaiver: null,
     legal: null,
   };
 
@@ -748,6 +749,8 @@ function makeContext({ out, timeline, domicile, codes, holidays, answers, plan, 
     setFreeDays(v) { out.freeDays = v; },
     /** האש"ל הצפוי בחודש, לשורה התחתונה בסיכום: שעות טיסה ושהייה, ימי ויתור מלון וסה"כ בדולרים. */
     setPerDiem(v) { out.perDiem = v; },
+    /** התזכורת להגיש טופס ויתור מלון, מתחת לאש"ל הצפוי בסיכום – רק בחודש שיש בו ויתור מלון. */
+    setHotelWaiver(text) { out.hotelWaiver = text; },
     /** קודים בתכנון שאינם היעדרות, הערה או DUM: פעילות, וגם קוד לא מוכר (לא מניחים שהוא יום פנוי). */
     planActivityCodes: (day) => (day.plan?.codes ?? []).filter((c) => !isLeaveCode(c, leave, codes) && !isIgnoredPlanCode(c, codes)),
     /**
