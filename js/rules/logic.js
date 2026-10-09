@@ -444,6 +444,7 @@ function hotel_waiver_days(ctx, params, rule) {
  * - שעות טיסה (PDFT): הקרדיט וה-Rig הצפויים על הסבבים, וההשלמה לסליפ קצר לפי הקרדיט של כל ה-FDP יחד
  *   (30/12/2025: ‏07:19, בלי ה-Rig ‏02:41). Rig על סבב שלא בוצע (הורדה מהטיסה, 28/07/2026) אינו נכלל, וגם
  *   קרדיט של היעדרות ביום שנחת בו סבב (SICK ב-14/08/2026).
+ * ויתור מלון (NHTL ברומה): סכום קבוע לכל יום (בעל המוצר, 09/10/2026: ה-300$ באוגוסט 2026 שולמו על 2 ימים).
  * השעות עשרוניות ומעוגלות לשתי ספרות, כמו בתלוש, והסכומים לסנטים.
  */
 function per_diem_estimate(ctx, params, rule) {
@@ -475,13 +476,20 @@ function per_diem_estimate(ctx, params, rule) {
     const g = credit + rig + (slipped ? Math.max(0, H(slip.min_credit_hours) - credit) : 0);
     flight += g;
   }
-  if (!stay && !flight) return;
+  // ימי ויתור מלון ברומה: סכום קבוע ליום (300$ על 2 ימים בתלוש של אוגוסט 2026, בתוקף מ-01/01/2026).
+  const waived = ctx.timeline.filter((d) => {
+    const v = d.exec?.values?.[params.hotel_waiver_column];
+    return !!(v?.min || v?.count);
+  }).length;
+  if (!stay && !flight && !waived) return;
   const hours = (min) => Math.round((min / 60) * 100) / 100;
   const cents = (usd) => Math.round(usd * 100) / 100;
   const [stayH, flightH] = [hours(stay), hours(flight)];
-  const total = cents(stayH * params.stay_rate_usd) + cents(flightH * params.flight_rate_usd) - cents(stayH * params.stay_deduction_usd);
+  const total = cents(stayH * params.stay_rate_usd) + cents(flightH * params.flight_rate_usd) - cents(stayH * params.stay_deduction_usd)
+    + waived * params.hotel_waiver_usd_per_day;
   const usd = (v) => v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  ctx.note(null, `אש"ל צפוי: ${usd(flightH)} שעות טיסה ו-${usd(stayH)} שעות שהייה, סה"כ לתשלום ${usd(cents(total))}$.`, rule);
+  const hotel = !waived ? '' : waived === 1 ? ', יום ויתור מלון אחד' : `, ${waived} ימי ויתור מלון`;
+  ctx.note(null, `אש"ל צפוי: ${usd(flightH)} שעות טיסה ו-${usd(stayH)} שעות שהייה${hotel}, סה"כ לתשלום ${usd(cents(total))}$.`, rule);
 }
 
 /** בחודש שכולו היעדרות, סך הזיכויים מוגבל. */
@@ -1941,7 +1949,7 @@ export const KNOWN_PARAMS = {
   absence_day_credit: ['plan_codes', 'report_codes', 'plan_code_prefixes', 'report_code_prefixes', 'report_flag_column', 'credit_hours', 'tab_hours', 'requires_assigned_activity', 'flight_day_takes_higher', 'away_flag_on_pairing_start', 'confirm_code_prefixes', 'confirm_label', 'confirm_answer', 'exclude_codes'],
   unpaid_leave_days: ['plan_codes', 'report_codes', 'plan_code_prefixes', 'report_code_prefixes'],
   hotel_waiver_days: ['report_column'],
-  per_diem_estimate: ['stay_rate_usd', 'flight_rate_usd', 'stay_deduction_usd'],
+  per_diem_estimate: ['stay_rate_usd', 'flight_rate_usd', 'stay_deduction_usd', 'hotel_waiver_column', 'hotel_waiver_usd_per_day'],
   vacation_credit_balance: ['per_day_hours', 'days_full_rate', 'monthly_max_hours', 'yearly_cap_days', 'taper_table', 'taper_table_complete', 'taper_monthly_totals'],
   absence_month_cap: ['cap_hours'],
   late_landing_home: ['grace_minutes', 'step_minutes', 'hours_per_step', 'note_from_minutes'],
