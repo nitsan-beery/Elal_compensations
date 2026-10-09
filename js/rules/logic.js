@@ -417,8 +417,8 @@ function unpaid_leave_days(ctx, params, rule) {
 }
 
 /**
- * ויתור מלון: יום שבעמודה NHTL ברומה רשום בו ערך (12:00 ב-14/03/2025). התזכורת להגיש עליהם טופס ויתור
- * מלון היא בכרטיס הסיכום, מתחת לאש"ל הצפוי, ולא בהערות (`ctx.setHotelWaiver`; בעל המוצר, 09/10/2026).
+ * ויתור מלון: יום שבעמודה NHTL ברומה רשום בו ערך (12:00 ב-14/03/2025). אינו מזכה בכלום לפי מה
+ * שבקבצים; ההערה מציינת כמה ימים כאלה היו בחודש, ומזכירה להגיש עליהם טופס ויתור מלון (בעל המוצר, 09/10/2026).
  */
 function hotel_waiver_days(ctx, params, rule) {
   const days = ctx.timeline.filter((d) => {
@@ -426,9 +426,10 @@ function hotel_waiver_days(ctx, params, rule) {
     return !!(v?.min || v?.count);
   });
   if (!days.length) return;
-  // בלי הצהרת ויתור מלון אין תשלום עליו (מצגת הרומה; בעל המוצר, 09/10/2026). מספר הימים כבר בשורת האש"ל.
-  const dates = days.map((d) => dayOf(d.date));
-  ctx.setHotelWaiver(`יש להגיש טופס ויתור מלון על ${dates.length > 1 ? `${dates.slice(0, -1).join(', ')} ו-${dates.at(-1)}` : dates[0]}.`);
+  const what = days.length === 1 ? 'יום ויתור מלון אחד' : `${days.length} ימי ויתור מלון`;
+  // בלי הצהרת ויתור מלון אין תשלום עליו (מצגת הרומה; בעל המוצר, 09/10/2026).
+  const form = days.length === 1 ? 'התאריך הזה' : 'התאריכים האלה';
+  ctx.note(null, `${what} (${days.map((d) => dayOf(d.date)).join(', ')}): יש להגיש טופס ויתור מלון על ${form}.`, rule);
 }
 
 /**

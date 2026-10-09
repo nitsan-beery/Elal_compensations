@@ -1007,7 +1007,7 @@ const gapClass = (diff) => (diff > 0 ? 'gain' : 'bad');
 const signed = (min) => (min > 0 ? '+' : '') + minToHhmm(min);
 
 const PRINT_BUTTON = '<button class="btn no-print" data-action="print">ייצוא PDF</button>';
-const hasTotals = (res) => res.totals.length > 0 || !!res.freeDays || !!res.perDiem || !!res.hotelWaiver;
+const hasTotals = (res) => res.totals.length > 0 || !!res.freeDays || !!res.perDiem;
 const usd = (v) => v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 /** האש"ל הצפוי, שורה תחתונה בסיכום אחרי ספירת הימים (בעל המוצר, 09/10/2026). */
@@ -1045,7 +1045,6 @@ function renderTotals(res) {
     </div>
     ${days.length ? `<p class="small">${days.join(' · ')}</p>` : ''}
     ${perDiemLine(res.perDiem)}
-    ${res.hotelWaiver ? `<p class="small">${esc(res.hotelWaiver)}</p>` : ''}
   </div>`;
 }
 
