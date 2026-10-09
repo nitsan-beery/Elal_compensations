@@ -433,21 +433,56 @@ function hotel_waiver_days(ctx, params, rule) {
 }
 
 /**
- * אש"ל צפוי בחודש (בעל המוצר, 09/10/2026; תלושי האש"ל של יולי ואוגוסט 2026): שעות השהייה ושעות
- * הטיסה, כל אחת בתעריף שלה לשעה, פחות ניכוי קטן על כל שעת שהייה ("טיפ" בתלוש). הערה בלבד.
- * מחושב מהרגליים ומהקרדיט הצפוי ולא מהעמודות ABR ו-PDFT, שאינן בכל רומה (יולי 2026), ולכן גם בתכנון לבד.
- * הכללים נבדקו מול ABR ו-PDFT בכל החודשים שיש בהם רומה (09/10/2026). לכל FDP (סבבים בלי מנוחה חוקית ביניהם):
- * - שעות שהייה (ABR): מההמראה הראשונה מהבסיס לחו"ל ועד הנחיתה האחרונה בבסיס – בפועל כשיש רומה, ובתכנון
- *   לבד STD עד STA; גם הזמן בבסיס בין שני סבבים באותו FDP (30/12/2025: BUS ו-LCA, ‏10:17). חזרה לבסיס
- *   אחרי המראה אינה נספרת כשאחריה יציאה לחו"ל (31/03/2025), ולבדה – מההמראה עד הנחיתה (15/09/2025, ‏00:25).
- *   סבב שנחתך בגבול החודש – עד הגבול.
- * - שעות טיסה (PDFT): הקרדיט וה-Rig הצפויים על הסבבים, וההשלמה לסליפ קצר לפי הקרדיט של כל ה-FDP יחד
- *   (30/12/2025: ‏07:19, בלי ה-Rig ‏02:41). Rig על סבב שלא בוצע (הורדה מהטיסה, 28/07/2026) אינו נכלל, וגם
- *   קרדיט של היעדרות ביום שנחת בו סבב (SICK ב-14/08/2026).
- * ויתור מלון (NHTL ברומה): סכום קבוע לכל יום (בעל המוצר, 09/10/2026: ה-300$ באוגוסט 2026 שולמו על 2 ימים).
+ * אש"ל צפוי בחודש (בעל המוצר, 09/10/2026; תלושי האש"ל מ-03/2025 עד 08/2026): שעות השהייה ושעות הטיסה,
+ * כל אחת בתעריף שלה לשעה בתקופה (`rates`), ויתור מלון, ופחות ניכוי קטן לכל שעת שהייה ("טיפ" בתלוש).
+ * הערה בלבד, בלי השוואה. התלוש משלם לפי העמודות ABR ו-PDFT ברומה, גם כשהן חריגות (35:50 ב-10/06/2026),
+ * ולכן כשהן ברומה – לפיהן. כשהן חסרות (נובמבר 2025), ובתכנון לבד, השעות מחושבות מהרגליים ומהקרדיט הצפוי
+ * (`perDiemHours`).
+ * ויתור מלון (NHTL ברומה; `hotel_waiver`): עד 2025 – שעות ה-NHTL בתעריף השהייה, והן גם בבסיס הניכוי
+ * (03/2025: ‏12 שעות, ‏75.00$); מ-2026 – סכום קבוע ליום, מחוץ לבסיס הניכוי (300$ על 2 ימים באוגוסט 2026).
  * השעות עשרוניות ומעוגלות לשתי ספרות, כמו בתלוש, והסכומים לסנטים.
  */
 function per_diem_estimate(ctx, params, rule) {
+  const byPeriod = (list) => [...(list ?? [])].sort((a, b) => b.from.localeCompare(a.from)).find((r) => r.from <= ctx.monthFirst);
+  const rate = byPeriod(params.rates);
+  const hotel = byPeriod(params.hotel_waiver) ?? {};
+  if (!rate) return;
+  const column = (c) => ctx.timeline.reduce((s, d) => s + (d.exec?.values?.[c]?.min ?? 0), 0);
+  const computed = perDiemHours(ctx);
+  // עמודה שאין בה ערך באף יום אינה ברומה של החודש (הרומה מציגה רק עמודות שיש בהן ערך).
+  const stay = column(params.stay_column) || computed.stay;
+  const flight = column(params.flight_column) || computed.flight;
+  const waivedDays = ctx.timeline.filter((d) => {
+    const v = d.exec?.values?.[params.hotel_waiver_column];
+    return !!(v?.min || v?.count);
+  });
+  if (!stay && !flight && !waivedDays.length) return;
+  const hours = (min) => Math.round((min / 60) * 100) / 100;
+  const cents = (usd) => Math.round(usd * 100) / 100;
+  const [stayH, flightH] = [hours(stay), hours(flight)];
+  const waivedH = hotel.as_stay_hours ? hours(column(params.hotel_waiver_column)) : 0;
+  const hotelUsd = hotel.as_stay_hours ? cents(waivedH * rate.stay_usd) : waivedDays.length * (hotel.usd_per_day ?? 0);
+  const total = cents(stayH * rate.stay_usd) + cents(flightH * rate.flight_usd) + hotelUsd
+    - cents((stayH + waivedH) * params.stay_deduction_usd);
+  const usd = (v) => v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const n = waivedDays.length;
+  const waived = !n ? '' : n === 1 ? ', יום ויתור מלון אחד' : `, ${n} ימי ויתור מלון`;
+  ctx.note(null, `אש"ל צפוי: ${usd(flightH)} שעות טיסה ו-${usd(stayH)} שעות שהייה${waived}, סה"כ לתשלום ${usd(cents(total))}$.`, rule);
+}
+
+/**
+ * שעות השהייה והטיסה של האש"ל, בדקות, מהרגליים ומהקרדיט הצפוי – לרומה בלי ABR ו-PDFT, ולתכנון לבד.
+ * נבדקו מול ABR ו-PDFT בכל החודשים שיש בהם רומה (09/10/2026), ובנובמבר 2025 מול התלוש. לכל FDP (סבבים
+ * בלי מנוחה חוקית ביניהם):
+ * - שהייה: מההמראה הראשונה מהבסיס לחו"ל ועד הנחיתה האחרונה בבסיס – בפועל כשיש רומה, ובתכנון לבד STD
+ *   עד STA; גם הזמן בבסיס בין שני סבבים באותו FDP (30/12/2025: BUS ו-LCA, ‏10:17). חזרה לבסיס אחרי
+ *   המראה אינה נספרת כשאחריה יציאה לחו"ל (31/03/2025), ולבדה – מההמראה עד הנחיתה (15/09/2025, ‏00:25).
+ *   סבב שנחתך בגבול החודש – עד הגבול.
+ * - טיסה: הקרדיט וה-Rig הצפויים על הסבבים, וההשלמה לסליפ קצר לפי הקרדיט של כל ה-FDP יחד (30/12/2025:
+ *   ‏07:19, בלי ה-Rig ‏02:41). Rig על סבב שלא בוצע (הורדה מהטיסה, 28/07/2026) אינו נכלל, וגם קרדיט של
+ *   היעדרות ביום שנחת בו סבב (SICK ב-14/08/2026).
+ */
+function perDiemHours(ctx) {
   const first = at(ctx.monthFirst, 0);
   const last = at(ctx.timeline.at(-1).date, 1440);
   const slipRule = ctx.rulesWithLogic('min_slip_credit')[0];
@@ -473,23 +508,9 @@ function per_diem_estimate(ctx, params, rule) {
     const credit = group.reduce((s, p) => s + ctx.expectedOn(p, 'flight'), 0);
     const rig = group.reduce((s, p) => s + ctx.expectedOn(p, 'rig', slipRule ? [slipRule.id] : []), 0);
     const slipped = slipRule && group.some((p) => ctx.expectedOn(p, 'rig') > ctx.expectedOn(p, 'rig', [slipRule.id]));
-    const g = credit + rig + (slipped ? Math.max(0, H(slip.min_credit_hours) - credit) : 0);
-    flight += g;
+    flight += credit + rig + (slipped ? Math.max(0, H(slip.min_credit_hours) - credit) : 0);
   }
-  // ימי ויתור מלון ברומה: סכום קבוע ליום (300$ על 2 ימים בתלוש של אוגוסט 2026, בתוקף מ-01/01/2026).
-  const waived = ctx.timeline.filter((d) => {
-    const v = d.exec?.values?.[params.hotel_waiver_column];
-    return !!(v?.min || v?.count);
-  }).length;
-  if (!stay && !flight && !waived) return;
-  const hours = (min) => Math.round((min / 60) * 100) / 100;
-  const cents = (usd) => Math.round(usd * 100) / 100;
-  const [stayH, flightH] = [hours(stay), hours(flight)];
-  const total = cents(stayH * params.stay_rate_usd) + cents(flightH * params.flight_rate_usd) - cents(stayH * params.stay_deduction_usd)
-    + waived * params.hotel_waiver_usd_per_day;
-  const usd = (v) => v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  const hotel = !waived ? '' : waived === 1 ? ', יום ויתור מלון אחד' : `, ${waived} ימי ויתור מלון`;
-  ctx.note(null, `אש"ל צפוי: ${usd(flightH)} שעות טיסה ו-${usd(stayH)} שעות שהייה${hotel}, סה"כ לתשלום ${usd(cents(total))}$.`, rule);
+  return { stay, flight };
 }
 
 /** בחודש שכולו היעדרות, סך הזיכויים מוגבל. */
@@ -1949,7 +1970,7 @@ export const KNOWN_PARAMS = {
   absence_day_credit: ['plan_codes', 'report_codes', 'plan_code_prefixes', 'report_code_prefixes', 'report_flag_column', 'credit_hours', 'tab_hours', 'requires_assigned_activity', 'flight_day_takes_higher', 'away_flag_on_pairing_start', 'confirm_code_prefixes', 'confirm_label', 'confirm_answer', 'exclude_codes'],
   unpaid_leave_days: ['plan_codes', 'report_codes', 'plan_code_prefixes', 'report_code_prefixes'],
   hotel_waiver_days: ['report_column'],
-  per_diem_estimate: ['stay_rate_usd', 'flight_rate_usd', 'stay_deduction_usd', 'hotel_waiver_column', 'hotel_waiver_usd_per_day'],
+  per_diem_estimate: ['rates', 'stay_column', 'flight_column', 'stay_deduction_usd', 'hotel_waiver_column', 'hotel_waiver'],
   vacation_credit_balance: ['per_day_hours', 'days_full_rate', 'monthly_max_hours', 'yearly_cap_days', 'taper_table', 'taper_table_complete', 'taper_monthly_totals'],
   absence_month_cap: ['cap_hours'],
   late_landing_home: ['grace_minutes', 'step_minutes', 'hours_per_step', 'note_from_minutes'],
