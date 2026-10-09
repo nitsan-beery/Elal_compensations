@@ -416,6 +416,20 @@ function unpaid_leave_days(ctx, params, rule) {
   ctx.note(null, `${what} (${days.map((d) => dayOf(d.date)).join(', ')}).`, rule);
 }
 
+/**
+ * ויתור מלון: יום שבעמודה NHTL ברומה רשום בו ערך (12:00 ב-14/03/2025). אינו מזכה בכלום לפי מה
+ * שבקבצים; ההערה מציינת כמה ימים כאלה היו בחודש (בעל המוצר, 09/10/2026).
+ */
+function hotel_waiver_days(ctx, params, rule) {
+  const days = ctx.timeline.filter((d) => {
+    const v = d.exec?.values?.[params.report_column];
+    return !!(v?.min || v?.count);
+  });
+  if (!days.length) return;
+  const what = days.length === 1 ? 'יום ויתור מלון אחד' : `${days.length} ימי ויתור מלון`;
+  ctx.note(null, `${what} (${days.map((d) => dayOf(d.date)).join(', ')}).`, rule);
+}
+
 /** בחודש שכולו היעדרות, סך הזיכויים מוגבל. */
 function absence_month_cap(ctx, params, rule) {
   const hasFlights = ctx.timeline.some((d) => (d.exec?.legs?.length ?? 0) > 0 || (d.plan?.legs?.length ?? 0) > 0);
@@ -1843,6 +1857,7 @@ export const LOGIC = {
   absence_day_credit,
   vacation_credit_balance,
   unpaid_leave_days,
+  hotel_waiver_days,
   absence_month_cap,
   late_landing_home,
   long_flight_day,
@@ -1870,6 +1885,7 @@ export const KNOWN_PARAMS = {
   min_slip_credit: ['min_credit_hours', 'per_fdp', 'legal_rest_hours', 'report_minutes_before_std'],
   absence_day_credit: ['plan_codes', 'report_codes', 'plan_code_prefixes', 'report_code_prefixes', 'report_flag_column', 'credit_hours', 'tab_hours', 'requires_assigned_activity', 'flight_day_takes_higher', 'away_flag_on_pairing_start', 'confirm_code_prefixes', 'confirm_label', 'confirm_answer', 'exclude_codes'],
   unpaid_leave_days: ['plan_codes', 'report_codes', 'plan_code_prefixes', 'report_code_prefixes'],
+  hotel_waiver_days: ['report_column'],
   vacation_credit_balance: ['per_day_hours', 'days_full_rate', 'monthly_max_hours', 'yearly_cap_days', 'taper_table', 'taper_table_complete', 'taper_monthly_totals'],
   absence_month_cap: ['cap_hours'],
   late_landing_home: ['grace_minutes', 'step_minutes', 'hours_per_step', 'note_from_minutes'],
@@ -1893,6 +1909,7 @@ export const LOGIC_ORDER = [
   'absence_day_credit',
   'vacation_credit_balance',
   'unpaid_leave_days',
+  'hotel_waiver_days',
   'credit_from_scheduled',
   'late_landing_home',
   'long_flight_day',
