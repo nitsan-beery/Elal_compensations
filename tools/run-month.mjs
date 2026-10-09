@@ -91,6 +91,7 @@ if (r.mode === 'plan') {
 console.log('\n== סיכומים ==');
 if (r.freeDays) console.log(`${r.freeDays.free >= r.freeDays.due ? '✓' : '✗'} ימים פנויים ${r.freeDays.free} מתוך ${r.freeDays.due}`);
 for (const t of r.totals) console.log(`${t.ok == null ? '?' : t.ok ? '✓' : '✗'} ${t.column.padEnd(7)} צפוי ${minToHhmm(t.expected)}  בדוח ${minToHhmm(t.reported)}`);
+if (r.perDiem) console.log(`אש"ל צפוי: ${r.perDiem.flightHours.toFixed(2)} שעות טיסה, ${r.perDiem.stayHours.toFixed(2)} שעות שהייה${r.perDiem.hotelDays ? `, ${r.perDiem.hotelDays} ימי ויתור מלון` : ''}, סה"כ ${r.perDiem.usd.toFixed(2)}$`);
 
 if (r.questions.length) {
   console.log('\n== שאלות למשתמש ==');

@@ -435,7 +435,7 @@ function hotel_waiver_days(ctx, params, rule) {
 /**
  * אש"ל צפוי בחודש (בעל המוצר, 09/10/2026; תלושי האש"ל מ-03/2025 עד 08/2026): שעות השהייה ושעות הטיסה,
  * כל אחת בתעריף שלה לשעה בתקופה (`rates`), ויתור מלון, ופחות ניכוי קטן לכל שעת שהייה ("טיפ" בתלוש).
- * הערה בלבד, בלי השוואה. התלוש משלם לפי העמודות ABR ו-PDFT ברומה, גם כשהן חריגות (35:50 ב-10/06/2026),
+ * שורה תחתונה בכרטיס הסיכום (`ctx.setPerDiem`), ולא הערה, בלי השוואה (בעל המוצר, 09/10/2026). התלוש משלם לפי העמודות ABR ו-PDFT ברומה, גם כשהן חריגות (35:50 ב-10/06/2026),
  * ולכן כשהן ברומה – לפיהן. כשהן חסרות (נובמבר 2025), ובתכנון לבד, השעות מחושבות מהרגליים ומהקרדיט הצפוי
  * (`perDiemHours`).
  * ויתור מלון (NHTL ברומה; `hotel_waiver`): עד 2025 – שעות ה-NHTL בתעריף השהייה, והן גם בבסיס הניכוי
@@ -464,10 +464,7 @@ function per_diem_estimate(ctx, params, rule) {
   const hotelUsd = hotel.as_stay_hours ? cents(waivedH * rate.stay_usd) : waivedDays.length * (hotel.usd_per_day ?? 0);
   const total = cents(stayH * rate.stay_usd) + cents(flightH * rate.flight_usd) + hotelUsd
     - cents((stayH + waivedH) * params.stay_deduction_usd);
-  const usd = (v) => v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  const n = waivedDays.length;
-  const waived = !n ? '' : n === 1 ? ', יום ויתור מלון אחד' : `, ${n} ימי ויתור מלון`;
-  ctx.note(null, `אש"ל צפוי: ${usd(flightH)} שעות טיסה ו-${usd(stayH)} שעות שהייה${waived}, סה"כ לתשלום ${usd(cents(total))}$.`, rule);
+  ctx.setPerDiem({ flightHours: flightH, stayHours: stayH, hotelDays: waivedDays.length, usd: cents(total) });
 }
 
 /**

@@ -117,6 +117,7 @@ export function evaluate({ rulesData, plan = null, exec = null, answers = {}, hi
     comparison: [],
     totals: [],
     freeDays: null,
+    perDiem: null,
     legal: null,
   };
 
@@ -745,6 +746,8 @@ function makeContext({ out, timeline, domicile, codes, holidays, answers, plan, 
     execCodes: (day) => execCodesOf(day, codes),
     /** ימים ללא פעילות בתכנון מול המינימום בהסכם, לסיכום החודשי. */
     setFreeDays(v) { out.freeDays = v; },
+    /** האש"ל הצפוי בחודש, לשורה התחתונה בסיכום: שעות טיסה ושהייה, ימי ויתור מלון וסה"כ בדולרים. */
+    setPerDiem(v) { out.perDiem = v; },
     /** קודים בתכנון שאינם היעדרות, הערה או DUM: פעילות, וגם קוד לא מוכר (לא מניחים שהוא יום פנוי). */
     planActivityCodes: (day) => (day.plan?.codes ?? []).filter((c) => !isLeaveCode(c, leave, codes) && !isIgnoredPlanCode(c, codes)),
     /**

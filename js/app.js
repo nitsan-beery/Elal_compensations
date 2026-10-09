@@ -1007,7 +1007,17 @@ const gapClass = (diff) => (diff > 0 ? 'gain' : 'bad');
 const signed = (min) => (min > 0 ? '+' : '') + minToHhmm(min);
 
 const PRINT_BUTTON = '<button class="btn no-print" data-action="print">ייצוא PDF</button>';
-const hasTotals = (res) => res.totals.length > 0 || !!res.freeDays;
+const hasTotals = (res) => res.totals.length > 0 || !!res.freeDays || !!res.perDiem;
+const usd = (v) => v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+/** האש"ל הצפוי, שורה תחתונה בסיכום אחרי ספירת הימים (בעל המוצר, 09/10/2026). */
+function perDiemLine(pd) {
+  if (!pd) return '';
+  const num = (v) => `<span class="num">${v}</span>`;
+  const parts = [`${num(usd(pd.flightHours))} שעות טיסה`, `${num(usd(pd.stayHours))} שעות שהייה`];
+  if (pd.hotelDays) parts.push(pd.hotelDays === 1 ? 'יום ויתור מלון אחד' : `${num(pd.hotelDays)} ימי ויתור מלון`);
+  return `<p class="small">אש"ל צפוי: ${parts.join(' · ')} · סה"כ לתשלום ${num(`${usd(pd.usd)}$`)}</p>`;
+}
 
 function renderTotals(res) {
   const fd = res.freeDays;
@@ -1034,6 +1044,7 @@ function renderTotals(res) {
       </div>` : ''}
     </div>
     ${days.length ? `<p class="small">${days.join(' · ')}</p>` : ''}
+    ${perDiemLine(res.perDiem)}
   </div>`;
 }
 
