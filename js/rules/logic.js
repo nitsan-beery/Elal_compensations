@@ -7,7 +7,7 @@
 import { hoursToMin, minToHhmm } from '../time.js';
 import { describePairing, describeRoute, fdpParts } from '../model.js';
 import { at, dateOf, legTimes, pairingTimes } from '../flight-times.js';
-import { DUTY_LOGIC, DUTY_PARAMS, execFdpGroups, amountWord, otherOption, applyOtherReason, extensionDays, earlierActivity, keyFor } from './duty.js';
+import { DUTY_LOGIC, DUTY_PARAMS, execFdpGroups, amountWord, otherOption, applyOtherReason, extensionDays, dayActivity, keyFor } from './duty.js';
 import { overlapDays } from './journal.js';
 
 const H = (hours) => hoursToMin(hours) ?? 0;
@@ -631,10 +631,13 @@ function special_call(ctx, params, rule) {
       // S/C ברומה שייך ליום שבו נרשם, ולא לסבב כולו (בעל המוצר, 08/10/2026): כשרק הוא הסיבה לקריאה המיוחדת,
       // יממה שתוכנן בה סבב (שלא בוטל ללא קרדיט) נספרת רק כשהרומה רשמה S/C עליה. בלי יממה כזאת – אין קריאה
       // מיוחדת, וה-S/C מוצג כפיצוי שאף חוק אינו מסביר (FRA ‏10–12/03/2026: S/C רק על 12/03).
+      // ימי הסבב המתוכנן של הטיסה עצמה אינם קריאה מיוחדת גם כשהרומה רשמה בהם S/C: הוא שייך לפעילות אחרת ביממה
+      // (בעל המוצר, 09/10/2026; סינתטי: ATH ‏02/08/2026 שבוצע כמתוכנן, ולפניו טיסה לא מתוכננת).
       if (!because) {
-        const planned = new Set(ctx.planPairings.filter((p) => !ctx.pairingHandledBy(p, 'cancelled_no_compensation'))
-          .flatMap((p) => p.shownTo ? [...p.dates, p.shownTo] : p.dates));
-        days.counted = days.counted.filter((d) => !planned.has(d) || ctx.reportedOnDate(d, column) > 0);
+        const daysOf = (p) => (p.shownTo ? [...p.dates, p.shownTo] : p.dates);
+        const own = new Set(match.plan ? daysOf(match.plan) : []);
+        const planned = new Set(ctx.planPairings.filter((p) => !ctx.pairingHandledBy(p, 'cancelled_no_compensation')).flatMap(daysOf));
+        days.counted = days.counted.filter((d) => !own.has(d) && (!planned.has(d) || ctx.reportedOnDate(d, column) > 0));
         if (!days.counted.length) continue;
       }
       ctx.markPairing(match.exec, 'special_call');
@@ -654,26 +657,31 @@ function special_call(ctx, params, rule) {
       const partOf = (d) => parts.findLast((p) => p.from <= d) ?? parts[0];
       if (days.skipped) ctx.note(days.skipped.date, `${flightsOf(match.exec)}: ${days.skipped.why}`, rule, { aside: true });
       if (days.cut) ctx.note(match.exec.from, `${flightsOf(match.exec)}: ${days.cut}`, rule, { aside: true });
-      // יממה שהייתה בה פעילות לפני הטיסה, עם מנוחה חוקית ביניהן: פעילות שנייה, ולא קריאה מיוחדת – לא שתיהן
-      // (`earlierActivity`; בעל המוצר, 09/10/2026). הסכום זהה, והיא שמוצגת מתחת לטיסה. הרומה זיכתה עליה קריאה
-      // מיוחדת – הציפייה בעמודה שהרומה רשמה (S/C), כדי שלא יהיה פער; לא זיכתה – בעמודה של הפעילות השנייה
-      // (08/10/2026). סימולטור לפני הטיסה: הפעילות השנייה נשאלת ב-`second_unplanned_activity`, ואין קריאה מיוחדת.
+      // קריאה מיוחדת רק על יממה שלא תוכננה בה פעילות (`dayActivity`; בעל המוצר, 09/10/2026). ביממה שתוכננה בה
+      // פעילות, עם מנוחה חוקית ביניהן – פעילות שנייה במקום הקריאה המיוחדת, באותו סכום, והיא שמוצגת מתחת לטיסה. הרומה
+      // זיכתה עליה קריאה מיוחדת – הציפייה בעמודה שהרומה רשמה (S/C), כדי שלא יהיה פער; לא זיכתה – בעמודה של הפעילות
+      // השנייה (08/10/2026). באותו FDP – כלום (2024 ס' 42.7); סימולטור מתוכנן – הפעילות השנייה נשאלת
+      // ב-`second_unplanned_activity`. ביממה שלא תוכננה בה פעילות ובוצעו בה שתיים – קריאה מיוחדת, ופעילות שנייה על
+      // המאוחרת (`second_unplanned_activity`).
       const second = ctx.rulesWithLogic('second_unplanned_activity')[0];
       const moved = new Set();
       for (const d of second ? days.counted : []) {
-        const earlier = earlierActivity(ctx, match.exec, d);
-        if (earlier?.sim) moved.add(d);
-        if (!earlier?.pairing) continue;
-        const prev = earlier.pairing;
+        const act = dayActivity(ctx, match.exec, d);
+        if (!act.planned) continue;
+        moved.add(d);
+        if (!act.pairing?.planned) continue;
+        const prev = act.pairing.pairing;
         ctx.markPairing(match.exec, 'second_activity');
         const flightOf = (p) => p.legs.find((l) => l.date === d && l.org === ctx.domicile)?.flight ?? flightsOf(p);
-        const landed = prev.legs.findLast((l) => l.dst === ctx.domicile)?.flight ?? flightsOf(prev);
-        // S/C מעבר למה שכבר צפוי ביממה (קריאה מיוחדת על הפעילות הראשונה).
+        // הפעילות המתוכננת לפני הטיסה: "נחתה" (גם אחרי חצות); אחריה: "יצאה".
+        const before = (pairingTimes(prev, ctx.tz, { away: true }).end ?? Infinity) <= pairingTimes(match.exec, ctx.tz, { away: true }).start;
+        const other = before ? `${prev.legs.findLast((l) => l.dst === ctx.domicile)?.flight ?? flightsOf(prev)} נחתה`
+          : `${prev.legs.find((l) => l.org === ctx.domicile)?.flight ?? flightsOf(prev)} יצאה`;
+        // S/C מעבר למה שכבר צפוי ביממה.
         const asSc = ctx.paidOnDate(d, column, 'sc', H(second.logic.params.hours));
-        moved.add(d);
         ctx.expectPairing(match.exec, asSc ? 'sc' : keyFor(second.logic.params.report_column), H(second.logic.params.hours), second,
-          `${flightOf(match.exec)} לא הייתה בתכנון, ובאותה יממה נחתה ${landed} עם מנוחה חוקית ביניהן`,
-          { date: d, dates: [d], perDay: asSc, explain: `פעילות שנייה ביממה: ${landed} נחתה ביממה הזאת.${asSc ? ' הרומה רשמה אותה כקריאה מיוחדת, באותו סכום.' : ''}` });
+          `${flightOf(match.exec)} לא הייתה בתכנון, ובאותה יממה ${other} עם מנוחה חוקית ביניהן`,
+          { date: d, dates: [d], perDay: asSc, explain: `פעילות שנייה ביממה: ${other} ביממה הזאת.${asSc ? ' הרומה רשמה אותה כקריאה מיוחדת, באותו סכום.' : ''}` });
       }
       // קריאה מיוחדת אחת ליממה: שני סבבים לא מתוכננים באותו FDP ביממה אחת (בעל המוצר, 09/10/2026).
       for (const d of days.counted.filter((x) => !moved.has(x) && !ctx.expectedOnDate(x, 'sc'))) {
@@ -684,16 +692,26 @@ function special_call(ctx, params, rule) {
     }
     // טיסה לא מתוכננת בלי S/C: לא מנחשים, שואלים.
     // טיסה בסוף כוננות: השאלה עליה היא של סיום כוננות למכרז.
+    // טיסה של יממה אחת ביממה שתוכננה בה פעילות: אין קריאה מיוחדת, ומה שתלוי בתשובה הוא הפעילות השנייה – וכשאין
+    // מנוחה חוקית ביניהן אין גם אותה, ואין מה לשאול; כשהרומה זיכתה אותה – מניחים (בעל המוצר, 09/10/2026).
+    const second = ctx.rulesWithLogic('second_unplanned_activity')[0];
+    const act = second && match.how === 'unplanned' && match.exec.from === match.exec.to ? dayActivity(ctx, match.exec, match.exec.from) : null;
+    // גם ביממה שלא תוכננה בה פעילות, כשהייתה לפניה פעילות לא מתוכננת והרומה זיכתה פעילות שנייה: מניחים.
+    const secondOnly = !!act?.planned;
+    const secondPaid = !!act?.pairing && ctx.paidOnDate(match.exec.from, second.logic.params.report_column ?? 'COM',
+      keyFor(second.logic.params.report_column ?? 'COM'), H(second.logic.params.hours));
     if (match.how === 'unplanned' && params.ask_user_if_no_sc && !answer && !ctx.pairingHandledBy(match.exec, 'vacation_recall') &&
-      !ctx.pairingHandledBy(match.exec, 'standby_bid_pending')) {
+      !ctx.pairingHandledBy(match.exec, 'standby_bid_pending') && !secondPaid && !(secondOnly && !act.pairing && !act.sim)) {
       ctx.ask({
         id: `unplanned:${match.exec.id}`,
         date: match.exec.from,
-        title: `פעילות ביום שלא תוכננה בו פעילות: ${describePairing(match.exec)}`,
-        body: 'הרומה לא מזכה קריאה מיוחדת, ולכן לא ניתן לדעת אם היא מגיעה. מה קרה?',
+        title: secondOnly ? `פעילות שלא תוכננה ביממה עם פעילות מתוכננת: ${describePairing(match.exec)}`
+          : `פעילות ביום שלא תוכננה בו פעילות: ${describePairing(match.exec)}`,
+        body: secondOnly ? 'הרומה לא מזכה פיצוי על פעילות שנייה, ולכן לא ניתן לדעת אם הוא מגיע. מה קרה?'
+          : 'הרומה לא מזכה קריאה מיוחדת, ולכן לא ניתן לדעת אם היא מגיעה. מה קרה?',
         // הוספת טיסה בהסכמה: רק הקרדיט של הטיסה, בלי קריאה מיוחדת (בעל המוצר, 06/10/2026).
         options: [
-          { value: 'special_call', label: 'קריאה מיוחדת' },
+          { value: 'special_call', label: secondOnly ? 'פעילות שנייה ביוזמת החברה' : 'קריאה מיוחדת' },
           { value: 'added', label: 'הוספת טיסה בהסכמה' },
           { value: 'voluntary_swap', label: 'החלפה מרצוני', needsLink: true },
           otherOption(),

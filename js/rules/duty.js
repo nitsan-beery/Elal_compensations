@@ -146,31 +146,53 @@ export function extensionDays(ctx, match) {
 }
 
 /**
- * הפעילות שקדמה ל-`exec` ביממה `d`, עם מנוחה חוקית ביניהן: על היממה הזאת `exec` היא פעילות שנייה (2024
- * ס' 42.6), ולא קריאה מיוחדת. לא מקבלים את שתיהן: קריאה מיוחדת רק כשזו הפעילות היחידה ביממה, ופעילות שנייה
- * כשהייתה לפניה פעילות באותה יממה (בעל המוצר, 09/10/2026). הסכום זהה, ו-`special_call` מצפה לו – כשהרומה זיכתה
- * קריאה מיוחדת, ב-S/C. `{ pairing }` – סבב שנחת ביממה הזאת לפני היציאה של `exec`, גם כשהמריא ביום שלפני: טיסה
- * שנוחתת אחרי חצות היא פעילות טיסה ביממה שבה נחתה (08/10/2026; רון: LY2524 נחתה ב-23/09 ב-02:36, ו-LY391 יצאה
- * ב-17:45). `{ sim }` – סימולטור שלא תוכנן, שהתחיל לפני היציאה באותה יממה: אין בקבצים שעות שממנה אפשר לדעת
- * אם הייתה מנוחה ביניהם, והתשובה (`second_activity:`) נשאלת ב-`second_unplanned_activity`; "שתיהן באותו
- * FDP" – אין פעילות שנייה. null כשאין.
+ * הפעילויות האחרות ביממה `d` של `exec` (בעל המוצר, 09/10/2026): קריאה מיוחדת מגיעה על יממה שלא תוכננה בה
+ * פעילות; פעילות שלא תוכננה ביממה שהייתה בה פעילות נוספת, עם מנוחה חוקית ביניהן, היא פעילות שנייה (2024
+ * ס' 42.6). ביממה שתוכננה בה פעילות – רק פעילות שנייה, בלי קריאה מיוחדת; ביממה שלא תוכננה בה פעילות ובוצעו בה
+ * שתיים – שתיהן: קריאה מיוחדת אחת על היממה, ופעילות שנייה על המאוחרת.
+ * נספרים סבב ביצוע שנגע ביממה – יצא בה, או נחת בה, גם כשהמריא ביום שלפני: טיסה שנוחתת אחרי חצות היא פעילות
+ * טיסה ביממה שבה נחתה (08/10/2026; רון: LY2524 נחתה ב-23/09 ב-02:36, ו-LY391 יצאה ב-17:45) – וסימולטור. כל
+ * אחד מהם רק כשהוא מתוכנן (בכל סדר), או כשלא תוכנן והתחיל לפני `exec` (אז `exec` היא השנייה). סבב מתוכנן
+ * שבוטל ללא קרדיט אינו מתוכנן. לסימולטור אין בקבצים שעות שמהן אפשר לדעת אם הייתה מנוחה, והתשובה
+ * (`second_activity:`) נשאלת ב-`second_unplanned_activity`.
+ * מחזירה `{ planned, pairing, sameFdp, sim }`: `planned` – יש ביממה פעילות מתוכננת; `pairing` – סבב שהייתה
+ * מנוחה חוקית בינו לבין `exec` (מתוכנן קודם); `sameFdp` – סבבים באותו FDP; `sim` – סימולטור, או null.
  */
-export function earlierActivity(ctx, exec, d) {
+export function dayActivity(ctx, exec, d) {
   const params = ctx.rulesWithLogic('second_unplanned_activity')[0]?.logic.params;
   const span = pairingTimes(exec, ctx.tz, { away: true });
-  if (!params || span.start == null) return null;
-  const pairing = ctx.execPairings.find((o) => {
-    if (o === exec) return false;
+  const none = { planned: false, pairing: null, sameFdp: [], sim: null };
+  if (!params || span.start == null) return none;
+  const legal = H(params.legal_rest_hours);
+  const report = params.report_minutes_before_std ?? 0;
+  const plannedPairing = (o) => {
+    const m = ctx.matches.find((x) => x.exec === o);
+    return !!m?.plan && !ctx.pairingHandledBy(m.plan, 'cancelled_no_compensation');
+  };
+  const pairings = [];
+  for (const o of ctx.execPairings) {
+    if (o === exec) continue;
     const so = pairingTimes(o, ctx.tz, { away: true });
-    return so.end != null && so.end < span.start && dateOf(so.end) === d &&
-      legalRestBetween(so, span, params.report_minutes_before_std ?? 0, ctx.legalRest?.postMin) >= H(params.legal_rest_hours);
-  });
-  if (pairing) return { pairing };
-  if (dateOf(span.start) !== d || ctx.answer(`second_activity:${exec.id}`)?.value === 'same_fdp') return null;
+    if (so.start == null || so.end == null || !(o.dates.includes(d) || dateOf(so.end) === d)) continue;
+    const planned = plannedPairing(o);
+    if (!planned && so.start >= span.start) continue;
+    const [first, second] = so.start < span.start ? [so, span] : [span, so];
+    pairings.push({ o, planned, separate: legalRestBetween(first, second, report, ctx.legalRest?.postMin) >= legal });
+  }
+  const separate = pairings.filter((x) => x.separate).sort((a, b) => b.planned - a.planned);
   const day = ctx.timeline.find((x) => x.date === d);
-  const sim = day && !planSimDay(day, params) && (day.exec?.sims ?? []).find((s) =>
-    s.std != null && (params.sim_report_codes ?? []).some((c) => ctx.execCodes(day).includes(c)) && at(d, s.std) < span.start);
-  return sim ? { sim } : null;
+  const simDay = day && (params.sim_report_codes ?? []).some((c) => ctx.execCodes(day).includes(c));
+  const simPlanned = !!simDay && planSimDay(day, params);
+  const sims = day?.exec?.sims ?? [];
+  // סימולטור בלי שעות: רק כשתוכנן, כי אי אפשר לדעת אם היה לפני הטיסה.
+  const simEarlier = sims.some((s) => s.std != null && at(d, s.std) < span.start);
+  const sim = simDay && (simPlanned || simEarlier) ? { planned: simPlanned } : null;
+  return {
+    planned: pairings.some((x) => x.planned) || simPlanned,
+    pairing: separate[0] ? { pairing: separate[0].o, planned: separate[0].planned } : null,
+    sameFdp: pairings.filter((x) => !x.separate).map((x) => x.o),
+    sim,
+  };
 }
 
 /** סימולטור שתוכנן ביום (SIM_PRG ב-28/01/2025: סימולטור בחו"ל שתוכנן באמצע סבב). */
@@ -188,7 +210,12 @@ function second_unplanned_activity(ctx, params, rule) {
   if (!ctx.hasExec || !ctx.hasPlan) return;
   const legal = H(params.legal_rest_hours);
   const report = params.report_minutes_before_std ?? 0;
+  const plannedPairing = (o) => {
+    const m = ctx.matches.find((x) => x.exec === o);
+    return !!m?.plan && !ctx.pairingHandledBy(m.plan, 'cancelled_no_compensation');
+  };
   const simReport = params.sim_report_codes ?? [];
+  const scColumn = ctx.rulesWithLogic('special_call')[0]?.logic?.params?.report_column ?? 'S/C';
   const isSimDay = (day) => ctx.execCodes(day).some((c) => simReport.includes(c));
   const simPlanned = (day) => planSimDay(day, params);
   const key = keyFor(params.report_column);
@@ -213,30 +240,25 @@ function second_unplanned_activity(ctx, params, rule) {
     const span = pairingTimes(u, ctx.tz, { away: true });
     if (span.start == null) continue;
     const day = u.from;
-    // פעילות שנייה רק כשהייתה לפניה פעילות באותה יממה; כשהיא הראשונה – רק קריאה מיוחדת, ולא שתיהן (בעל המוצר,
-    // 09/10/2026). כשהרומה זיכתה קריאה מיוחדת או שהמשתמש ענה כך, `special_call` כבר מצפה לפעילות השנייה
-    // (`earlierActivity`, `second_activity` על הסבב).
-    const earlier = earlierActivity(ctx, u, day);
-    if (earlier?.pairing) {
-      if (!ctx.pairingHandledBy(u, 'second_activity')) {
-        ctx.expectPairing(u, key, H(params.hours), rule,
-          `${describePairing(u)} לא הייתה בתכנון, ובאותה יממה בוצעה לפניה ${describePairing(earlier.pairing)} עם מנוחה חוקית ביניהן`, { date: day, dates: [day] });
+    // הפעילות האחרת ביממה: מתוכננת (בכל סדר), או לא מתוכננת שהייתה לפניה (`dayActivity`; בעל המוצר,
+    // 09/10/2026). כש-`special_call` כבר מצפה לפעילות השנייה (ביממה מתוכננת, `second_activity` על הסבב) – לא שוב.
+    const act = dayActivity(ctx, u, day);
+    if (act.pairing) {
+      // ממתין לתשובה על הטיסה (`unplanned:`): בהוספה בהסכמה אין פיצוי.
+      if (!ctx.pairingHandledBy(u, 'second_activity') && !ctx.isAsked(`unplanned:${u.id}`)) {
+        // הרומה רשמה ביממה S/C מעבר למה שכבר צפוי: הפעילות השנייה רשומה כקריאה מיוחדת, באותו סכום (כמו ב-`special_call`).
+        const asSc = ctx.paidOnDate(day, scColumn, 'sc', H(params.hours));
+        ctx.expectPairing(u, asSc ? 'sc' : key, H(params.hours), rule,
+          `${describePairing(u)} לא הייתה בתכנון, ובאותה יממה בוצעה גם ${describePairing(act.pairing.pairing)} עם מנוחה חוקית ביניהן`,
+          { date: day, dates: [day], ...(asSc && { perDay: true, explain: 'פעילות שנייה ביממה. הרומה רשמה אותה כקריאה מיוחדת, באותו סכום.' }) });
       }
       continue;
     }
-    const sameFdp = ctx.execPairings.filter((o) => {
-      if (o === u || !o.dates.includes(day)) return false;
-      const so = pairingTimes(o, ctx.tz, { away: true });
-      const [first, second] = (so.start ?? 0) < span.start ? [so, span] : [span, so];
-      return first.end != null && second.start != null && legalRestBetween(first, second, report, ctx.legalRest?.postMin) < legal;
-    });
-    if (sameFdp.length) {
-      ctx.note(day, `${describePairing(u)} לא הייתה בתכנון, אבל היא באותו FDP עם ${sameFdp.map(describePairing).join(', ')}. אין פיצוי על פעילות שנייה (2024 ס' 42.7).`, rule);
+    if (act.sameFdp.length) {
+      ctx.note(day, `${describePairing(u)} לא הייתה בתכנון, אבל היא באותו FDP עם ${act.sameFdp.map(describePairing).join(', ')}. אין פיצוי על פעילות שנייה (2024 ס' 42.7).`, rule);
       continue;
     }
-    // סימולטור אחרי הטיסה: הטיסה היא הפעילות הראשונה ביממה.
-    const simDay = ctx.timeline.find((d) => d.date === day && isSimDay(d));
-    if (!simDay || ((simDay.exec?.sims ?? []).length && !earlier?.sim)) continue;
+    if (!act.sim) continue;
     const id = `second_activity:${u.id}`;
     const answered = ctx.answer(id);
     const a = answered ?? (ctx.paidOnDate(day, params.report_column, key, H(params.hours)) ? { value: 'separate' } : null);
@@ -285,7 +307,11 @@ function second_unplanned_activity(ctx, params, rule) {
   // סימולטור לא מתוכנן ביום טיסה
   for (const day of ctx.timeline) {
     if (!isSimDay(day) || simPlanned(day)) continue;
-    const flights = ctx.execPairings.filter((p) => p.dates.includes(day.date));
+    // הסימולטור הוא הפעילות השנייה כשהטיסה מתוכננת, או כשלא תוכננה והייתה לפניו; טיסה שלא תוכננה אחריו היא
+    // השנייה, והשאלה עליה (בעל המוצר, 09/10/2026). סימולטור בלי שעות – כל טיסה.
+    const simStart = (day.exec?.sims ?? []).filter((s) => s.std != null).map((s) => at(day.date, s.std)).sort((a, b) => a - b)[0];
+    const flights = ctx.execPairings.filter((p) => p.dates.includes(day.date) &&
+      (simStart == null || plannedPairing(p) || (pairingTimes(p, ctx.tz, { away: true }).start ?? Infinity) < simStart));
     if (!flights.length) continue;
     const id = `second_activity:sim:${day.date}`;
     const answered = ctx.answer(id);
