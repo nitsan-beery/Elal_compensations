@@ -247,8 +247,11 @@ export function evaluate({ rulesData, plan = null, exec = null, answers = {}, hi
   }
   // מה שמוסבר בטבלת השינויים אינו חוזר בהערות (בעל המוצר, 01/10/2026).
   out.notes = out.notes.filter((n) => !n.placed);
-  // כמו שאר הטבלאות: לפי תאריך. הערה בלי תאריך (על החודש כולו) בסוף.
-  out.notes.sort((a, b) => (a.date ?? '￿').localeCompare(b.date ?? '￿'));
+  // סדר ההערות (בעל המוצר, 09/10/2026): ההערות על החודש כולו (בלי תאריך) קודם, וויתור מלון ראשונה ביניהן
+  // (`order: 'first'`); אחריהן ההערות על יום מסוים, לפי תאריך; בסוף ההערה על הרכב הצוות החוזי
+  // (`order: 'last'`), ואחריה – בממשק – ההערה על מגבלות החוק. בתוך כל קבוצה לפי סדר הרצת החוקים.
+  const noteRank = (n) => (n.order === 'first' ? 0 : n.order === 'last' ? 3 : n.date ? 2 : 1);
+  out.notes.sort((a, b) => noteRank(a) - noteRank(b) || (a.date ?? '').localeCompare(b.date ?? ''));
   // כמה טיסות בחודש היומן מכיר (בלי קשר לשאלה על הרכב הצוות), לשורת היומן בממשק.
   // כמה טיסות יש בחודש בסך הכול (בלי DH), ליד מספר הטיסות שהרכב הצוות שלהן מהיומן.
   const opLegs = (legs) => (legs ?? []).filter((l) => l.flight && !l.dh && !l.dhd && l.type !== 'DHO' && l.type !== 'DHX');
@@ -796,7 +799,7 @@ function makeContext({ out, timeline, domicile, codes, holidays, answers, plan, 
     },
     /**
      * `date` הוא null בהערה על החודש כולו, בלי יום מסוים. `extra.byUser`: ההערה מצטטת את מה
-     * שהמשתמש כתב, ומוצגת עם "לפי תשובת המשתמש".
+     * שהמשתמש כתב, ומוצגת עם "לפי תשובת המשתמש". `extra.order`: 'first' או 'last' – מקום קבוע ברשימה.
      */
     note(date, message, rule, extra) {
       const k = `${date}|${message}`;

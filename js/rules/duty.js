@@ -1504,9 +1504,9 @@ function legal_crew_composition(ctx, params, rule) {
     }
   }
   if (unknown.length) {
-    ctx.note(null, `הרכב הצוות אינו ידוע ב${unknown.length === 1 ? 'טיסה שהצוות החוזי בה מוגבר או כפול' : `-${unknown.length} טיסות שהצוות החוזי בהן מוגבר או כפול`}, ולכן לא נבדק אם הוא חוזי: ${unknown.join('; ')}.`, rule);
+    ctx.note(null, `הרכב הצוות אינו ידוע ב${unknown.length === 1 ? 'טיסה שהצוות החוזי בה מוגבר או כפול' : `-${unknown.length} טיסות שהצוות החוזי בהן מוגבר או כפול`}, ולכן לא נבדק אם הוא חוזי: ${unknown.join('; ')}.`, rule, { order: 'last' });
   } else if (checked && !below && !pending.length) {
-    ctx.note(null, 'כל הטיסות עומדות בהרכב צוות חוזי.', rule);
+    ctx.note(null, 'כל הטיסות עומדות בהרכב צוות חוזי.', rule, { order: 'last' });
   }
 }
 

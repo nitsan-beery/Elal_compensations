@@ -429,7 +429,7 @@ function hotel_waiver_days(ctx, params, rule) {
   const what = days.length === 1 ? 'יום ויתור מלון אחד' : `${days.length} ימי ויתור מלון`;
   // בלי הצהרת ויתור מלון אין תשלום עליו (מצגת הרומה; בעל המוצר, 09/10/2026).
   const form = days.length === 1 ? 'התאריך הזה' : 'התאריכים האלה';
-  ctx.note(null, `${what} (${days.map((d) => dayOf(d.date)).join(', ')}): יש להגיש טופס ויתור מלון על ${form}.`, rule);
+  ctx.note(null, `${what} (${days.map((d) => dayOf(d.date)).join(', ')}): יש להגיש טופס ויתור מלון על ${form}.`, rule, { order: 'first' });
 }
 
 /**
