@@ -410,8 +410,8 @@ function chainNotes(out, journal, answers) {
     if (!moved) c.plan = path.join(' → ');
     if (view.steps.length > 1 || path.length > 1 || root || moved) c.steps = view.steps;
     // מתחת לשורה רק הסיבה, ומה שמגיע עליה; כשהיא כבר הכותרת של השורה, או בראש ההערה על מה שמגיע
-    // ("החלפה מרצון: לא מגיע קרדיט על היום הזה."), – רק מה שמגיע (בעל המוצר, 07/10/2026; 21/07/2026 ATH).
-    const norm = (t) => t.replace(/\.$/, '').replace('מרצוני', 'מרצון');
+    // ("החלפה מרצוני או בהסכמתי: לא מגיע קרדיט על היום הזה."), – רק מה שמגיע (בעל המוצר, 07/10/2026; 21/07/2026 ATH).
+    const norm = (t) => t.replace(/\.$/, '');
     const said = view.reason && (c.notes ?? []).some((n) => norm(n.message).startsWith(`${norm(view.reason)}:`));
     const reason = view.reason && view.reason !== `${c.label}.` && !said ? [{ message: view.reason, byUser: true }] : [];
     c.notes = eff.value === 'chain_open' ? [...reason, { message: 'ממתין לתשובה בשאלה על הסבב.', byUser: false }] : [...reason, ...(c.notes ?? [])];
@@ -1211,7 +1211,7 @@ function explainChanges(out, supported) {
     const diverted = change.map((n) => ({ message: n.message.startsWith(`${c.label}: `) ? n.message.slice(c.label.length + 2) : n.message, byUser: false }));
     if (ruled.length) {
       // שם השינוי כבר בשורה שלו, ולכן הוא יורד מראש ההערה.
-      const leads = [c.label, c.label.replace('מרצוני', 'מרצון')].map((l) => `${l}: `);
+      const leads = [`${c.label}: `];
       c.notes = ruled.map((n) => {
         n.placed = true;
         const lead = leads.find((l) => n.message.startsWith(l));
@@ -1340,7 +1340,7 @@ const GAVE_AWAY_LABEL = 'מסירת הטיסה ללא חלופה';
 const DATES_OUTCOME = {
   replaced: 'שינוי ביוזמת החברה',
   bid: 'זכייה במכרז',
-  voluntary_swap: 'החלפה מרצוני',
+  voluntary_swap: 'החלפה מרצוני או בהסכמתי',
   cancelled: 'המתוכנן בוטל, ומה שבוצע לא היה מתוכנן',
   wet_lease: 'הורדה מהטיסה ביוזמת החברה',
   trainee: 'הורדה מהטיסה ביוזמת החברה',

@@ -713,7 +713,7 @@ function special_call(ctx, params, rule) {
         options: [
           { value: 'special_call', label: secondOnly ? 'פעילות שנייה ביוזמת החברה' : 'קריאה מיוחדת' },
           { value: 'added', label: 'הוספת טיסה בהסכמה' },
-          { value: 'voluntary_swap', label: 'החלפה מרצוני', needsLink: true },
+          { value: 'voluntary_swap', label: 'החלפה מרצוני או בהסכמתי', needsLink: true },
           otherOption(),
         ],
         ruleId: rule.id,
@@ -1141,16 +1141,16 @@ function voluntary_swap(ctx, params, rule) {
     // ההערה ביום של כל צד: ביום המתוכנן שלא בוצע – אין קרדיט; ביום של הטיסה שבוצעה – הקרדיט שלה
     // (בעל המוצר, 29/09/2026).
     if (answer.link === 'none') {
-      ctx.note(date, 'החלפה מרצון: הטיסה נמסרה ללא חלופה, ולא מגיע עליה קרדיט.', rule, { pairingId: match.plan.id });
+      ctx.note(date, 'החלפה מרצוני או בהסכמתי: הטיסה נמסרה ללא חלופה, ולא מגיע עליה קרדיט.', rule, { pairingId: match.plan.id });
       continue;
     }
     if (!match.exec) {
       // `pairingId`: ההערה של הסבב המתוכנן, ולא של טיסה אחרת שבוצעה באותם ימים (`splitSwappedElsewhere`).
-      ctx.note(date, `החלפה מרצון: לא מגיע קרדיט על ${match.plan.dates.length > 1 ? 'הימים האלה' : 'היום הזה'}.`, rule, { pairingId: match.plan.id });
+      ctx.note(date, `החלפה מרצוני או בהסכמתי: לא מגיע קרדיט על ${match.plan.dates.length > 1 ? 'הימים האלה' : 'היום הזה'}.`, rule, { pairingId: match.plan.id });
       continue;
     }
     const slip = minSlipTopUp(ctx, match.exec) ? ', כולל השלמה לסליפ קצר' : '';
-    ctx.note(date, `החלפה מרצון: קרדיט על הטיסה שבוצעה${slip}.`, rule);
+    ctx.note(date, `החלפה מרצוני או בהסכמתי: קרדיט על הטיסה שבוצעה${slip}.`, rule);
   }
 }
 
@@ -1313,7 +1313,7 @@ function claimLabel(ctx, entry, planLabel, execLabel, planMatch) {
       : `לפי הרומה, מגיעות על ${planLabel} השעות שהפסיד`;
   }
   if (value === 'special_call') return `${execLabel} היא קריאה מיוחדת עצמאית, ולא קשורה ל${planLabel}`;
-  if (value === 'voluntary_swap') return `${planLabel} הוחלפה מרצון עם ${execLabel}`;
+  if (value === 'voluntary_swap') return `${planLabel} הוחלפה מרצוני או בהסכמתי עם ${execLabel}`;
   if (value === 'other') return ctx.answerFor(match)?.text || 'סיבה אחרת';
   const opt = whatHappenedOptions(ctx, planMatch.plan, planMatch.exec).find((o) => o.value === value);
   return opt ? opt.label : value;
@@ -1413,7 +1413,7 @@ function whatHappenedOptions(ctx, plan, exec, calendar = null) {
     // זכייה במכרז משלמת כמו שינוי ביוזמת החברה, אבל אינה "ביוזמת החברה" לעניין 2024 ס' 34–37 ו-39
     // (ס' 40): נחיתות לילה, שבתות ברצף וטיסות סבב לילה עוקבות (בעל המוצר, 05/10/2026).
     { value: 'bid', label: 'זכייה במכרז', hint: higher, needsLink: true },
-    { value: 'voluntary_swap', label: 'החלפה מרצוני', hint: `רק הקרדיט של ${performed}`, needsLink: true },
+    { value: 'voluntary_swap', label: 'החלפה מרצוני או בהסכמתי', hint: `רק הקרדיט של ${performed}`, needsLink: true },
     { value: 'cancelled', label: 'הטיסה המקורית בוטלה ללא קרדיט',
       hint: other ? `מגיע פיצוי של קריאה מיוחדת על ${performed}` : 'לא מגיע כלום' },
     ...lostHoursOptions(ctx, plan, other ? `בנוסף לקרדיט של ${performed}` : undefined),
@@ -1513,7 +1513,7 @@ function askJournal(ctx, rule) {
       body: 'הסיבה אינה בקבצים, והיא תקבע מה מגיע כשתועלה הרומה. מה קרה?',
       options: [
         { value: 'bid', label: 'זכייה במכרז' },
-        { value: 'voluntary_swap', label: 'החלפה מרצוני', needsLink: true },
+        { value: 'voluntary_swap', label: 'החלפה מרצוני או בהסכמתי', needsLink: true },
         { value: 'replaced', label: 'שינוי ביוזמת החברה', needsLink: true },
         { value: 'added', label: 'הוספת טיסה בהסכמה' },
         otherOption(),
@@ -1569,7 +1569,7 @@ function unplannedNote(ctx, n) {
   const simple = { special_call: 'קריאה מיוחדת', bid: 'זכייה במכרז', added: 'הוספת טיסה בהסכמה' };
   if (simple[a.value]) return simple[a.value];
   if (a.value === 'other') return `סיבה אחרת${a.text ? `: ${a.text}` : ''}`;
-  const what = { voluntary_swap: 'החלפה מרצוני', replaced: 'שינוי ביוזמת החברה' }[a.value];
+  const what = { voluntary_swap: 'החלפה מרצוני או בהסכמתי', replaced: 'שינוי ביוזמת החברה' }[a.value];
   if (!what) return a.value;
   const gone = ctx.journal.steps.find((st) => st.node.id === a.link);
   return `${what}: ${gone ? describePairing(gone.fromPairing) : a.link ? a.link : 'טיסה בחודש אחר'}`;
