@@ -418,7 +418,7 @@ function unpaid_leave_days(ctx, params, rule) {
 
 /**
  * ויתור מלון: יום שבעמודה NHTL ברומה רשום בו ערך (12:00 ב-14/03/2025). אינו מזכה בכלום לפי מה
- * שבקבצים; ההערה מציינת כמה ימים כאלה היו בחודש (בעל המוצר, 09/10/2026).
+ * שבקבצים; ההערה מציינת כמה ימים כאלה היו בחודש, ומזכירה להגיש עליהם טופס ויתור מלון (בעל המוצר, 09/10/2026).
  */
 function hotel_waiver_days(ctx, params, rule) {
   const days = ctx.timeline.filter((d) => {
@@ -427,7 +427,61 @@ function hotel_waiver_days(ctx, params, rule) {
   });
   if (!days.length) return;
   const what = days.length === 1 ? 'יום ויתור מלון אחד' : `${days.length} ימי ויתור מלון`;
-  ctx.note(null, `${what} (${days.map((d) => dayOf(d.date)).join(', ')}).`, rule);
+  // בלי הצהרת ויתור מלון אין תשלום עליו (מצגת הרומה; בעל המוצר, 09/10/2026).
+  const form = days.length === 1 ? 'התאריך הזה' : 'התאריכים האלה';
+  ctx.note(null, `${what} (${days.map((d) => dayOf(d.date)).join(', ')}): יש להגיש טופס ויתור מלון על ${form}.`, rule);
+}
+
+/**
+ * אש"ל צפוי בחודש (בעל המוצר, 09/10/2026; תלושי האש"ל של יולי ואוגוסט 2026): שעות השהייה ושעות
+ * הטיסה, כל אחת בתעריף שלה לשעה, פחות ניכוי קטן על כל שעת שהייה ("טיפ" בתלוש). הערה בלבד.
+ * מחושב מהרגליים ומהקרדיט הצפוי ולא מהעמודות ABR ו-PDFT, שאינן בכל רומה (יולי 2026), ולכן גם בתכנון לבד.
+ * הכללים נבדקו מול ABR ו-PDFT בכל החודשים שיש בהם רומה (09/10/2026). לכל FDP (סבבים בלי מנוחה חוקית ביניהם):
+ * - שעות שהייה (ABR): מההמראה הראשונה מהבסיס לחו"ל ועד הנחיתה האחרונה בבסיס – בפועל כשיש רומה, ובתכנון
+ *   לבד STD עד STA; גם הזמן בבסיס בין שני סבבים באותו FDP (30/12/2025: BUS ו-LCA, ‏10:17). חזרה לבסיס
+ *   אחרי המראה אינה נספרת כשאחריה יציאה לחו"ל (31/03/2025), ולבדה – מההמראה עד הנחיתה (15/09/2025, ‏00:25).
+ *   סבב שנחתך בגבול החודש – עד הגבול.
+ * - שעות טיסה (PDFT): הקרדיט וה-Rig הצפויים על הסבבים, וההשלמה לסליפ קצר לפי הקרדיט של כל ה-FDP יחד
+ *   (30/12/2025: ‏07:19, בלי ה-Rig ‏02:41). Rig על סבב שלא בוצע (הורדה מהטיסה, 28/07/2026) אינו נכלל, וגם
+ *   קרדיט של היעדרות ביום שנחת בו סבב (SICK ב-14/08/2026).
+ * השעות עשרוניות ומעוגלות לשתי ספרות, כמו בתלוש, והסכומים לסנטים.
+ */
+function per_diem_estimate(ctx, params, rule) {
+  const first = at(ctx.monthFirst, 0);
+  const last = at(ctx.timeline.at(-1).date, 1440);
+  const slipRule = ctx.rulesWithLogic('min_slip_credit')[0];
+  const slip = slipRule?.logic.params ?? {};
+  const groups = slip.per_fdp
+    ? execFdpGroups(ctx.execPairings, ctx.tz, H(slip.legal_rest_hours), slip.report_minutes_before_std ?? 0, ctx.legalRest?.postMin)
+    : ctx.execPairings.map((p) => [p]);
+  let stay = 0;
+  let flight = 0;
+  for (const group of groups) {
+    // לא `pairingTimes` עם `away`: הוא מסיים לפי ה-TAB של היום האחרון, שכולל גם היעדרות באותו יום.
+    const legs = group.flatMap((p) => p.legs);
+    const abroad = legs.find((l) => l.org === ctx.domicile && l.dst !== ctx.domicile);
+    const out = abroad ?? legs.find((l) => l.org === ctx.domicile);
+    const home = legs.findLast((l) => l.dst === ctx.domicile);
+    const a = out ? legTimes(out, ctx.tz) : null;
+    const b = home ? legTimes(home, ctx.tz) : null;
+    const start = group[0].cutAtStart ? first : (a?.atd ?? a?.std);
+    // ATA ברומה בנחיתה בבסיס הוא כבר שעון הבסיס, ומדויק יותר מ-ATD + ActDur (09/09/2024 TIV-TLV: ‏22:07, ‏ABR 10:07).
+    const landed = b?.ata != null && home.ata != null ? b.ata + ((((home.ata - b.ata) % 1440) + 2160) % 1440) - 720 : b?.ata;
+    const end = group.at(-1).cutAtEnd ? last : (landed ?? b?.sta);
+    if (start != null && end != null) stay += Math.max(0, Math.min(end, last) - Math.max(start, first));
+    const credit = group.reduce((s, p) => s + ctx.expectedOn(p, 'flight'), 0);
+    const rig = group.reduce((s, p) => s + ctx.expectedOn(p, 'rig', slipRule ? [slipRule.id] : []), 0);
+    const slipped = slipRule && group.some((p) => ctx.expectedOn(p, 'rig') > ctx.expectedOn(p, 'rig', [slipRule.id]));
+    const g = credit + rig + (slipped ? Math.max(0, H(slip.min_credit_hours) - credit) : 0);
+    flight += g;
+  }
+  if (!stay && !flight) return;
+  const hours = (min) => Math.round((min / 60) * 100) / 100;
+  const cents = (usd) => Math.round(usd * 100) / 100;
+  const [stayH, flightH] = [hours(stay), hours(flight)];
+  const total = cents(stayH * params.stay_rate_usd) + cents(flightH * params.flight_rate_usd) - cents(stayH * params.stay_deduction_usd);
+  const usd = (v) => v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  ctx.note(null, `אש"ל צפוי: ${usd(flightH)} שעות טיסה ו-${usd(stayH)} שעות שהייה, סה"כ לתשלום ${usd(cents(total))}$.`, rule);
 }
 
 /** בחודש שכולו היעדרות, סך הזיכויים מוגבל. */
@@ -1858,6 +1912,7 @@ export const LOGIC = {
   vacation_credit_balance,
   unpaid_leave_days,
   hotel_waiver_days,
+  per_diem_estimate,
   absence_month_cap,
   late_landing_home,
   long_flight_day,
@@ -1886,6 +1941,7 @@ export const KNOWN_PARAMS = {
   absence_day_credit: ['plan_codes', 'report_codes', 'plan_code_prefixes', 'report_code_prefixes', 'report_flag_column', 'credit_hours', 'tab_hours', 'requires_assigned_activity', 'flight_day_takes_higher', 'away_flag_on_pairing_start', 'confirm_code_prefixes', 'confirm_label', 'confirm_answer', 'exclude_codes'],
   unpaid_leave_days: ['plan_codes', 'report_codes', 'plan_code_prefixes', 'report_code_prefixes'],
   hotel_waiver_days: ['report_column'],
+  per_diem_estimate: ['stay_rate_usd', 'flight_rate_usd', 'stay_deduction_usd'],
   vacation_credit_balance: ['per_day_hours', 'days_full_rate', 'monthly_max_hours', 'yearly_cap_days', 'taper_table', 'taper_table_complete', 'taper_monthly_totals'],
   absence_month_cap: ['cap_hours'],
   late_landing_home: ['grace_minutes', 'step_minutes', 'hours_per_step', 'note_from_minutes'],
@@ -1951,4 +2007,6 @@ export const LOGIC_ORDER = [
   // אחרון מבין חוקי הפיצוי: בלי הרכב צוות, הוא מניח צוות חוקי רק כשהפיצוי ברומה ושאר החוקים אינם מסבירים אותו.
   'legal_crew_composition',
   'absence_month_cap',
+  // אחרי כל החוקים שמזכים קרדיט ו-Rig: שעות הטיסה של האש"ל הן מה שצפוי עליהם.
+  'per_diem_estimate',
 ];
