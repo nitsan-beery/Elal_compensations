@@ -1853,8 +1853,8 @@ function standbyRuns(ctx, params) {
  *   98.5). ערך יום הכוננות לפי חוק זיכוי היום של הקוד (הקוד בדוח הוא 5 התווים הראשונים של הקוד בתכנון).
  *   כשקוד הכוננות רשום גם בדוח ביום הטיסה, חוק זיכוי היום כבר בודק את זה.
  * - החזרה אחרי סוף הכוננות: החברה רשאית להפעיל רק כשהחזרה מתוכננת בתוך הכוננות (2018 ס' 88). בדיקה ידנית.
- * - טיסה מתוכננת ביום כוננות, שלא במסגרת הכוננות: מגיעים גם קרדיט הטיסה וגם זיכוי הכוננות (ישן כ"ה
- *   ס' 11.י). הדוח עוד לא הראה איך זה נרשם, ולכן בדיקה ידנית.
+ *
+ * יום בתכנון הוא טיסה או כוננות, לא שניהם (בעל המוצר, 10/10/2026), ולכן אין בדיקה של טיסה מתוכננת ביום כוננות.
  */
 function standby_activation(ctx, params, rule) {
   if (!ctx.hasPlan || !ctx.hasExec) return;
@@ -1863,14 +1863,6 @@ function standby_activation(ctx, params, rule) {
     const range = run.length === 1 ? dayOf(run[0]) : `⁦${dayOf(run[0])}–${dayOf(run.at(-1))}⁩`;
     const planCode = ctx.timeline.find((d) => d.date === run[0]).plan.codes.find((c) => codeIn(c, params.plan_codes, params.plan_code_prefixes));
     const value = standbyDayRule(ctx, planCode);
-
-    for (const date of run) {
-      const day = ctx.timeline.find((d) => d.date === date);
-      if (day.plan?.legs?.length) {
-        ctx.review(`${dayOf(date)}: בתכנון גם כוננות (${planCode}) וגם טיסה. על טיסה שלא במסגרת הכוננות מגיעים גם קרדיט הטיסה ` +
-          `וגם זיכוי הכוננות${value ? ` (${minToHhmm(value.min)})` : ''} (ישן כ"ה ס' 11.י). דורש בדיקה ידנית.`, rule);
-      }
-    }
 
     for (const match of ctx.matches) {
       if (match.how !== 'unplanned' || !run.includes(match.exec.from)) continue;
