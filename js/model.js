@@ -88,8 +88,9 @@ export function markCarryIn(days, domicile) {
 const isAirReturnOnly = (pairing) => pairing.legs.every((l) => l.org === l.dst);
 
 /**
- * האם הרגל `next` יוצאת באותו FDP שבו נחתה `leg`: המנוחה מהנחיתה (בפועל, ובלעדיה המתוכננת) ועד
- * ההמראה (המתוכננת או בפועל, המוקדמת), פחות זמן ההתייצבות לפני ה-STD, קצרה ממנוחה חוקית. הזמנים
+ * האם הרגל `next` יוצאת באותו FDP שבו נחתה `leg`: המנוחה מהשחרור אחרי הנחיתה (בפועל, ובלעדיה
+ * המתוכננת) ועד ההתייצבות להמראה (המתוכננת או בפועל, המוקדמת) קצרה ממנוחה חוקית. ההתייצבות והשחרור
+ * לפי OMA 7.2.1 (`fdp.reportBefore`, `fdp.releaseAfter`; `dutyTimes` ב-js/rules/legal.js). הזמנים
  * מ-`legTimes`, לפי אזורי הזמן שב-`fdp.tz`.
  */
 export function sameFdp(leg, next, fdp) {
@@ -97,8 +98,7 @@ export function sameFdp(leg, next, fdp) {
   const [a, b] = [legTimes(leg, fdp.tz), legTimes(next, fdp.tz)];
   const end = a ? a.ata ?? a.sta : null;
   if (end == null || !b) return false;
-  // המנוחה מתחילה `postMin` אחרי ה-On block (OMA 7.2.1).
-  const rest = Math.min(b.std, b.atd ?? b.std) - (fdp.reportMin ?? 0) - end - (fdp.postMin ?? 0);
+  const rest = Math.min(b.std, b.atd ?? b.std) - (fdp.reportBefore?.(next) ?? 0) - end - (fdp.releaseAfter?.(leg) ?? 0);
   return rest < fdp.legalRestMin;
 }
 

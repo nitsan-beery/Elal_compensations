@@ -63,11 +63,11 @@ const isTurnaround = (span, legalRest, ctx) =>
   span.start != null && span.end != null && span.flight != null &&
   span.end - span.start - span.flight - (ctx.legalRest?.postMin ?? 0) - (ctx.legalRest?.outstationReportMin ?? 0) < legalRest;
 
-/** הזמן בין סיום FDP (On block בבסיס) לבין ההתייצבות לפעילות הבאה. */
-const restBetween = (a, b, reportMin) => b.start - reportMin - a.end;
-
-/** המנוחה החוקית ביניהם: מתחילה `postMin` אחרי ה-On block (תפקיד אחרי הטיסה, OMA 7.2.1). */
-const legalRestBetween = (a, b, reportMin, postMin = 0) => restBetween(a, b, reportMin) - postMin;
+/**
+ * המנוחה החוקית בין שני תפקידים (`ctx.duty.span`): מהשחרור ועד ההתייצבות, לפי OMA 7.2.1, כמו במגבלות
+ * החוק (`dutyTimes` ב-js/rules/legal.js; בעל המוצר, 10/10/2026).
+ */
+const legalRestBetween = (a, b) => b.report - a.release;
 
 function planPairingsSorted(ctx) {
   return [...ctx.planPairings].sort((a, b) => a.from.localeCompare(b.from));
@@ -89,19 +89,17 @@ function performedAsPlanned(ctx, planPairing) {
 function same_fdp_rounds(ctx, params, rule) {
   if (!ctx.hasPlan) return;
   const legal = H(params.legal_rest_hours);
-  const report = params.report_minutes_before_std ?? 0;
   const list = planPairingsSorted(ctx);
   for (let i = 1; i < list.length; i++) {
     const [p1, p2] = [list[i - 1], list[i]];
-    const [s1, s2] = [pairingTimes(p1, ctx.tz), pairingTimes(p2, ctx.tz)];
+    const [s1, s2] = [ctx.duty.span(p1), ctx.duty.span(p2)];
     if (s1.end == null || s2.start == null) continue;
-    const post = ctx.legalRest?.postMin ?? 0;
-    const rest = legalRestBetween(s1, s2, report, post);
+    const rest = legalRestBetween(s1, s2);
     if (rest >= legal) continue;
     if (!isTurnaround(s1, legal, ctx) || !isTurnaround(s2, legal, ctx)) continue;
 
-    const why = `${describePairing(p1)} ו-${describePairing(p2)}: ${minToHhmm(Math.max(rest, 0))} מנוחה מהשחרור (${hhmm(s1.end + post)}) ` +
-      `עד ההתייצבות (${hhmm(s2.start - report)}), פחות ממנוחה חוקית של ${params.legal_rest_hours} שעות. שתי טיסות סבב באותו FDP`;
+    const why = `${describePairing(p1)} ו-${describePairing(p2)}: ${minToHhmm(Math.max(rest, 0))} מנוחה מהשחרור (${hhmm(s1.release)}) ` +
+      `עד ההתייצבות (${hhmm(s2.report)}), פחות ממנוחה חוקית של ${params.legal_rest_hours} שעות. שתי טיסות סבב באותו FDP`;
     // מתחת לטיסה רק שם החוק, בלי השעות (בעל המוצר, 01/10/2026).
     const explain = '';
     if (!ctx.hasExec) {
@@ -160,11 +158,10 @@ export function extensionDays(ctx, match) {
  */
 export function dayActivity(ctx, exec, d) {
   const params = ctx.rulesWithLogic('second_unplanned_activity')[0]?.logic.params;
-  const span = pairingTimes(exec, ctx.tz, { away: true });
+  const span = ctx.duty.span(exec, { away: true });
   const none = { planned: false, pairing: null, sameFdp: [], sim: null };
   if (!params || span.start == null) return none;
   const legal = H(params.legal_rest_hours);
-  const report = params.report_minutes_before_std ?? 0;
   const plannedPairing = (o) => {
     const m = ctx.matches.find((x) => x.exec === o);
     return !!m?.plan && !ctx.pairingHandledBy(m.plan, 'cancelled_no_compensation');
@@ -172,12 +169,12 @@ export function dayActivity(ctx, exec, d) {
   const pairings = [];
   for (const o of ctx.execPairings) {
     if (o === exec) continue;
-    const so = pairingTimes(o, ctx.tz, { away: true });
+    const so = ctx.duty.span(o, { away: true });
     if (so.start == null || so.end == null || !(o.dates.includes(d) || dateOf(so.end) === d)) continue;
     const planned = plannedPairing(o);
     if (!planned && so.start >= span.start) continue;
     const [first, second] = so.start < span.start ? [so, span] : [span, so];
-    pairings.push({ o, planned, separate: legalRestBetween(first, second, report, ctx.legalRest?.postMin) >= legal });
+    pairings.push({ o, planned, separate: legalRestBetween(first, second) >= legal });
   }
   const separate = pairings.filter((x) => x.separate).sort((a, b) => b.planned - a.planned);
   const day = ctx.timeline.find((x) => x.date === d);
@@ -209,7 +206,6 @@ function planSimDay(day, params) {
 function second_unplanned_activity(ctx, params, rule) {
   if (!ctx.hasExec || !ctx.hasPlan) return;
   const legal = H(params.legal_rest_hours);
-  const report = params.report_minutes_before_std ?? 0;
   const plannedPairing = (o) => {
     const m = ctx.matches.find((x) => x.exec === o);
     return !!m?.plan && !ctx.pairingHandledBy(m.plan, 'cancelled_no_compensation');
@@ -277,14 +273,14 @@ function second_unplanned_activity(ctx, params, rule) {
     if (!ext?.second.length) continue;
     const reason = `extended:${m.exec.id}`;
     if (ctx.isAsked(reason) || ctx.answer(reason)?.value === 'agreed') continue;
-    const span = pairingTimes(m.exec, ctx.tz, { away: true });
+    const span = ctx.duty.span(m.exec, { away: true });
     for (const d of ext.second) {
       const what = `${describePairing(m.exec)} התארך ל-${ddmm(d)}`;
       const others = ctx.execPairings.filter((x) => x !== m.exec && x.dates.includes(d));
       const separate = others.find((o) => {
-        const so = pairingTimes(o, ctx.tz, { away: true });
+        const so = ctx.duty.span(o, { away: true });
         const [first, second] = (so.start ?? 0) < span.start ? [so, span] : [span, so];
-        return first.end != null && second.start != null && legalRestBetween(first, second, report, ctx.legalRest?.postMin) >= legal;
+        return first.end != null && second.start != null && legalRestBetween(first, second) >= legal;
       });
       if (separate) {
         ctx.expectPairing(m.exec, key, H(params.hours), rule, `${what}, ובאותה יממה בוצעה גם ${describePairing(separate)} עם מנוחה חוקית ביניהן`,
@@ -339,19 +335,17 @@ function second_unplanned_activity(ctx, params, rule) {
 function base_rest_shortfall(ctx, params, rule) {
   if (!ctx.hasPlan) return;
   const buffer = params.rest_buffer_minutes ?? 0;
-  const report = params.report_minutes_before_std ?? 0;
   const legal = H(params.legal_rest_hours);
-  const post = ctx.legalRest?.postMin ?? 0;
   const list = planPairingsSorted(ctx);
 
   const links = [];
   for (let i = 1; i < list.length; i++) {
     const [p1, p2] = [list[i - 1], list[i]];
-    const [s1, s2] = [pairingTimes(p1, ctx.tz), pairingTimes(p2, ctx.tz)];
+    const [s1, s2] = [ctx.duty.span(p1), ctx.duty.span(p2)];
     if (s1.start == null || s1.end == null || s2.start == null || s1.flight == null) continue;
-    if (legalRestBetween(s1, s2, report, post) < legal) continue; // אותו FDP
+    if (legalRestBetween(s1, s2) < legal) continue; // אותו FDP
 
-    const rest = restBetween(s1, s2, report) - 2 * buffer;
+    const rest = s2.report - s1.end - 2 * buffer;
     const stay = s1.end - s1.start;
     let required;
     let basis;
@@ -369,7 +363,7 @@ function base_rest_shortfall(ctx, params, rule) {
     if (rest < required) links.push({ p1, p2, s1, s2, rest, required, basis, capUnknown });
   }
 
-  const sequences = turnaroundSequences(ctx, params.turnaround_sequence, links, legal, report);
+  const sequences = turnaroundSequences(ctx, params.turnaround_sequence, links, legal);
   for (const link of links) {
     const { p1, p2, rest, required, basis, capUnknown } = link;
     const seq = sequences.get(link);
@@ -434,7 +428,7 @@ function base_rest_shortfall(ctx, params, rule) {
  * הרבה רצפים, לפי הסדר בחודש; רצף שאינו נכנס בה נשאל כמו כל מנוחה קצרה.
  * @returns {Map<object, {ok: boolean, why?: string}>} לכל קישור בין שתי טיסות סבב
  */
-function turnaroundSequences(ctx, seq, links, legal, report) {
+function turnaroundSequences(ctx, seq, links, legal) {
   const out = new Map();
   if (!seq) return out;
   const overlaps = (start, end, [from, to]) => {
@@ -444,8 +438,8 @@ function turnaroundSequences(ctx, seq, links, legal, report) {
   const nightWin = seq.night_window.map(parseClock);
   const [exFrom, exTo] = seq.night_report_excluded.map(parseClock);
   const night = (s) => {
-    const at = clockOf(s.start - report);
-    return overlaps(s.start - report, s.end, nightWin) && !(at >= exFrom && at < exTo);
+    const at = clockOf(s.report);
+    return overlaps(s.report, s.end, nightWin) && !(at >= exFrom && at < exTo);
   };
   const tiers = [...seq.min_block].sort((a, b) => parseClock(b.report_after) - parseClock(a.report_after));
   const nightMin = H(seq.night_min_block_hours);
@@ -468,9 +462,9 @@ function turnaroundSequences(ctx, seq, links, legal, report) {
         why = `${gap}. ברצף של שתי טיסות חוצות לילה נדרשים לפחות ${minToHhmm(nightMin)}, והטיסה השנייה צריכה לנחות לפני ${seq.night_on_block_before}`;
       }
     } else {
-      const reportAt = clockOf(s2.start - report);
+      const reportAt = clockOf(s2.report);
       const tier = tiers.find((t) => reportAt > parseClock(t.report_after));
-      if (!tier) why = `${gap}, וההתייצבות לטיסה הבאה ב-${hhmm(s2.start - report)}. רצף כזה מותר רק כשההתייצבות אחרי ${tiers.at(-1).report_after}`;
+      if (!tier) why = `${gap}, וההתייצבות לטיסה הבאה ב-${hhmm(s2.report)}. רצף כזה מותר רק כשההתייצבות אחרי ${tiers.at(-1).report_after}`;
       else if (block < H(tier.hours)) why = `${gap}. כשההתייצבות לטיסה הבאה אחרי ${tier.report_after} נדרשים לפחות ${minToHhmm(H(tier.hours))}`;
     }
     if (why) {
@@ -533,8 +527,7 @@ function legEndsFdp(ctx, legs, i, legal) {
   if (i === legs.length - 1) return true;
   const [a, b] = [legTimes(legs[i], ctx.tz), legTimes(legs[i + 1], ctx.tz)];
   if (a?.sta == null || !b) return true;
-  const rest = ctx.legalRest;
-  return b.std - a.sta - (rest?.postMin ?? 0) - (rest?.outstationReportMin ?? 0) >= legal;
+  return b.std - a.sta - ctx.duty.releaseAfter(legs[i]) - ctx.duty.reportBefore(legs[i + 1]) >= legal;
 }
 
 /** שעת הנחיתה המתוכננת של רגל בשעון הבסיס (`legTimes`), או null. */
@@ -873,7 +866,6 @@ function askOccasionDate(ctx, occ, rule, def) {
  * החברה, וקוד פעילות בלי שעות (קרקע, סימולטור, כוננות) – שואלים.
  */
 function special_date_activity(ctx, params, rule) {
-  const report = params.report_minutes_before_std ?? 0;
   const key = keyFor(params.report_column);
   const monthStart = at(ctx.monthFirst, 0);
   const monthEnd = at(ctx.timeline.at(-1).date, 1440);
@@ -906,8 +898,8 @@ function special_date_activity(ctx, params, rule) {
 
     let hit = null;
     for (const p of pairings) {
-      const s = pairingTimes(p, ctx.tz, { away: ctx.hasExec });
-      const start = s.start != null ? s.start - report : monthStart;
+      const s = ctx.duty.span(p, { away: ctx.hasExec });
+      const start = s.report ?? monthStart;
       const end = s.end ?? monthEnd;
       if (start < wTo && end > wFrom) { hit = p; break; }
     }
@@ -1130,25 +1122,24 @@ function consecutive_saturdays(ctx, params, rule) {
  */
 function consecutive_night_rounds(ctx, params, rule) {
   if (!ctx.hasPlan) return;
-  const report = params.report_minutes_before_std ?? 0;
   const legal = H(params.legal_rest_hours);
   const from = parseClock(params.window_from);
   const to = parseClock(params.window_to);
   const key = keyFor(params.report_column);
   const nightsOf = (s) => {
     if (s.start == null || s.end == null || !isTurnaround(s, legal, ctx)) return [];
-    const d0 = dateOf(s.start - report);
-    return [d0, addDays(d0, 1)].filter((d) => s.start - report < at(d, to) && s.end > at(d, from));
+    const d0 = dateOf(s.report);
+    return [d0, addDays(d0, 1)].filter((d) => s.report < at(d, to) && s.end > at(d, from));
   };
 
   const planned = new Map(); // לילה → סבב מתוכנן
   for (const p of planPairingsSorted(ctx)) {
-    for (const d of nightsOf(pairingTimes(p, ctx.tz))) if (!planned.has(d)) planned.set(d, p);
+    for (const d of nightsOf(ctx.duty.span(p))) if (!planned.has(d)) planned.set(d, p);
   }
   const performed = new Map(); // לילה → סבב ביצוע
   if (ctx.hasExec) {
     for (const e of ctx.execPairings) {
-      for (const d of nightsOf(pairingTimes(e, ctx.tz))) if (!performed.has(d)) performed.set(d, e);
+      for (const d of nightsOf(ctx.duty.span(e))) if (!performed.has(d)) performed.set(d, e);
     }
   }
   // done / company / no / unknown
@@ -1225,14 +1216,13 @@ function consecutive_night_rounds(ctx, params, rule) {
 // ---------- טיסה לבנה (2018 הגדרות, ס' 27.4) ----------
 
 /**
- * הרגליים שיכולות להיות טיסה לבנה: יוצאות מהבסיס, ההתייצבות המתוכננת (STD פחות `report_minutes_before_std`,
- * 90 דק' בצי רחב גוף, 2018 ס' 52.2) אחרי `report_after` ועד `report_until`, ובלוק מקובע ארוך מ-`min_block_hours`.
+ * הרגליים שיכולות להיות טיסה לבנה: יוצאות מהבסיס, ההתייצבות המתוכננת (STD פחות זמן ההתייצבות של OMA 7.2.1,
+ * `ctx.duty.reportBefore`: 90 דק' בצי רחב גוף) אחרי `report_after` ועד `report_until`, ובלוק מקובע ארוך מ-`min_block_hours`.
  * `block: null` – אין משך מתוכנן (השדה אינו בטבלת אזורי הזמן). גם מגבלות החוק (לפני החוקים) והצוות החוזי
  * נשענים עליהן: טיסה כזאת לעולם אינה בצוות בודד, ולכן הרכב הצוות שלה נשאל רק בשאלת הטיסה הלבנה (בעל
  * המוצר, 06/10/2026).
  */
 export function whiteFlightLegs(ctx, params) {
-  const report = params.report_minutes_before_std ?? 0;
   const from = parseClock(params.report_after);
   const to = parseClock(params.report_until);
   const inWindow = (c) => (from < to ? c > from && c <= to : c > from || c <= to);
@@ -1243,7 +1233,7 @@ export function whiteFlightLegs(ctx, params) {
       const dh = ctx.hasExec ? l.dhd || l.type === 'DHO' : l.dh;
       const t = legTimes(l, ctx.tz);
       if (dh || l.org !== ctx.domicile || !t) continue;
-      const reportAt = t.std - report;
+      const reportAt = t.std - ctx.duty.reportBefore(l);
       if (!inWindow(clockOf(reportAt))) continue;
       const block = legBlock(ctx, l);
       if (block != null && block <= H(params.min_block_hours)) continue;
@@ -1582,7 +1572,7 @@ function stay_extension(ctx, params, rule) {
 
 /**
  * שהייה בתחנה בתוך סבב: מהנחיתה בה (`actual` – בפועל כשיש) ועד ההתייצבות לרגל שיוצאת ממנה.
- * שעת ההתייצבות אינה בקבצים, ונגזרת מ-STD פחות `report_minutes_before_std`. מוחזרים גם הזמנים
+ * שעת ההתייצבות אינה בקבצים, ונגזרת מ-STD לפי OMA 7.2.1 (`ctx.duty.reportBefore`; ב-DH ‏20 דק'). מוחזרים גם הזמנים
  * בשעון התחנה, כי חלון הלילה של ס' 24.3 הוא מקומי. רגל DH נספרת גם היא: הצוות שוהה בתחנה בכל מקרה.
  */
 function stationStay(ctx, pairing, params, actual) {
@@ -1594,9 +1584,10 @@ function stationStay(ctx, pairing, params, actual) {
     const off = ctx.tz.offsetAt(params.station, inLeg.date);
     const arr = actual ? a?.ata ?? a?.sta : a?.sta;
     if (arr == null || !b || off == null) return null;
-    const pickup = b.std - (params.report_minutes_before_std ?? 0);
+    const reportMin = ctx.duty.reportBefore(outLeg);
+    const pickup = b.std - reportMin;
     if (pickup <= arr) return null;
-    return { inLeg, outLeg, arr, pickup, localArr: arr + off, localPickup: pickup + off };
+    return { inLeg, outLeg, arr, pickup, reportMin, localArr: arr + off, localPickup: pickup + off };
   }
   return null;
 }
@@ -1614,6 +1605,8 @@ function nightsIn(from, to, startLocal, endLocal) {
   }
   return count;
 }
+
+const derivedReport = (stay) => `שעת ההתייצבות אינה בקבצים ונגזרת מ-STD פחות ${stay.reportMin} דק'.`;
 
 const stayLine = (p, stay, params) =>
   `${describePairing(p)}: נחיתה ב-${params.station} ${ddmm(dateOf(stay.localArr))} ${hhmm(stay.localArr)} והתייצבות ` +
@@ -1643,7 +1636,7 @@ function short_rest_miami(ctx, params, rule) {
         `${params.max_nights} לילה בלבד, ולכן אין פיצוי.`, rule);
       continue;
     }
-    const derived = `שעת ההתייצבות אינה בקבצים ונגזרת מ-STD פחות ${params.report_minutes_before_std} דק'.`;
+    const derived = derivedReport(stay);
     const why = `${what}, ולכן לילה אחד בלבד ${window}`;
     if (!ctx.hasExec) {
       ctx.markPairing(p, 'miami_one_night');
@@ -1773,11 +1766,11 @@ function short_rest_las_vegas(ctx, params, rule) {
   const own = ctx.rulesWithLogic('short_rest_las_vegas').map((r) => r.id);
   const deal = `המנוחה החוזית ב-${params.station} מקוצרת ל-${params.rest_hours} שעות בתמורה לפיצוי של ` +
     `${minToHhmm(hours)}, כל עוד החברה טסה לשם פעם בשבוע.`;
-  const derived = `שעת ההתייצבות אינה בקבצים ונגזרת מ-STD פחות ${params.report_minutes_before_std} דק'.`;
   for (const p of ctx.hasExec ? ctx.execPairings : ctx.planPairings) {
     const stay = stationStay(ctx, p, params, ctx.hasExec);
     if (!stay) continue;
     const what = stayLine(p, stay, params);
+    const derived = derivedReport(stay);
     if (!ctx.hasExec) {
       ctx.expectPairing(p, key, hours, rule, `${what}. ${deal} ${derived}`);
       continue;
@@ -1924,16 +1917,16 @@ function sim_extension(ctx, params, rule) {
 function covered_by() {}
 
 /**
- * קיבוץ סבבי הביצוע ל-FDP: סבבים עוקבים שאין ביניהם מנוחה חוקית, לפי STD/STA. סבב חתוך,
+ * קיבוץ סבבי הביצוע ל-FDP: סבבים עוקבים שאין ביניהם מנוחה חוקית, לפי STD/STA וההתייצבות והשחרור של ה-OMA. סבב חתוך,
  * או סבב שחסרים לו זמנים, עומד לבד.
  */
-export function execFdpGroups(pairings, tz, legalRest, reportMin, postMin = 0) {
+export function execFdpGroups(ctx, pairings, legalRest) {
   const sorted = [...pairings].sort((a, b) => a.from.localeCompare(b.from));
   const groups = [];
   let prev = null;
   for (const p of sorted) {
-    const span = pairingTimes(p, tz);
-    const joins = prev && prev.span.end != null && span.start != null && legalRestBetween(prev.span, span, reportMin, postMin) < legalRest;
+    const span = ctx.duty.span(p);
+    const joins = prev && prev.span.end != null && span.start != null && legalRestBetween(prev.span, span) < legalRest;
     if (joins) groups.at(-1).push(p);
     else groups.push([p]);
     prev = { span };
@@ -1964,21 +1957,21 @@ export const DUTY_LOGIC = {
 };
 
 export const DUTY_PARAMS = {
-  same_fdp_rounds: ['legal_rest_hours', 'report_minutes_before_std', 'hours', 'report_column'],
-  second_unplanned_activity: ['legal_rest_hours', 'report_minutes_before_std', 'hours', 'report_column', 'sim_report_codes', 'sim_plan_codes', 'sim_plan_code_prefixes'],
-  base_rest_shortfall: ['answer_value', 'hours', 'report_column', 'report_minutes_before_std', 'rest_buffer_minutes', 'legal_rest_hours',
+  same_fdp_rounds: ['legal_rest_hours', 'hours', 'report_column'],
+  second_unplanned_activity: ['legal_rest_hours', 'hours', 'report_column', 'sim_report_codes', 'sim_plan_codes', 'sim_plan_code_prefixes'],
+  base_rest_shortfall: ['answer_value', 'hours', 'report_column', 'rest_buffer_minutes', 'legal_rest_hours',
     'short_stay_max_hours', 'short_stay_factor', 'long_stay_share', 'long_stay_min_hours', 'long_stay_max_hours', 'turnaround_sequence'],
   night_landings: ['fleet', 'window_from', 'window_to', 'min_planned_count', 'paid_from_count', 'hours', 'report_column', 'base_landings_only', 'counted_crews', 'legal_rest_hours'],
-  special_date_activity: ['occasions', 'flight_activity_only', 'hours', 'report_column', 'report_minutes_before_std'],
+  special_date_activity: ['occasions', 'flight_activity_only', 'hours', 'report_column'],
   free_days_waived: ['hours', 'report_column', 'paid_from_day', 'off_block_from', 'on_block_until', 'min_free_days'],
   consecutive_saturdays: ['hours', 'report_column', 'shabbat_from', 'shabbat_to'],
-  consecutive_night_rounds: ['hours', 'report_column', 'more_than', 'window_from', 'window_to', 'legal_rest_hours', 'report_minutes_before_std'],
-  white_flight: ['hours', 'report_column', 'report_minutes_before_std', 'report_after', 'report_until', 'min_block_hours'],
+  consecutive_night_rounds: ['hours', 'report_column', 'more_than', 'window_from', 'window_to', 'legal_rest_hours'],
+  white_flight: ['hours', 'report_column', 'report_after', 'report_until', 'min_block_hours'],
   ulh_flight: ['hours', 'report_column', 'min_block_hours', 'max_block_hours'],
   stay_extension: ['over_hours', 'capped_days', 'hours', 'report_column'],
-  short_rest_miami: ['station', 'night_from', 'night_to', 'max_nights', 'hours', 'report_column', 'report_minutes_before_std'],
+  short_rest_miami: ['station', 'night_from', 'night_to', 'max_nights', 'hours', 'report_column'],
   miami_delay: ['station', 'phase', 'min_delay_hours', 'min_delay_exclusive', 'hours', 'report_column'],
-  short_rest_las_vegas: ['station', 'rest_hours', 'hours', 'report_column', 'report_minutes_before_std'],
+  short_rest_las_vegas: ['station', 'rest_hours', 'hours', 'report_column'],
   sim_night_session: ['hours', 'report_column', 'stations', 'night_from', 'night_to', 'start_after_std_minutes'],
   sim_friday_holiday_eve: ['hours', 'report_column', 'stations'],
   sim_extension: ['hours', 'report_column', 'stations', 'max_hours'],

@@ -11,7 +11,7 @@ import { rulesInEffect, partitionRules, rulesByLogic, classifyCode } from './cat
 import { buildTimeline, buildPairings, markCarryIn, matchPairings, describePairing, describeRoute, pairingParts, fdpParts, sameFdp } from '../model.js';
 import { hoursToMin, minToHhmm } from '../time.js';
 import { OPTIONAL_COLUMNS } from '../pdf/exec.js';
-import { checkLegalLimits, restDefinition, delayFitsFdp, baseReportMinutes } from './legal.js';
+import { checkLegalLimits, restDefinition, delayFitsFdp, baseReportMinutes, dutyTimes } from './legal.js';
 import { whiteFlightLegs, whiteCrew, contractCrewOf } from './duty.js';
 import { timeZones, legTimes, pairingTimes, crossesMidnight, dateOf } from '../flight-times.js';
 import { calendarView, buildJournal, reduceChain, sameAssignment, firstFdpLegs, overlapDays, samePairing } from './journal.js';
@@ -82,8 +82,11 @@ export function evaluate({ rulesData, plan = null, exec = null, answers = {}, hi
   const slip = supported.find((r) => r.logic.id === 'min_slip_credit')?.logic.params;
   // המנוחה החוקית לפי ה-OMA: מתחילה 15 דק' אחרי ה-On block (`legal_limits`).
   const legalRest = restDefinition(rulesData.legal_limits);
+  // ההתייצבות והשחרור לפי ה-OMA, לכל חוקי הפיצוי (`dutyTimes`; בעל המוצר, 10/10/2026).
+  const duty = dutyTimes(rulesData.legal_limits, { domicile, fleet, tz,
+    answer: (id) => answers[id] ?? (reopen.includes(id) ? null : cal.answer(id)) ?? null });
   const fdp = slip?.legal_rest_hours != null
-    ? { legalRestMin: slip.legal_rest_hours * 60, reportMin: slip.report_minutes_before_std ?? 0, postMin: legalRest?.postMin ?? 0, tz } : null;
+    ? { legalRestMin: slip.legal_rest_hours * 60, reportBefore: duty.reportBefore, releaseAfter: duty.releaseAfter, tz } : null;
   const execPairings = exec ? buildPairings(timeline, domicile, (d) => d.exec?.legs, fdp) : [];
   const reportDays = exec ? attachReportTails(execPairings, timeline, tz, codes, answers) : [];
   markLandingDays(planPairings, execPairings, timeline, tz);
@@ -127,6 +130,7 @@ export function evaluate({ rulesData, plan = null, exec = null, answers = {}, hi
     // בלי דוח ביצוע, הסבבים המתוכננים משמשים לחישוב הקרדיט והרי"ג הצפויים.
     execPairings: exec ? execPairings : planPairings });
   ctx.legalRest = legalRest;
+  ctx.duty = duty;
   ctx.tz = tz;
   // טיסות שהרכב הצוות שלהן משנה את בדיקת מגבלות החוק או את הזכאות לפיצוי, "date|flight": רק עליהן
   // ההודעה על הרכב צוות שחסר ביומן (`calendarMissing`; בעל המוצר, 04/10/2026).

@@ -17,7 +17,7 @@
 
 import { minToHhmm } from '../time.js';
 import { markCarryIn } from '../model.js';
-import { legTimes } from '../flight-times.js';
+import { legTimes, pairingTimes } from '../flight-times.js';
 
 const dayMs = 86400000;
 const at = (date, clock) => Date.parse(date) / 60000 + clock;
@@ -395,6 +395,35 @@ export function delayFitsFdp(limits, { crew = 'single', ac = null, oldReport, ne
   const row = tableRow(limits.fdp_unaugmented, clockOf(newReport));
   const combined = Math.min(H(row.hours[Math.min(ch.flights.length, row.hours.length) - 1] + limits.rap_fdp_extra_hours), H(limits.rap_fdp_max_hours));
   return end - oldReport <= Math.max(combined, lim.fdp);
+}
+
+const isDeadhead = (l) => !!(l.dh || l.dhd || l.type === 'DHO' || l.type === 'DHX');
+
+/**
+ * ההתייצבות והשחרור לחוקי הפיצוי שתלויים ב-FDP, באותה הגדרה כמו בבדיקת מגבלות החוק (7.2.1, `setTimes`;
+ * בעל המוצר, 10/10/2026; עד אז 60 דק' קבועות לפני STD בכל חוק). התייצבות לפני STD: DH –
+ * `deadhead_report_minutes`; טיסה – `reportMinutes` (מחוץ לבסיס, ובבסיס לפי הצי והרכב הצוות). שחרור: DH –
+ * ב-On block; טיסה – `post_flight_minutes` אחריו. `span(pairing, opts)`: `pairingTimes` ועוד `report`
+ * (ההתייצבות לרגל הראשונה שיוצאת מהבסיס) ו-`release` (השחרור אחרי הנחיתה בבסיס).
+ * @param {object} limits  `legal_limits`
+ * @param {{domicile: string, fleet: string|null, tz: object, answer: Function}} o
+ */
+export function dutyTimes(limits, { domicile, fleet, tz, answer }) {
+  const reportBefore = (leg) => {
+    if (!limits || !leg) return 0;
+    if (isDeadhead(leg)) return limits.deadhead_report_minutes ?? 0;
+    const t = legTimes(leg, tz);
+    return reportMinutes({ org: leg.org, ac: leg.ac ?? null, date: t ? dateOf(t.std) : leg.date, flight: leg.flight, std: t?.std ?? 0 },
+      { limits, domicile, fleet, answer });
+  };
+  const releaseAfter = (leg) => (!limits || !leg || isDeadhead(leg) ? 0 : limits.post_flight_minutes ?? 0);
+  const span = (pairing, opts) => {
+    const s = pairingTimes(pairing, tz, opts);
+    const out = pairing.cutAtStart ? null : pairing.legs.find((l) => l.org === domicile);
+    const home = pairing.cutAtEnd ? null : pairing.legs.findLast((l) => l.dst === domicile);
+    return { ...s, report: s.start == null ? null : s.start - reportBefore(out), release: s.end == null ? null : s.end + releaseAfter(home) };
+  };
+  return { reportBefore, releaseAfter, span };
 }
 
 /** זמן ההתייצבות בבסיס לפני STD, לפי הצי (`report_minutes_base`). */

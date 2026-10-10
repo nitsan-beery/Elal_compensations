@@ -152,7 +152,7 @@ function min_slip_credit(ctx, params, rule) {
 /** הקבוצות שההשלמה נבדקת עליהן: FDP שלם, או כל סבב בנפרד כשחלק מה-FDP אינו נבדק. */
 function minSlipGroups(ctx, params) {
   const groups = params.per_fdp
-    ? execFdpGroups(ctx.execPairings, ctx.tz, H(params.legal_rest_hours), params.report_minutes_before_std ?? 0, ctx.legalRest?.postMin)
+    ? execFdpGroups(ctx, ctx.execPairings, H(params.legal_rest_hours))
     : ctx.execPairings.map((p) => [p]);
   const out = [];
   for (const group of groups) {
@@ -485,7 +485,7 @@ function perDiemHours(ctx) {
   const slipRule = ctx.rulesWithLogic('min_slip_credit')[0];
   const slip = slipRule?.logic.params ?? {};
   const groups = slip.per_fdp
-    ? execFdpGroups(ctx.execPairings, ctx.tz, H(slip.legal_rest_hours), slip.report_minutes_before_std ?? 0, ctx.legalRest?.postMin)
+    ? execFdpGroups(ctx, ctx.execPairings, H(slip.legal_rest_hours))
     : ctx.execPairings.map((p) => [p]);
   let stay = 0;
   let flight = 0;
@@ -1963,7 +1963,7 @@ export const LOGIC = {
  */
 export const KNOWN_PARAMS = {
   credit_from_scheduled: [],
-  min_slip_credit: ['min_credit_hours', 'per_fdp', 'legal_rest_hours', 'report_minutes_before_std'],
+  min_slip_credit: ['min_credit_hours', 'per_fdp', 'legal_rest_hours'],
   absence_day_credit: ['plan_codes', 'report_codes', 'plan_code_prefixes', 'report_code_prefixes', 'report_flag_column', 'credit_hours', 'tab_hours', 'requires_assigned_activity', 'flight_day_takes_higher', 'away_flag_on_pairing_start', 'confirm_code_prefixes', 'confirm_label', 'confirm_answer', 'exclude_codes'],
   unpaid_leave_days: ['plan_codes', 'report_codes', 'plan_code_prefixes', 'report_code_prefixes'],
   hotel_waiver_days: ['report_column'],
