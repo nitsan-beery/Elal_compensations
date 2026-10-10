@@ -1809,7 +1809,8 @@ function standby_end_for_bid(ctx, params, rule) {
             'הרומה לא מזכה קריאה מיוחדת. אם החברה אישרה לך לסיים את הכוננות בגלל זכייה במכרז, מגיעה קריאה מיוחדת על ימי הטיסה. אם הכוננות הופעלה, מגיע רק קרדיט הטיסה. מה קרה?',
           options: [
             { value: 'standby_bid', label: 'סיום כוננות בגלל זכייה במכרז', hint: bidHint(pairing, ctx, sc) },
-            { value: 'standby_activated', label: 'הפעלת הכוננות', hint: 'קרדיט הטיסה, בלי קריאה מיוחדת' },
+            { value: 'standby_activated', label: 'הפעלת הכוננות',
+              hint: daysAfterStandby(ctx, pairing, run).length ? 'קרדיט הטיסה, וקריאה מיוחדת רק על הימים שאחרי הכוננות' : 'קרדיט הטיסה, בלי קריאה מיוחדת' },
             otherOption(),
           ],
           ruleId: rule.id,
@@ -1849,10 +1850,14 @@ function standbyRuns(ctx, params) {
  * ס' 12.ב: קריאה מיוחדת היא ביממה שבה לא היה משובץ לטיסה או לכוננות), ולא שואלים עליה. היומיים
  * האחרונים של הרצף הם של חוק סיום הכוננות למכרז, ומגיעים לכאן רק אחרי התשובה "הפעלת הכוננות".
  *
- * - הקרדיט על ימי הכוננות שבהם טס: הגבוה מבין קרדיט הטיסה לבין ערך ימי הכוננות האלה (2018 ס' 98.1–98.3,
- *   98.5). ערך יום הכוננות לפי חוק זיכוי היום של הקוד (הקוד בדוח הוא 5 התווים הראשונים של הקוד בתכנון).
- *   כשקוד הכוננות רשום גם בדוח ביום הטיסה, חוק זיכוי היום כבר בודק את זה.
- * - החזרה אחרי סוף הכוננות: החברה רשאית להפעיל רק כשהחזרה מתוכננת בתוך הכוננות (2018 ס' 88). בדיקה ידנית.
+ * - הקרדיט על ימי הכוננות שבהם טס: הגבוה מבין קרדיט הטיסה, כולל ההשלמה לסליפ קצר (`minSlipTopUp`), לבין
+ *   ערך ימי הכוננות האלה (2018 ס' 98.1–98.3, 98.5). כשהכוננות גבוהה – ההפרש ב-Rig (סבב של יומיים ומעלה; ביום
+ *   אחד הטיסה תמיד גבוהה; בעל המוצר, 10/10/2026; העמודה לא אומתה מול הרומה). ערך יום הכוננות לפי חוק זיכוי
+ *   היום של הקוד (הקוד בדוח הוא 5 התווים הראשונים של הקוד בתכנון). כשקוד הכוננות רשום גם בדוח ביום הטיסה,
+ *   חוק זיכוי היום כבר בודק את זה.
+ * - החזרה אחרי סוף הכוננות: החברה רשאית להפעיל רק כשהחזרה מתוכננת בתוך הכוננות (2018 ס' 88), ולכן הימים
+ *   שאחריה הם בהסכמה, ועל כל יום מהם שלא תוכנן בו כלום מגיעה קריאה מיוחדת, בלי הסף של היממה השנייה (בעל
+ *   המוצר, 10/10/2026). ימי הכוננות עצמם – הפעלה, כמו בכל סבב.
  *
  * יום בתכנון הוא טיסה או כוננות, לא שניהם (בעל המוצר, 10/10/2026), ולכן אין בדיקה של טיסה מתוכננת ביום כוננות.
  */
@@ -1870,28 +1875,54 @@ function standby_activation(ctx, params, rule) {
       if (pending.some((t) => ctx.pairingHandledBy(pairing, t))) continue;
       ctx.markPairing(pairing, 'standby_activated');
       const flown = run.filter((d) => pairing.from <= d && d <= pairing.to);
-      const beyond = pairing.to > run.at(-1);
-      ctx.note(pairing.from, `הפעלה מהכוננות (${range}): קרדיט הטיסה, בלי קריאה מיוחדת.`, rule);
-      if (beyond) {
-        ctx.review(`${describePairing(pairing)}: הופעלת מהכוננות (${range}), והחזרה אחרי סוף הכוננות. החברה רשאית להפעיל ` +
-          'כונן רק כשהחזרה מתוכננת להסתיים בתוך הכוננות (2018 ס\' 88). דורש בדיקה ידנית.', rule);
+      const after = daysAfterStandby(ctx, pairing, run);
+      ctx.note(pairing.from, `הפעלה מהכוננות (${range}): קרדיט הטיסה${after.length
+        ? `, וקריאה מיוחדת על ${after.length === 1 ? 'היום' : 'הימים'} שאחרי הכוננות` : ', בלי קריאה מיוחדת'}.`, rule);
+      // החזרה אחרי סוף הכוננות: הימים שאחריה בהסכמה, וכל יום שלא תוכנן בו כלום הוא קריאה מיוחדת (2018 ס' 88;
+      // בעל המוצר, 10/10/2026). חוק הקריאה המיוחדת מדלג על סבב שהופעל מכוננות, ולכן הציפייה כאן.
+      const sc = ctx.rulesWithLogic('special_call')[0];
+      for (const d of sc ? after : []) {
+        ctx.expectPairing(pairing, 'sc', H(sc.logic.params.hours), sc, `${flightsOf(pairing)}: יממה ${dayOf(d)}, אחרי סוף הכוננות (${range}).`,
+          { date: d, dates: [d], perDay: true, explain: 'הסבב נמשך אחרי סוף הכוננות.' });
       }
 
       // הכוננות רשומה בדוח בימי הטיסה: חוק זיכוי היום כבר משווה בין הטיסה לכוננות.
       if (value && flown.some((d) => ctx.execCodes(ctx.timeline.find((x) => x.date === d)).some((c) => codeIn(c, value.rule.logic.params.report_codes, value.rule.logic.params.report_code_prefixes)))) continue;
-      const credit = sumLegs(pairing, ctx.domicile);
+      const legs = sumLegs(pairing, ctx.domicile);
+      const credit = legs == null ? null : legs + minSlipTopUp(ctx, pairing);
       const what = `${flown.length === 1 ? 'יום הכוננות שבו' : `${flown.length} ימי הכוננות שבהם`} טסת (${flown.map(dayOf).join(', ')})`;
       if (!value) {
         ctx.review(`${describePairing(pairing)}: על ${what} מגיע הגבוה מבין קרדיט הטיסה לבין ערך ימי הכוננות (2018 ס' 98). ` +
           `אין חוק שקובע את ערך הכוננות לקוד ${planCode}. דורש בדיקה ידנית.`, rule);
-      } else if (credit == null || credit < value.min * flown.length) {
-        ctx.review(`${describePairing(pairing)}: על ${what} מגיע הגבוה מבין קרדיט הטיסה (${credit == null ? 'לא ידוע' : minToHhmm(credit)}) ` +
-          `לבין ${flown.length} × ${minToHhmm(value.min)} (${value.rule.title}; 2018 ס' 98). הכוננות גבוהה יותר, ועוד לא ראינו איך זה נרשם ברומה. דורש בדיקה ידנית.`, rule);
+      } else if (credit == null) {
+        ctx.review(`${describePairing(pairing)}: על ${what} מגיע הגבוה מבין קרדיט הטיסה לבין ${flown.length} × ${minToHhmm(value.min)} ` +
+          `(${value.rule.title}; 2018 ס' 98), וקרדיט הטיסה אינו ידוע. דורש בדיקה ידנית.`, rule);
+      } else if (credit < value.min * flown.length) {
+        // הכוננות גבוהה (סבב של יומיים ומעלה): ההפרש מעבר לקרדיט ולהשלמה לסליפ קצר, ב-Rig (בעל המוצר, 10/10/2026).
+        const n = flown.length;
+        ctx.expectPairing(pairing, 'rig', value.min * n - credit, rule,
+          `${describePairing(pairing)}: ${n} × ${minToHhmm(value.min)} על ${what}, גבוה מקרדיט הטיסה ${minToHhmm(credit)}`,
+          { explain: `ערך ${n === 1 ? 'יום הכוננות' : `${n} ימי הכוננות`} שבהם טסת גבוה מקרדיט הסבב.` });
       } else {
         ctx.note(pairing.from, 'הפעלה מהכוננות: קרדיט הטיסה גבוה מערך הכוננות, ולכן אין תוספת.', rule);
       }
     }
   }
+}
+
+/**
+ * ימי הסבב אחרי סוף רצף הכוננות שלא תוכנן בהם כלום (`ctx.planFreeDay`), מההמראה ועד הנחיתה בבסיס בפועל,
+ * כולל נחיתה אחרי חצות, כמו ב-`extensionDays`.
+ */
+function daysAfterStandby(ctx, pairing, run) {
+  if (pairing.to <= run.at(-1)) return [];
+  const e = pairingTimes(pairing, ctx.tz, { away: true });
+  if (e.end == null) return [];
+  const days = [];
+  for (let d = addDays(run.at(-1), 1); at(d, 0) < e.end; d = addDays(d, 1)) {
+    if (ctx.timeline.some((x) => x.date === d) && ctx.planFreeDay(d)) days.push(d);
+  }
+  return days;
 }
 
 /** חוק זיכוי היום של קוד כוננות בתכנון, וערך היום שלו. בדוח הקוד מקוצר ל-5 תווים (SBY_S). */
