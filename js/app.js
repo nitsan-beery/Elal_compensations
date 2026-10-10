@@ -1007,7 +1007,7 @@ const gapClass = (diff) => (diff > 0 ? 'gain' : 'bad');
 const signed = (min) => (min > 0 ? '+' : '') + minToHhmm(min);
 
 const PRINT_BUTTON = '<button class="btn no-print" data-action="print">ייצוא PDF</button>';
-const hasTotals = (res) => res.totals.length > 0 || !!res.freeDays || !!res.perDiem;
+const hasTotals = (res) => res.totals.length > 0 || planTotals(res).length > 0 || !!res.freeDays || !!res.perDiem;
 const usd = (v) => v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 /** האש"ל הצפוי, שורה תחתונה בסיכום אחרי ספירת הימים (בעל המוצר, 09/10/2026). */
@@ -1019,14 +1019,26 @@ function perDiemLine(pd) {
   return `<p class="small">אש"ל צפוי: ${parts.join(' · ')} · סה"כ לתשלום ${num(`${usd(pd.usd)}$`)}</p>`;
 }
 
+/** בתכנון לבד: הקרדיט, ה-Rig וה-COM הצפויים לפי התכנון, בלי השוואה (בעל המוצר, 10/10/2026). S/C נספר עם COM. */
+function planTotals(res) {
+  if (res.mode !== 'plan' || !res.expectations.length) return [];
+  const sum = (keys) => res.expectations.filter((e) => keys.has(e.key)).reduce((s, e) => s + e.min, 0);
+  return [
+    { column: 'Credit', expected: sum(CREDIT_KEYS) },
+    { column: 'Rig', expected: sum(new Set(['rig'])) },
+    { column: 'COM', expected: sum(COM_KEYS) },
+  ];
+}
+
 function renderTotals(res) {
   const fd = res.freeDays;
   if (!hasTotals(res)) return '';
   // כל עוד יש שאלות פתוחות, פער בסיכום אינו ממצא: הצפוי תלוי בתשובות.
   const pending = res.questions.length > 0;
-  const days = res.totals.length ? dayCounts(res.expectations) : [];
+  const plan = planTotals(res);
+  const days = res.totals.length || plan.length ? dayCounts(res.expectations) : [];
   return `<div class="card">
-    <h2>${res.totals.length ? 'סיכום' : 'סיכום חודשי'}<span class="spacer"></span>${PRINT_BUTTON}</h2>
+    <h2>${res.totals.length || plan.length ? 'סיכום' : 'סיכום חודשי'}<span class="spacer"></span>${PRINT_BUTTON}</h2>
     <div class="totals">${res.totals.map((t) => {
       const gap = `פער <span class="num">${signed(t.reported - t.expected)}</span>`;
       const status = t.ok === true ? '✓' : t.ok === false ? (pending ? `ממתין · ${gap}` : `✗ ${gap}`) : '';
@@ -1036,7 +1048,12 @@ function renderTotals(res) {
         <div class="val num">${minToHhmm(t.expected)}</div>
         <div class="rep">ברומה <span class="num">${minToHhmm(t.reported)}</span> ${status}</div>
       </div>`;
-    }).join('')}${fd ? `
+    }).join('')}${plan.map((t) => `
+      <div class="total">
+        <div class="label">${esc(t.column)}</div>
+        <div class="val num">${minToHhmm(t.expected)}</div>
+        <div class="rep">צפוי לפי התכנון</div>
+      </div>`).join('')}${fd ? `
       <div class="total free ${fd.free >= fd.due ? 'ok' : 'bad'}">
         <div class="label" style="direction:rtl">ימים פנויים בתכנון</div>
         <div class="val num">${fd.free}</div>
@@ -1096,19 +1113,10 @@ const pairingOf = (e) => e.pairing ?? String(e.note ?? '').match(/^⁦[^⁩]*⁩
 function renderExpectations(res) {
   if (!res.expectations.length || res.mode !== 'plan') return '';
   const rows = [...res.expectations].sort((a, b) => a.date.localeCompare(b.date));
-  const sumKeys = (keys) => rows.filter((e) => keys.has(e.key)).reduce((s, e) => s + e.min, 0);
-  // שורה שנייה: Rig, ואחריו כמה ימים זוכו על פעילות שאינה טיסה, לפי סוג.
-  const rig = sumKeys(new Set(['rig']));
-  const second = [
-    ...(rig ? [`Rig: <span class="num">${minToHhmm(rig)}</span>`] : []),
-    ...dayCounts(rows),
-  ];
-  // הקרדיט של כל טיסה הוא רק רעש: הסך הכול בשורה העליונה, ובטבלה רק הפיצויים.
+  // הקרדיט של כל טיסה הוא רק רעש: הסך הכול בכרטיס הסיכום (`planTotals`), ובטבלה רק הפיצויים.
   const shown = rows.filter((e) => !CREDIT_KEYS.has(e.key));
   return `<details class="card" data-section="expected" open>
     <summary><h2 style="display:inline">קרדיט ופיצויים צפויים</h2></summary>
-    <p class="small">סה"כ קרדיט: <span class="num">${minToHhmm(sumKeys(CREDIT_KEYS))}</span> · סה"כ COM: <span class="num">${minToHhmm(sumKeys(COM_KEYS))}</span></p>
-    ${second.length ? `<p class="small">${second.join(' · ')}</p>` : ''}
     ${!shown.length ? '<p class="small muted">אין פיצויים צפויים לפי התכנון.</p>' : `<div class="table-wrap"><table>
       <thead><tr><th>תאריך</th><th>חוק</th><th>סוג</th><th>צפוי</th><th>הסבר</th></tr></thead>
       <tbody>${shown.map((e) => `<tr>
