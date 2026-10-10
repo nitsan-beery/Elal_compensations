@@ -1076,9 +1076,10 @@ function free_days_waived(ctx, params, rule) {
  * שתי שבתות ברצף (2024 ס' 34): פעילות טיסתית בשתי שבתות עוקבות. חלון השבת קבוע בשעון
  * ישראל, משישי `shabbat_from` עד שבת `shabbat_to` (החלטת בעל המוצר, 23/09/2026). שבת עם
  * פעילות = סבב שחופף לחלון: טיסה בתוך החלון, או יציאה לפניו וחזרה לארץ אחריו (טיסה חוצת
- * שבת). פעילות קרקע בשבת, כמו לימוד עצמי בבית, אינה נספרת. לפי הביצוע כשיש; סבב מתוכנן
- * שבוטל ביוזמת החברה נחשב ביצוע (ס' 40). בלי שאלת הסכמה (החלטת בעל המוצר, 21/09/2026).
- * שלוש שבתות ברצף הן שני זוגות.
+ * שבת). גם פעילות קרקע בשבת נספרת, חוץ מלימוד עצמי בבית (`ground_excluded_prefixes`: HOME) ומכוננות
+ * (בעל המוצר, 10/10/2026; לא אמורה להיות כזו). סימולטור עם שעות ברומה – כשהוא חופף לחלון (מוצ"ש אינו
+ * נספר); פעילות קרקע בלי שעות – כל יום השבת. לפי הביצוע כשיש; סבב מתוכנן שבוטל ביוזמת החברה נחשב
+ * ביצוע (ס' 40). בלי שאלת הסכמה (החלטת בעל המוצר, 21/09/2026). שלוש שבתות ברצף הן שני זוגות.
  */
 function consecutive_saturdays(ctx, params, rule) {
   const key = keyFor(params.report_column);
@@ -1086,13 +1087,36 @@ function consecutive_saturdays(ctx, params, rule) {
   const execSpans = ctx.hasExec ? spansOf(ctx, ctx.execPairings, (p) => pairingTimes(p, ctx.tz, { away: true })) : [];
   const inShabbat = (sp, date) =>
     sp.start < at(date, parseClock(params.shabbat_to)) && sp.end > at(addDays(date, -1), parseClock(params.shabbat_from));
+  const excluded = params.ground_excluded_prefixes ?? [];
+  // פעילות קרקע בחלון השבת (בעל המוצר, 10/10/2026): סימולטור עם שעות ברומה לפי השעות, ושאר הקודים לפי יום השבת.
+  const groundIn = (date) => {
+    const found = [];
+    for (const d of [addDays(date, -1), date]) {
+      const day = ctx.timeline.find((x) => x.date === d);
+      if (!day) continue;
+      const timed = ctx.hasExec ? (day.exec?.sims ?? []).filter((s) => s.std != null && s.sta != null) : [];
+      for (const s of timed) {
+        const start = at(d, s.std);
+        if (inShabbat({ start, end: start + mod(s.sta - s.std, 1440) }, date)) found.push(`SIM ${minToHhmm(s.std)} ב-${ddmm(d)}`);
+      }
+      if (d !== date) continue;
+      const codes = ctx.activityCodes(day).filter((c) => !c.startsWith('SBY') && !excluded.some((p) => c.startsWith(p)) &&
+        !(timed.length && c.startsWith('SIM')));
+      found.push(...codes.map((c) => `${c} ב-${ddmm(d)}`));
+    }
+    return found.length ? [...new Set(found)] : null;
+  };
   const active = (date) => {
     if (!ctx.hasExec) {
       const sp = planSpans.find((s) => inShabbat(s, date));
-      return sp ? { pairing: sp.p } : null;
+      if (sp) return { pairing: sp.p };
+      const g = groundIn(date);
+      return g ? { date, ground: g } : null;
     }
     const sp = execSpans.find((s) => inShabbat(s, date));
     if (sp) return { pairing: sp.p };
+    const g = groundIn(date);
+    if (g) return { date, ground: g };
     const cancelled = planSpans.find((s) => inShabbat(s, date) && cancelStatus(ctx, s.p) === 'company');
     return cancelled ? { date, cancelled: cancelled.p } : null;
   };
@@ -1102,7 +1126,9 @@ function consecutive_saturdays(ctx, params, rule) {
     const [s1, s2] = [saturdays[i - 1], saturdays[i]];
     const [a1, a2] = [active(s1), active(s2)];
     if (!a1 || !a2) continue;
-    const why = `${rule.title}: פעילות בשבתות ${ddmm(s1)} ו-${ddmm(s2)}${a2.cancelled ? ' (בשבת השנייה סבב שבוטל ביוזמת החברה)' : ''}`;
+    const grounds = [a1, a2].flatMap((a) => a.ground ?? []);
+    const why = `${rule.title}: פעילות בשבתות ${ddmm(s1)} ו-${ddmm(s2)}${a2.cancelled ? ' (בשבת השנייה סבב שבוטל ביוזמת החברה)' : ''}` +
+      (grounds.length ? ` (פעילות קרקע: ${grounds.join(', ')})` : '');
     if (a2.pairing) ctx.expectPairing(a2.pairing, key, H(params.hours), rule, why);
     else ctx.expect(s2, key, H(params.hours), rule, why);
   }
@@ -1964,7 +1990,7 @@ export const DUTY_PARAMS = {
   night_landings: ['fleet', 'window_from', 'window_to', 'min_planned_count', 'paid_from_count', 'hours', 'report_column', 'base_landings_only', 'counted_crews', 'legal_rest_hours'],
   special_date_activity: ['occasions', 'flight_activity_only', 'hours', 'report_column'],
   free_days_waived: ['hours', 'report_column', 'paid_from_day', 'off_block_from', 'on_block_until', 'min_free_days'],
-  consecutive_saturdays: ['hours', 'report_column', 'shabbat_from', 'shabbat_to'],
+  consecutive_saturdays: ['hours', 'report_column', 'shabbat_from', 'shabbat_to', 'ground_excluded_prefixes'],
   consecutive_night_rounds: ['hours', 'report_column', 'more_than', 'window_from', 'window_to', 'legal_rest_hours'],
   white_flight: ['hours', 'report_column', 'report_after', 'report_until', 'min_block_hours'],
   ulh_flight: ['hours', 'report_column', 'min_block_hours', 'max_block_hours'],
