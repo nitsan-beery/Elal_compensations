@@ -28,6 +28,9 @@ const TOKEN_KEY = 'calendar-token';
 
 let gisPromise = null;
 
+/** שגיאת רשת: בלי חיבור, ולא תקלה ביומן (`offline`; בעל המוצר, 11/10/2026). */
+const offlineError = (message) => Object.assign(new Error(message), { offline: true });
+
 function loadGis() {
   if (globalThis.google?.accounts?.oauth2) return Promise.resolve();
   gisPromise ??= new Promise((resolve, reject) => {
@@ -35,7 +38,7 @@ function loadGis() {
     s.src = GIS_SRC;
     s.async = true;
     s.onload = () => resolve();
-    s.onerror = () => { gisPromise = null; reject(new Error('לא ניתן לטעון את ההתחברות של גוגל. בדוק את החיבור לרשת.')); };
+    s.onerror = () => { gisPromise = null; reject(offlineError('לא ניתן לטעון את ההתחברות של גוגל. בדוק את החיבור לרשת.')); };
     document.head.append(s);
   });
   return gisPromise;
@@ -105,7 +108,12 @@ export async function revoke() {
 async function api(token, path, params = {}) {
   const url = new URL(path, API);
   for (const [k, v] of Object.entries(params)) if (v != null) url.searchParams.set(k, String(v));
-  const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+  let res;
+  try {
+    res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+  } catch {
+    throw offlineError('אין חיבור לרשת.');
+  }
   if (res.status === 401) {
     forgetToken();
     throw new Error('ההרשאה ליומן פגה. לחץ "עדכון מהיומן" כדי להתחבר שוב.');

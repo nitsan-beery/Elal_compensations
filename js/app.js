@@ -72,6 +72,7 @@ const state = {
   calGaps: null, // {key, items}: פערים שהעדכון האחרון מהיומן מצא בחודש הפתוח (`calendarGaps`)
   calForeign: null, // שם בעל היומן המחובר, כשהוא טייס אחר מזה של החודש הפתוח (`foreignCalendar`)
   calError: null,
+  calOffline: false, // העדכון האחרון של היומן לא הגיע לרשת (בעל המוצר, 11/10/2026)
 };
 
 // ---------- אתחול ----------
@@ -412,13 +413,15 @@ function calendarParts(c) {
   }
   const n = state.result?.calendarCrew ?? 0;
   const when = state.calBusy ? 'מתעדכן…' : c.synced ? `מעודכן ל-${stamp(c.synced)}` : 'עוד לא עודכן';
+  // בלי רשת: במקום פס אדום, בשורת היומן ובאותו צבע (בעל המוצר, 11/10/2026).
+  const status = !state.calBusy && state.calOffline ? `אין חיבור לרשת. היומן ${when}` : `יומן ${when}`;
   const noData = c.synced && !c.facts?.flights?.length;
   const info = [`${c.calendars.length === 1 ? 'יומן מחובר' : 'יומנים מחוברים'}: ${c.calendars.map((x) => x.name).join(', ')}`,
     n ? `הרכב הצוות של ${n} ${state.result?.monthFlights >= n ? `מתוך ${state.result.monthFlights} ` : ''}${n === 1 && !(state.result?.monthFlights >= n) ? 'טיסה' : 'טיסות'} בחודש הזה מהיומן` : ''].filter(Boolean);
   const hover = matchMedia('(hover: hover)').matches;
   const label = hover
-    ? `<span class="cal-label" title="${esc(info.join('\n'))}">יומן ${when}</span>`
-    : `<button type="button" class="cal-toggle cal-label" data-cal="info" aria-expanded="${state.calInfo}">יומן ${when}</button>`;
+    ? `<span class="cal-label" title="${esc(info.join('\n'))}">${status}</span>`
+    : `<button type="button" class="cal-toggle cal-label" data-cal="info" aria-expanded="${state.calInfo}">${status}</button>`;
   const buttons = `${noData ? '<button type="button" class="btn" data-cal="connect">יומן אחר</button>' : ''}
     <button type="button" class="btn" data-cal="sync" ${state.calBusy ? 'disabled' : ''}>עדכון</button>
     <button type="button" class="btn" data-cal="disconnect">ניתוק יומן</button>`;
@@ -614,7 +617,9 @@ async function connectCalendar(clientId, cals, { manual = false } = {}) {
 async function syncCalendar(pending = calendarToken()) {
   const c = state.calendar;
   // יומן של טייס אחר אינו מתעדכן בחודש של טייס אחר (בעל המוצר, 08/10/2026).
-  if (!c || state.calBusy || !pending || foreignCalendar(state.record)) return;
+  if (!c || state.calBusy || foreignCalendar(state.record)) return;
+  // בלי רשת (`calendarToken`): ההודעה בשורת היומן.
+  if (!pending) { if (state.calOffline) renderCalendarBar(); return; }
   state.calBusy = true;
   state.calError = null;
   renderCalendarBar();
@@ -634,8 +639,10 @@ async function syncCalendar(pending = calendarToken()) {
     const hint = all.find((x) => x.primary)?.id ?? c.hint ?? null;
     state.calendar = { ...c, calendars: cals, hint, facts: { ...facts, from: timeMin }, synced: new Date().toISOString() };
     await safe(() => store.putSetting(CAL_SETTING, state.calendar));
+    state.calOffline = false;
   } catch (err) {
-    state.calError = err.message;
+    state.calOffline = !!err.offline;
+    if (!err.offline) state.calError = err.message;
   }
   state.calBusy = false;
   if (state.record) await runAndSave();
@@ -651,6 +658,8 @@ async function syncCalendar(pending = calendarToken()) {
 function calendarToken() {
   const c = state.calendar;
   if (!c || state.calBusy) return null;
+  // המכשיר יודע שאין רשת: בלי ניסיון, ובלי החלון של גוגל (בעל המוצר, 11/10/2026).
+  if (!navigator.onLine) { state.calOffline = true; state.calError = null; return null; }
   const token = calendar.cachedToken();
   if (token) return Promise.resolve(token);
   if (navigator.userActivation && !navigator.userActivation.isActive) return null;
@@ -670,6 +679,7 @@ async function disconnectCalendar() {
   await calendar.revoke();
   state.calendar = null;
   state.calError = null;
+  state.calOffline = false;
   await safe(() => store.deleteSetting(CAL_SETTING));
   if (state.record) await runAndSave();
   else renderCalendarBar();
