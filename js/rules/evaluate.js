@@ -402,8 +402,8 @@ function chainNotes(out, journal, answers) {
   const chained = new Set();
   for (const c of out.changes) {
     // זכייה במכרז שעברה ליום אחר (`applyRootChain`): השרשרת מתחת לטיסה שבוצעה.
-    // שורת "במקום סבב שתוכנן בימים אחרים" (`showSwaps`): השרשרת כבר מתחת לסבב שלא בוצע.
-    if (c.how === 'swap') continue;
+    // שורת "במקום סבב שתוכנן בימים אחרים" (`showSwaps`, סבב בחודש אחר): אין סבב מתוכנן לשרשרת.
+    if (c.how === 'swap' && !c.merged) continue;
     const moved = !c.planId && c.execId && journal.chains.find((x) => x.movedTo === c.execId);
     const ch = moved || (c.planId && journal.chains.find((x) => x.plan.id === c.planId));
     const eff = moved ? { chain: true } : ch && answers[`cancelled:${c.planId}`];
@@ -1104,18 +1104,18 @@ function describeMatch(m) {
 }
 
 /**
- * פעילות לא מתוכננת שהמשתמש ענה שהיא החלפה מרצון: בשינויים היא מוצגת "במקום" הסבב
- * שתוכנן בימים אחרים. כשהיא קושרה לסבב שלא בוצע, גם הסבב שלא בוצע נשאר בשינויים, ביום
- * שלו, עם ההחלפה בצד הביצוע: זה עדיין שינוי (בעל המוצר, 29/09/2026). בצד הביצוע רק הטיסה
- * שבוצעה במקומו, בלי "החלפה מרצוני" או "החלפה ביוזמת החברה" לפניה: הסיבה כתובה בהערה שמתחת
- * לשורה (בעל המוצר, 01/10/2026; 08/09/2024).
- * בלי קישור (טיסה בחודש אחר) – "בחודש אחר" בצד התכנון.
- * סבב שלא בוצע ונענה – התשובה מוצגת בצד הביצוע.
+ * פעילות לא מתוכננת שקושרה בהחלפה (מרצון, ביוזמת החברה או בזכייה במכרז) לסבב שתוכנן בימים
+ * אחרים: שורה אחת לשניהם, ביום המוקדם מבין השניים, ובראשה שני התאריכים (`dates`); הכותרת
+ * היא סיבת ההחלפה, ומתחת מה שמגיע (בעל המוצר, 11/10/2026; 09/09/2024: VIE ‏08/09 ↔ SOF ‏09/09;
+ * עד אז שורה לכל צד, 29/09/2026). בצד הביצוע רק הטיסה שבוצעה במקומו, בלי הסיבה לפניה (בעל המוצר,
+ * 01/10/2026). פעילות שהוחלפה בסבב בחודש אחר – "במקום סבב שתוכנן בימים אחרים", ו"בחודש אחר" בצד התכנון.
+ * סבב שלא בוצע ונענה – התשובה מוצגת בצד הביצוע; בהחלפה עם טיסה בחודש אחר הכותרת היא סיבת ההחלפה.
  * בלי תשובה, כשהדוח כבר זיכה והאפליקציה הניחה אותה (`assumed`, planId → ערכים), מוצגת ההנחה
  * באותה לשון (בעל המוצר, 29/09/2026).
  */
 function showSwaps(out, answers, assumed) {
   const linkOf = new Map(); // execId → { planId | null, value }
+  const mergedInto = new Map(); // שורת הסבב שלא בוצע → השורה המאוחדת
   for (const [id, a] of Object.entries(answers)) {
     if (!LINKED_VALUES.includes(a?.value)) continue;
     if (id.startsWith('unplanned:') && !linkOf.get(id.slice(10))?.planId) linkOf.set(id.slice(10), { planId: a.link ?? null, value: a.value });
@@ -1123,7 +1123,7 @@ function showSwaps(out, answers, assumed) {
   }
   for (const c of out.changes) {
     if (c.how !== 'unplanned' || !linkOf.has(c.execId)) continue;
-    const { planId } = linkOf.get(c.execId);
+    const { planId, value } = linkOf.get(c.execId);
     const planned = out.changes.find((p) => p.how === 'cancelled' && p.planId === planId);
     c.how = 'swap';
     c.label = 'במקום סבב שתוכנן בימים אחרים';
@@ -1132,8 +1132,18 @@ function showSwaps(out, answers, assumed) {
     if (planned?.label.startsWith('סבב שנוסף ביומן')) c.label = 'במקום סבב שנוסף ביומן';
     if (!planned) continue;
     c.planId = planned.planId;
-    planned.exec = c.exec;
+    c.label = DATES_OUTCOME[value] ?? c.label;
+    c.merged = value;
+    if (planned.date !== c.date) c.dates = [planned.date, c.date].sort();
+    mergedInto.set(planned, c);
   }
+  // השורה המאוחדת במקום של המוקדם מבין השניים.
+  const atPlan = new Set([...mergedInto].filter(([p, c]) => p.date <= c.date).map(([, c]) => c));
+  out.changes = out.changes.flatMap((p) => {
+    const c = mergedInto.get(p);
+    if (c) return atPlan.has(c) ? [Object.assign(c, { date: p.date })] : [];
+    return atPlan.has(p) ? [] : [p];
+  });
 
   // סבב שבמקומו בוצע סבב אחר באותם ימים: אחרי התשובה, השורה אומרת מה קרה ולא רק מה הוחלף.
   for (const c of out.changes) {
@@ -1156,6 +1166,8 @@ function showSwaps(out, answers, assumed) {
       : a.value === 'replaced' || a.value === 'bid' ? linked ?? 'טיסה בחודש אחר'
       : a.value === 'other' ? `סיבה אחרת${a.text ? `: ${a.text}` : ''}`
       : CANCELLED_OUTCOME[a.value] ?? a.value;
+    // החלפה עם טיסה בחודש אחר: הכותרת היא סיבת ההחלפה (בעל המוצר, 11/10/2026).
+    if (LINKED_VALUES.includes(a.value) && a.link !== GAVE_AWAY) c.label = DATES_OUTCOME[a.value];
   }
 }
 
@@ -1204,16 +1216,21 @@ function explainChanges(out, supported) {
   for (const c of out.changes) {
     if (c.how === 'exact' || c.how === 'noplan') continue;
     const ids = [c.planId, c.execId].filter(Boolean);
-    // סבב שבוצע במקום סבב שתוכנן בימים אחרים, כשלסבב שלא בוצע יש שורה משלו: כל שורה עם ההערה של הימים
-    // שלה, ולא "לא מגיע קרדיט על היום הזה" גם מתחת לטיסה שבוצעה (09/09/2024, בעל המוצר 01/10/2026).
-    const planRow = !!c.execId && !!c.planId && out.changes.some((p) => p !== c && p.planId === c.planId && !p.execId);
-    const ranges = (planRow ? [c.execId] : ids).map(rangeOf).filter(Boolean);
+    const ranges = ids.map(rangeOf).filter(Boolean);
     // שורה אחת מכמה על אותו סבב (`splitChangesByFdp`): רק מה שנרשם בימים שלה.
     const own = (d) => c.until === undefined || (c.date <= d && (!c.until || d < c.until));
     const within = (d) => !!d && own(d) && ranges.some(([from, to]) => from <= d && d <= to);
     // הערה על סבב מסוים (`pairingId`) – רק בשורה שלו, גם כשסבב אחר בוצע באותם ימים.
-    const ruled = out.notes.filter((n) => !n.aside && CHANGE_LOGIC.has(logicOf.get(n.ruleId)) && within(n.date) &&
+    let ruled = out.notes.filter((n) => !n.aside && CHANGE_LOGIC.has(logicOf.get(n.ruleId)) && within(n.date) &&
       (!n.pairingId || ids.includes(n.pairingId)));
+    // החלפה עם טיסה בימים אחרים, בשורה אחת (`showSwaps`): הערה אחת על מה שמגיע (בעל המוצר, 11/10/2026).
+    // מרצון – זו של הטיסה שבוצעה, ולא "לא מגיע קרדיט על היום הזה" של הסבב שלא בוצע; ביוזמת החברה
+    // ובמכרז – זו של הסבב המתוכנן, שכבר אומרת גם מה מגיע על הטיסה שבוצעה.
+    if (c.merged) {
+      const dup = (n) => (c.merged === 'voluntary_swap' ? n.pairingId === c.planId : n.pairingId === c.execId);
+      for (const n of ruled.filter(dup)) n.placed = true;
+      ruled = ruled.filter((n) => !dup(n));
+    }
     // סטיה לשדה משנה שהנחיתה המאוחרת זיהתה (`late_landing_home`): מעל מה שמגיע על השינוי, גם
     // כשהסבב לא היה מתוכנן (בעל המוצר, 05/10/2026: כל סטיה מופיעה בשינויים).
     const change = out.notes.filter((n) => n.change && within(n.date) && (!n.pairingId || ids.includes(n.pairingId)));

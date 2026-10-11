@@ -1153,7 +1153,7 @@ function renderChanges(res) {
   return `<details class="card" data-section="changes" ${changes.length ? 'open' : ''}>
     <summary><h2 style="display:inline">שינויים בין תכנון לביצוע <span class="count">${changes.length}</span></h2></summary>
     ${changes.length ? `<ul class="list">${changes.map((c) => `<li${ruleAttr((c.notes ?? []).map((n) => n.ruleTitle))}>
-      <strong class="num">${ddmm(c.date)}</strong> ${esc(c.label)}
+      <strong class="num">${(c.dates ?? [c.date]).map(ddmm).join(' · ')}</strong> ${esc(c.label)}
       ${chainSides(c, `<span class="side-plan">תכנון: ${esc(datesFirst(c.plan ?? '—'))}</span> · <span class="side-exec">ביצוע: ${esc(datesFirst(c.exec ?? (c.replacedBy?.join(', ') || '—')))}</span>`)}
       ${(c.notes ?? []).map((n) => `<div class="explain">${esc(n.message)}${n.byUser ? ' <span class="muted">לפי תשובת המשתמש</span>' : ''}</div>`).join('')}
     </li>`).join('')}</ul>` : '<p class="muted">כל הסבבים בוצעו כמתוכנן.</p>'}

@@ -61,7 +61,7 @@ if (r.legal) {
 
 console.log('\n== שינויים ==');
 for (const c of r.changes) {
-  console.log(`${c.date.slice(8)}  ${c.label.padEnd(34)} תכנון: ${c.plan ?? '—'}  |  ביצוע: ${c.exec ?? '—'}${c.replacedBy ? '  ← ' + c.replacedBy.join(', ') : ''}`);
+  console.log(`${(c.dates ?? [c.date]).map((d) => d.slice(8)).join('·')}  ${c.label.padEnd(34)} תכנון: ${c.plan ?? '—'}  |  ביצוע: ${c.exec ?? '—'}${c.replacedBy ? '  ← ' + c.replacedBy.join(', ') : ''}`);
   for (const n of c.notes ?? []) console.log(`      ${n.message}${n.byUser ? ' (לפי תשובת המשתמש)' : ''}`);
   for (const n of c.steps ?? []) console.log(`        ⤷ ${n.message}${n.byUser ? ' (לפי תשובת המשתמש)' : ''}`);
 }
