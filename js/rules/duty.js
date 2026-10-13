@@ -415,7 +415,8 @@ function base_rest_shortfall(ctx, params, rule) {
   const paidOn = (link) => ctx.hasExec && performed(link) &&
     ctx.reportedOn(targetOf(link), params.report_column) - ctx.expectedOn(targetOf(link), keyFor(params.report_column), own) >= H(params.hours);
   // רצף שאינו רצף: נענה אחרת, או שהרומה זיכתה על כל המנוחות בו.
-  const declined = (c) => { const a = ctx.answer(c.id); return a ? a.value !== 'sequence' : c.links.every(paidOn); };
+  // רצף של 3 טיסות יום אינו נשאל (טיוטה 328), ותשובה קודמת עליו אינה נקראת.
+  const declined = (c) => { const a = c.type === 'day3' ? null : ctx.answer(c.id); return a ? a.value !== 'sequence' : c.links.every(paidOn); };
   const sequences = turnaroundSequences(ctx, params.turnaround_sequence, links, legal, declined);
   // מה קרה בכל מנוחה קצרה, להערות: 'open' – לא זוכתה (בתכנון לבד – תמיד), 'paid' – הרומה זיכתה,
   // 'sequence' – רצף שהוצג בתכנית החודשית, 'unperformed' – לא בוצע כמתוכנן, 'skip' – בדיקה ידנית.
@@ -445,7 +446,9 @@ function base_rest_shortfall(ctx, params, rule) {
     const id = chain ? chain.id : `base_rest:${p2.id}`;
     const answered = ctx.answer(id);
     // "רצף" על מנוחה שאינה עוד חלק מרצף שעומד בתנאים – נשאל שוב.
-    const a = (answered?.value === 'sequence' && !chain ? null : answered) ?? (paid ? { value: 'company_request' } : null);
+    // רצף של 3 טיסות יום בתכנון: בטוח שהוצג בתכנית החודשית, בלי שאלה (בעל המוצר, 13/10/2026; טיוטה 328).
+    const a = chain?.assumed ? { value: paid ? 'company_request' : 'sequence' }
+      : (answered?.value === 'sequence' && !chain ? null : answered) ?? (paid ? { value: 'company_request' } : null);
     if (!a) {
       if (chain && !asked.has(chain.id)) {
         asked.add(chain.id);
@@ -524,7 +527,7 @@ function askSequence(ctx, chain, rule) {
 
 /**
  * הערות על המנוחה בבסיס (בעל המוצר, 13/10/2026). רצף טיסות סבב עם מנוחה קצרה – הערה אחת, מהטיסה הראשונה עד
- * האחרונה: עומד בתנאי ההסכם (רק אחרי התשובה "רצף"; עד אז ובכל תשובה אחרת – כמו כל מנוחה קצרה), או באדום (`severity: 'bad'`) חורג, עם הסיבות. כל מנוחה קצרה אחרת – באדום,
+ * האחרונה: עומד בתנאי ההסכם (רק אחרי התשובה "רצף", או ברצף של 3 טיסות יום – בלי שאלה, טיוטה 328; עד אז ובכל תשובה אחרת – כמו כל מנוחה קצרה), או באדום (`severity: 'bad'`) חורג, עם הסיבות. כל מנוחה קצרה אחרת – באדום,
  * מיום הנחיתה ועד יום ההמראה הבאה. מנוחה שהרומה זיכתה או שלא בוצעה כמתוכנן – בלי הערה. בלי מנוחה קצרה,
  * גם לא ברצף שעומד בתנאים (טיוטה 320) – "כל הטיסות עומדות במנוחה חוזית בבסיס בין הטיסות." (`kind: 'rest_ok'`,
  * וב-`evaluate` יחד עם הרכב הצוות החוזי). מול הרומה (טיוטה 325): מנוחה קצרה בתכנון שלא בוצעה כמתוכנן
@@ -544,7 +547,12 @@ function restNotes(ctx, rule, units, links, sequences, status, execShort) {
     const [from, to] = [pairings[0].from, pairings.at(-1).shownTo ?? pairings.at(-1).to];
     const failed = g.filter((l) => !sequences.get(l).ok);
     if (!failed.length) {
-      if (g.every((l) => status.get(l) === 'sequence')) ctx.note(from, 'רצף טיסות עם מנוחה קצרה – עומד בתנאי ההסכם.', rule, { to });
+      if (g.every((l) => status.get(l) === 'sequence')) {
+        const text = sequences.get(g[0]).chain?.assumed
+          ? `רצף של ${pairings.length} טיסות עם מנוחה קצרה מהחוזית. האפליקציה מניחה שהרצף הוצג בתכנית החודשית – עומד בתנאי ההסכם.`
+          : 'רצף טיסות עם מנוחה קצרה – עומד בתנאי ההסכם.';
+        ctx.note(from, text, rule, { to });
+      }
       continue;
     }
     const why = [...new Set(failed.filter((l) => status.get(l) === 'open').map((l) => sequences.get(l).short))];
@@ -577,6 +585,7 @@ function restNotes(ctx, rule, units, links, sequences, status, execShort) {
  * הרבה רצפים, לפי הסדר בחודש; רצף שאינו נכנס בה נשאל כמו כל מנוחה קצרה. שתי טיסות סבב באותו FDP
  * (`planFdpUnits`) אינן חלק מרצף (בעל המוצר, 13/10/2026): המנוחה הקצרה לפניהן ואחריהן היא חריגה רגילה.
  * רצף שהמשתמש אמר שאינו רצף (`declined`, לפי `id` – `base_rest:` של המנוחה הראשונה בו) אינו נספר במכסה.
+ * רצף של 3 טיסות שאינן חוצות לילה שנכנס במכסה (`assumed`) אינו נשאל: בטוח שהוצג בתכנית החודשית (טיוטה 328).
  * @returns {Map<object, {ok: boolean, chain?: object, why?: string, short?: string, explain?: string}>} לכל קישור בין
  *   שתי טיסות סבב; `chain` – הרצף שעומד בתנאים ({id, links}). `why` – לשאלה, `short` – להערה, בלי "שתי טיסות סבב עוקבות", `explain` – להסבר בשורת הפיצוי (טיוטה 321):
  *   כשהזמן בין הנחיתה להמראה קצר מהמינימום – שני הזמנים, וכשהרצף אינו מותר בכלל – הסיבה בלבד.
@@ -671,7 +680,7 @@ function turnaroundSequences(ctx, seq, links, legal, declined = () => false) {
       ? [...Array(2).fill(`רצף של ${n} טיסות סבב${c.night ? ' חוצות לילה' : ''}. ההסכם מתיר רצף של 2 טיסות סבב חוצות לילה, או 2–3 שאינן חוצות לילה`),
         c.night ? `רצף של ${n} טיסות חוצות לילה, וההסכם מתיר עד 2` : `רצף של ${n} טיסות, וההסכם מתיר עד 3`]
       : ['רצף טיסות סבב עוקבות מעבר למכסה החודשית', 'מעבר למכסה החודשית', 'מעבר למכסה החודשית'];
-    const chain = { id: c.id, links: c.links };
+    const chain = { id: c.id, links: c.links, assumed: c.type === 'day3' && best.has(c) };
     for (const link of c.links) out.set(link, best.has(c) || c.declined ? { ok: true, chain } : { ok: false, why, short, explain });
   }
   return out;
