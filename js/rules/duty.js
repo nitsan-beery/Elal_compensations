@@ -377,13 +377,13 @@ function base_rest_shortfall(ctx, params, rule) {
     let capUnknown = false;
     if (stay <= H(params.short_stay_max_hours)) {
       required = Math.round(s1.flight * params.short_stay_factor);
-      basis = `פי ${params.short_stay_factor} משעות הטיסה (${minToHhmm(s1.flight)})`;
+      basis = `פי ${params.short_stay_factor} משעות הטיסה, ${minToHhmm(s1.flight)}`;
     } else {
       const share = Math.round(stay * params.long_stay_share);
       required = Math.max(share, H(params.long_stay_min_hours));
       if (params.long_stay_max_hours != null) required = Math.min(required, H(params.long_stay_max_hours));
       else capUnknown = share > H(params.long_stay_min_hours);
-      basis = `${params.long_stay_share * 100}% מהשהייה (${minToHhmm(stay)}), לפחות ${params.long_stay_min_hours} שעות`;
+      basis = `${params.long_stay_share * 100}% מהשהייה של ${minToHhmm(stay)}, לפחות ${params.long_stay_min_hours} שעות`;
     }
     if (rest < required) links.push({ u1, u2, p1: u1.pairings.at(-1), p2: u2.pairings[0], s1, s2, rest, required, basis, capUnknown });
   }
@@ -445,7 +445,11 @@ function base_rest_shortfall(ctx, params, rule) {
       continue;
     }
     if (a.value !== params.answer_value) continue;
-    ctx.expectPairing(target, keyFor(params.report_column), H(params.hours), rule, what);
+    // ההסבר בשורת הפיצוי, קצר (בעל המוצר, 13/10/2026; טיוטה 321).
+    const explain = seq
+      ? `רצף טיסות עם מנוחה קצרה שחורג מתנאי ההסכם – ${seq.explain}.`
+      : `חריגה ממנוחה חוזית בין טיסות – מנוחה בבסיס ${minToHhmm(Math.max(rest, 0))}, והמנוחה החוזית ${minToHhmm(required)} (${basis}).`;
+    ctx.expectPairing(target, keyFor(params.report_column), H(params.hours), rule, what, { explain });
   }
   restNotes(ctx, rule, units, links, sequences, status);
 }
@@ -498,8 +502,9 @@ function restNotes(ctx, rule, units, links, sequences, status) {
  * 2 חוצות לילה, `day2`/`day3` – 2 או 3 שאינן חוצות לילה, `day` – אחת מהן). נבחרת המכסה שמכסה הכי
  * הרבה רצפים, לפי הסדר בחודש; רצף שאינו נכנס בה נשאל כמו כל מנוחה קצרה. שתי טיסות סבב באותו FDP
  * (`planFdpUnits`) אינן חלק מרצף (בעל המוצר, 13/10/2026): המנוחה הקצרה לפניהן ואחריהן היא חריגה רגילה.
- * @returns {Map<object, {ok: boolean, why?: string, short?: string}>} לכל קישור בין שתי טיסות סבב. `why` –
- *   לשאלה, `short` – להערה, בלי "שתי טיסות סבב עוקבות".
+ * @returns {Map<object, {ok: boolean, why?: string, short?: string, explain?: string}>} לכל קישור בין שתי טיסות
+ *   סבב. `why` – לשאלה, `short` – להערה, בלי "שתי טיסות סבב עוקבות", `explain` – להסבר בשורת הפיצוי (טיוטה 321):
+ *   כשהזמן בין הנחיתה להמראה קצר מהמינימום – שני הזמנים, וכשהרצף אינו מותר בכלל – הסיבה בלבד.
  */
 function turnaroundSequences(ctx, seq, links, legal) {
   const out = new Map();
@@ -524,26 +529,40 @@ function turnaroundSequences(ctx, seq, links, legal) {
     if (link.u1.pairings.length > 1 || link.u2.pairings.length > 1) continue;
     if (!isTurnaround(s1, legal, ctx) || !isTurnaround(s2, legal, ctx)) continue;
     if (!seq.fleets.includes(ctx.fleet)) {
-      out.set(link, { ok: false, why: `${PAIR}, אבל רצף כזה עם מנוחה קצרה מותר רק בצי צר גוף`, short: 'רצף כזה מותר רק בצי צר גוף' });
+      const short = 'רצף כזה מותר רק בצי צר גוף';
+      out.set(link, { ok: false, why: `${PAIR}, אבל רצף כזה עם מנוחה קצרה מותר רק בצי צר גוף`, short, explain: short });
       continue;
     }
     const block = s2.start - s1.end;
     const gap = `בין הנחיתה להמראה הבאה ${minToHhmm(Math.max(block, 0))}`;
+    const minBlock = (min) => `זמן מ-On block ל-Off block ${minToHhmm(Math.max(block, 0))}, והמינימום ברצף ${minToHhmm(min)}`;
     let short = null;
+    let explain = null;
     if (night(s1) !== night(s2)) {
       short = 'אחת חוצת לילה והשנייה לא. ההסכם מתיר רצף רק של טיסות מאותו סוג';
+      explain = 'אחת חוצת לילה והשנייה לא, וההסכם מתיר רצף רק של טיסות מאותו סוג';
     } else if (night(s1)) {
-      if (block < nightMin || clockOf(s2.end) >= parseClock(seq.night_on_block_before)) {
+      const late = clockOf(s2.end) >= parseClock(seq.night_on_block_before);
+      if (block < nightMin || late) {
         short = `${gap}. ברצף של שתי טיסות חוצות לילה נדרשים לפחות ${minToHhmm(nightMin)}, והטיסה השנייה צריכה לנחות לפני ${seq.night_on_block_before}`;
+        explain = [
+          block < nightMin ? minBlock(nightMin) : null,
+          late ? `הטיסה השנייה נוחתת ב-${hhmm(s2.end)}, וההסכם מחייב נחיתה לפני ${seq.night_on_block_before}` : null,
+        ].filter(Boolean).join('; ');
       }
     } else {
       const reportAt = clockOf(s2.report);
       const tier = tiers.find((t) => reportAt > parseClock(t.report_after));
-      if (!tier) short = `${gap}, וההתייצבות לטיסה הבאה ב-${hhmm(s2.report)}. רצף כזה מותר רק כשההתייצבות אחרי ${tiers.at(-1).report_after}`;
-      else if (block < H(tier.hours)) short = `${gap}. כשההתייצבות לטיסה הבאה אחרי ${tier.report_after} נדרשים לפחות ${minToHhmm(H(tier.hours))}`;
+      if (!tier) {
+        short = `${gap}, וההתייצבות לטיסה הבאה ב-${hhmm(s2.report)}. רצף כזה מותר רק כשההתייצבות אחרי ${tiers.at(-1).report_after}`;
+        explain = `ההתייצבות לטיסה הבאה ב-${hhmm(s2.report)}, וההסכם מתיר רצף רק כשההתייצבות אחרי ${tiers.at(-1).report_after}`;
+      } else if (block < H(tier.hours)) {
+        short = `${gap}. כשההתייצבות לטיסה הבאה אחרי ${tier.report_after} נדרשים לפחות ${minToHhmm(H(tier.hours))}`;
+        explain = minBlock(H(tier.hours));
+      }
     }
     if (short) {
-      out.set(link, { ok: false, why: `${PAIR}, ${short}`, short });
+      out.set(link, { ok: false, why: `${PAIR}, ${short}`, short, explain });
       continue;
     }
     const last = chains.at(-1);
@@ -570,10 +589,11 @@ function turnaroundSequences(ctx, seq, links, legal) {
   }
   for (const c of chains) {
     const n = c.links.length + 1;
-    const [why, short] = c.type == null
-      ? Array(2).fill(`רצף של ${n} טיסות סבב${c.night ? ' חוצות לילה' : ''}. ההסכם מתיר רצף של 2 טיסות סבב חוצות לילה, או 2–3 שאינן חוצות לילה`)
-      : ['רצף טיסות סבב עוקבות מעבר למכסה החודשית', 'מעבר למכסה החודשית'];
-    for (const link of c.links) out.set(link, best.has(c) ? { ok: true } : { ok: false, why, short });
+    const [why, short, explain] = c.type == null
+      ? [...Array(2).fill(`רצף של ${n} טיסות סבב${c.night ? ' חוצות לילה' : ''}. ההסכם מתיר רצף של 2 טיסות סבב חוצות לילה, או 2–3 שאינן חוצות לילה`),
+        c.night ? `רצף של ${n} טיסות חוצות לילה, וההסכם מתיר עד 2` : `רצף של ${n} טיסות, וההסכם מתיר עד 3`]
+      : ['רצף טיסות סבב עוקבות מעבר למכסה החודשית', 'מעבר למכסה החודשית', 'מעבר למכסה החודשית'];
+    for (const link of c.links) out.set(link, best.has(c) ? { ok: true } : { ok: false, why, short, explain });
   }
   return out;
 }
