@@ -453,8 +453,9 @@ function base_rest_shortfall(ctx, params, rule) {
 /**
  * הערות על המנוחה בבסיס (בעל המוצר, 13/10/2026). רצף טיסות סבב עם מנוחה קצרה – הערה אחת, מהטיסה הראשונה עד
  * האחרונה: עומד בתנאי ההסכם, או באדום (`severity: 'bad'`) חורג, עם הסיבות. כל מנוחה קצרה אחרת – באדום,
- * מיום הנחיתה ועד יום ההמראה הבאה. מנוחה שהרומה זיכתה או שלא בוצעה כמתוכנן – בלי הערה. בלי חריגה –
- * "כל הטיסות עומדות במנוחה חוזית בין הטיסות." (`kind: 'rest_ok'`, וב-`evaluate` יחד עם הרכב הצוות החוזי).
+ * מיום הנחיתה ועד יום ההמראה הבאה. מנוחה שהרומה זיכתה או שלא בוצעה כמתוכנן – בלי הערה. בלי מנוחה קצרה,
+ * גם לא ברצף שעומד בתנאים (טיוטה 320) – "כל הטיסות עומדות במנוחה חוזית בין הטיסות." (`kind: 'rest_ok'`,
+ * וב-`evaluate` יחד עם הרכב הצוות החוזי).
  */
 function restNotes(ctx, rule, units, links, sequences, status) {
   const red = { severity: 'bad' };
@@ -481,7 +482,7 @@ function restNotes(ctx, rule, units, links, sequences, status) {
     ctx.note(l.p1.shownTo ?? l.p1.to, `חריגה ממנוחה חוזית בין ${describeUnit(l.u1)} ל-${describeUnit(l.u2)}: מנוחה בבסיס ` +
       `${minToHhmm(Math.max(l.rest, 0))}, והמנוחה החוזית ${minToHhmm(l.required)} (${l.basis}).`, rule, { to: l.p2.from, ...red });
   }
-  if (units.length > 1 && links.every((l) => sequences.get(l)?.ok)) {
+  if (units.length > 1 && !links.length) {
     ctx.note(null, 'כל הטיסות עומדות במנוחה חוזית בין הטיסות.', rule, { order: 'last', kind: 'rest_ok' });
   }
 }
