@@ -105,7 +105,7 @@ if (r.reviews.length) {
 }
 if (r.notes.length) {
   console.log('\n== הערות ==');
-  for (const n of r.notes) console.log(`- ${n.date ? n.date.slice(8) + " " : ""}${n.message}${n.byUser ? ' (לפי תשובת המשתמש)' : ''}`);
+  for (const n of r.notes) console.log(`- ${n.severity === 'bad' ? '[אדום] ' : ''}${n.date ? n.date.slice(8) + (n.to && n.to !== n.date ? '–' + n.to.slice(8) : '') + " " : ""}${n.message}${n.byUser ? ' (לפי תשובת המשתמש)' : ''}`);
 }
 if (r.unknownCodes.length) {
   console.log('\n== קודים לא מוכרים ==');

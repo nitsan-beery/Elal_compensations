@@ -1219,7 +1219,7 @@ function renderNotes(res) {
   if (!count) return '';
   return `<details class="card" data-section="notes">
     <summary><h2 style="display:inline">הערות <span class="count">${count}</span></h2></summary>
-    <ul class="list">${res.notes.map((n) => `<li${ruleAttr([n.ruleTitle])}>${n.date ? `<strong class="num">${ddmm(n.date)}</strong> ` : ''}${esc(n.message)}${n.byUser ? ' <span class="small muted">לפי תשובת המשתמש</span>' : ''}</li>`).join('')}${legal ? `<li${ruleAttr([legalTip])}>${esc(legal)}</li>` : ''}</ul>
+    <ul class="list">${res.notes.map((n) => `<li${n.severity === 'bad' ? ' class="bad"' : ''}${ruleAttr([n.ruleTitle])}>${n.date ? `<strong class="num">${ddmm(n.date)}${n.to && n.to !== n.date ? `–${ddmm(n.to)}` : ''}</strong> ` : ''}${esc(n.message)}${n.byUser ? ' <span class="small muted">לפי תשובת המשתמש</span>' : ''}</li>`).join('')}${legal ? `<li${ruleAttr([legalTip])}>${esc(legal)}</li>` : ''}</ul>
   </details>`;
 }
 

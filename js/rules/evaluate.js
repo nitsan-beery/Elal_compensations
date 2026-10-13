@@ -251,6 +251,13 @@ export function evaluate({ rulesData, plan = null, exec = null, answers = {}, hi
   }
   // מה שמוסבר בטבלת השינויים אינו חוזר בהערות (בעל המוצר, 01/10/2026).
   out.notes = out.notes.filter((n) => !n.placed);
+  // הרכב צוות חוזי ומנוחה חוזית בין הטיסות בלי חריגה: הערה אחת; כשיש חריגה באחד מהם – נפרדות (בעל המוצר, 13/10/2026).
+  const crewOk = out.notes.find((n) => n.kind === 'crew_ok');
+  const restOk = out.notes.find((n) => n.kind === 'rest_ok');
+  if (crewOk && restOk) {
+    crewOk.message = 'כל הטיסות עומדות בהרכב צוות חוזי ובמנוחה חוזית בין הטיסות.';
+    out.notes = out.notes.filter((n) => n !== restOk);
+  }
   // סדר ההערות (בעל המוצר, 09/10/2026): ההערות על החודש כולו (בלי תאריך) קודם, וויתור מלון ראשונה ביניהן
   // (`order: 'first'`); אחריהן ההערות על יום מסוים, לפי תאריך; בסוף ההערה על הרכב הצוות החוזי
   // (`order: 'last'`), ואחריה – בממשק – ההערה על מגבלות החוק. בתוך כל קבוצה לפי סדר הרצת החוקים.
@@ -804,6 +811,7 @@ function makeContext({ out, timeline, domicile, codes, holidays, answers, plan, 
     /**
      * `date` הוא null בהערה על החודש כולו, בלי יום מסוים. `extra.byUser`: ההערה מצטטת את מה
      * שהמשתמש כתב, ומוצגת עם "לפי תשובת המשתמש". `extra.order`: 'first' או 'last' – מקום קבוע ברשימה.
+     * `extra.to`: היום האחרון, כשההערה על כמה ימים. `extra.severity`: 'bad' – הערה אדומה (חריגה).
      */
     note(date, message, rule, extra) {
       const k = `${date}|${message}`;

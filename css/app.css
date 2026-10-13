@@ -236,6 +236,7 @@ tr.detail td { background: var(--surface-2); font-size: .85rem; color: var(--mut
 .list { margin: 0; padding: 0; list-style: none; }
 .list > li { padding: .5rem 0; border-bottom: 1px solid var(--line); }
 .list > li:last-child { border-bottom: 0; }
+.list > li.bad { color: var(--bad); }
 .tag {
   display: inline-block; font-size: .75rem; padding: .05rem .5rem; border-radius: 999px;
   background: var(--surface-2); color: var(--muted); white-space: nowrap;
@@ -312,6 +313,6 @@ tr.detail td { background: var(--surface-2); font-size: .85rem; color: var(--mut
   .table-wrap { overflow: visible; }
   .print-only { display: block !important; }
   .head-meta { display: inline; }
-  tr.bad td, tr.gain td, .total.bad, .total.gain { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  tr.bad td, tr.gain td, .total.bad, .total.gain, .list > li.bad { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
 }
 .print-only { display: none; }

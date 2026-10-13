@@ -4,7 +4,7 @@
 // והסבבים – רק מ-js/flight-times.js (`legTimes`, ‏`pairingTimes`).
 
 import { hoursToMin, isoDate, minToHhmm } from '../time.js';
-import { describePairing } from '../model.js';
+import { describePairing, describeRoute } from '../model.js';
 import { at, dateOf, legTimes, pairingTimes } from '../flight-times.js';
 
 const H = (hours) => hoursToMin(hours) ?? 0;
@@ -318,32 +318,57 @@ function second_unplanned_activity(ctx, params, rule) {
   }
 }
 
-// ---------- מנוחה חוזית בבסיס (2018 ס' 53–54; 2024 ס' 35; ישן כ"ה ס' 12.טו) ----------
+// ---------- מנוחה חוזית בבסיס (2018 ס' 53–57; 2024 ס' 35; ישן כ"ה ס' 12.טו) ----------
+
+/**
+ * הסבבים המתוכננים לפי FDP: סבבים בלי מנוחה חוקית ביניהם (שתי טיסות סבב באותו FDP, `same_fdp_rounds`) הם
+ * יחידה אחת, מההתייצבות לראשון ועד השחרור אחרי האחרון, עם שעות הטיסה של כולם (בעל המוצר, 13/10/2026).
+ * `span` של יחידה עם סבב אחד הוא `ctx.duty.span` שלו.
+ * @returns {{pairings: object[], span: object}[]}
+ */
+function planFdpUnits(ctx, legal) {
+  const units = [];
+  for (const p of planPairingsSorted(ctx)) {
+    const s = ctx.duty.span(p);
+    const last = units.at(-1);
+    if (last && last.span.release != null && last.span.flight != null && s.report != null && legalRestBetween(last.span, s) < legal) {
+      last.pairings.push(p);
+      last.span = { ...last.span, end: s.end, release: s.release, flight: last.span.flight + (s.flight ?? 0) };
+    } else {
+      units.push({ pairings: [p], span: s });
+    }
+  }
+  return units;
+}
+
+/** "TLV-BUS-TLV (LY…) + TLV-LCA-TLV (LY…) (באותו FDP)", בלי תאריכים. */
+const describeUnit = (u) => `⁦${u.pairings.map(describeRoute).join(' + ')}⁩${u.pairings.length > 1 ? ' (באותו FDP)' : ''}`;
 
 /**
  * מנוחה חוזית בבסיס מתחילה `rest_buffer_minutes` אחרי תום ה-FDP ומסתיימת `rest_buffer_minutes`
  * לפני ההתייצבות (2018 ס' 53). משכה (ס' 54): בשהייה של עד `short_stay_max_hours` – פי
  * `short_stay_factor` משעות הטיסה; מעבר לזה – `long_stay_share` מהשהייה, בין
- * `long_stay_min_hours` ל-`long_stay_max_hours`. שתי טיסות סבב באותו FDP (בלי מנוחה חוקית ביניהן,
- * `same_fdp_rounds`) אינן נבדקות.
+ * `long_stay_min_hours` ל-`long_stay_max_hours`. נבדקת בין כל שני FDP עוקבים (`planFdpUnits`): שתי טיסות
+ * סבב באותו FDP אינן נבדקות ביניהן, ולפניהן ואחריהן נדרשת מנוחה חוזית מלאה, לפי כל ה-FDP (בעל המוצר,
+ * 13/10/2026; עד אז לפי הטיסה הסמוכה בלבד).
  *
  * שני חוקים משתמשים באותה בדיקה ובאותה שאלה, וכל אחד מזכה רק בתשובה שלו (`answer_value`):
  * ויתור לבקשת החברה (2024 ס' 35) או תכנון שגוי שלא תוקן (ישן כ"ה ס' 12.טו).
  * רצף טיסות סבב עוקבות שההסכם מתיר עם מנוחה קצרה (2018 ס' 55–57, `turnaroundSequences`) אינו
  * נשאל ואינו מזכה; עד 09/10/2026 כל שתי טיסות סבב עוקבות דולגו, בכל צי ובלי המכסה והמינימום.
+ * ההערות (`restNotes`): כל רצף, וכל מנוחה קצרה שהרומה לא זיכתה.
  */
 function base_rest_shortfall(ctx, params, rule) {
   if (!ctx.hasPlan) return;
   const buffer = params.rest_buffer_minutes ?? 0;
   const legal = H(params.legal_rest_hours);
-  const list = planPairingsSorted(ctx);
+  const units = planFdpUnits(ctx, legal);
 
   const links = [];
-  for (let i = 1; i < list.length; i++) {
-    const [p1, p2] = [list[i - 1], list[i]];
-    const [s1, s2] = [ctx.duty.span(p1), ctx.duty.span(p2)];
+  for (let i = 1; i < units.length; i++) {
+    const [u1, u2] = [units[i - 1], units[i]];
+    const [s1, s2] = [u1.span, u2.span];
     if (s1.start == null || s1.end == null || s2.start == null || s1.flight == null) continue;
-    if (legalRestBetween(s1, s2) < legal) continue; // אותו FDP
 
     const rest = s2.report - s1.end - 2 * buffer;
     const stay = s1.end - s1.start;
@@ -360,29 +385,37 @@ function base_rest_shortfall(ctx, params, rule) {
       else capUnknown = share > H(params.long_stay_min_hours);
       basis = `${params.long_stay_share * 100}% מהשהייה (${minToHhmm(stay)}), לפחות ${params.long_stay_min_hours} שעות`;
     }
-    if (rest < required) links.push({ p1, p2, s1, s2, rest, required, basis, capUnknown });
+    if (rest < required) links.push({ u1, u2, p1: u1.pairings.at(-1), p2: u2.pairings[0], s1, s2, rest, required, basis, capUnknown });
   }
 
   const sequences = turnaroundSequences(ctx, params.turnaround_sequence, links, legal);
+  // מה קרה בכל מנוחה קצרה, להערות: 'open' – לא זוכתה (בתכנון לבד – תמיד), 'paid' – הרומה זיכתה,
+  // 'skip' – לא בוצע כמתוכנן, או בדיקה ידנית.
+  const status = new Map();
   for (const link of links) {
-    const { p1, p2, rest, required, basis, capUnknown } = link;
+    const { u1, u2, p2, rest, required, basis, capUnknown } = link;
     const seq = sequences.get(link);
     if (seq?.ok) continue;
-    const what = `${describePairing(p1)} → ${describePairing(p2)}: מנוחה בבסיס ${minToHhmm(Math.max(rest, 0))}, ` +
+    const what = `${u1.pairings.map(describePairing).join(' + ')} → ${u2.pairings.map(describePairing).join(' + ')}: מנוחה בבסיס ${minToHhmm(Math.max(rest, 0))}, ` +
       `והמנוחה החוזית היא ${minToHhmm(required)} (${basis})${seq ? `. ${seq.why}` : ''}`;
     if (capUnknown && rest >= H(params.long_stay_min_hours)) {
+      status.set(link, 'skip');
       ctx.review(`${what}. אין ב-rules.json תקרה למנוחה אחרי שהייה ארוכה (long_stay_max_hours), ולכן לא ידוע אם זו חריגה. דורש בדיקה ידנית.`, rule);
       continue;
     }
 
-    const performed = ctx.hasExec ? performedAsPlanned(ctx, p2) && performedAsPlanned(ctx, p1) : null;
-    if (ctx.hasExec && !performed) continue; // לא בוצע כמתוכנן: אין פיצוי על ויתור או על תכנון שגוי
+    const performed = !ctx.hasExec || [...u1.pairings, ...u2.pairings].every((p) => performedAsPlanned(ctx, p));
+    if (!performed) { // לא בוצע כמתוכנן: אין פיצוי על ויתור או על תכנון שגוי
+      status.set(link, 'skip');
+      continue;
+    }
 
     // הדוח כבר מזכה (מעבר למה שחוקים אחרים מסבירים): לא שואלים, והפיצוי נרשם כוויתור לבקשת החברה.
     const target = ctx.hasExec ? performedAsPlanned(ctx, p2) : p2;
     const own = ctx.rulesWithLogic('base_rest_shortfall').map((r) => r.id);
     const paid = ctx.hasExec &&
       ctx.reportedOn(target, params.report_column) - ctx.expectedOn(target, keyFor(params.report_column), own) >= H(params.hours);
+    status.set(link, paid ? 'paid' : 'open');
     const id = `base_rest:${p2.id}`;
     const a = ctx.answer(id) ?? (paid ? { value: 'company_request' } : null);
     if (!a) {
@@ -414,6 +447,43 @@ function base_rest_shortfall(ctx, params, rule) {
     if (a.value !== params.answer_value) continue;
     ctx.expectPairing(target, keyFor(params.report_column), H(params.hours), rule, what);
   }
+  restNotes(ctx, rule, units, links, sequences, status);
+}
+
+/**
+ * הערות על המנוחה בבסיס (בעל המוצר, 13/10/2026). רצף טיסות סבב עם מנוחה קצרה – הערה אחת, מהטיסה הראשונה עד
+ * האחרונה: עומד בתנאי ההסכם, או באדום (`severity: 'bad'`) חורג, עם הסיבות. כל מנוחה קצרה אחרת – באדום,
+ * מיום הנחיתה ועד יום ההמראה הבאה. מנוחה שהרומה זיכתה או שלא בוצעה כמתוכנן – בלי הערה. בלי חריגה –
+ * "כל הטיסות עומדות במנוחה חוזית בין הטיסות." (`kind: 'rest_ok'`, וב-`evaluate` יחד עם הרכב הצוות החוזי).
+ */
+function restNotes(ctx, rule, units, links, sequences, status) {
+  const red = { severity: 'bad' };
+  const groups = [];
+  for (const link of links.filter((l) => sequences.has(l))) {
+    const last = groups.at(-1);
+    if (last && last.at(-1).p2 === link.p1) last.push(link);
+    else groups.push([link]);
+  }
+  for (const g of groups) {
+    const pairings = [g[0].p1, ...g.map((l) => l.p2)];
+    if (ctx.hasExec && !pairings.every((p) => performedAsPlanned(ctx, p))) continue;
+    const [from, to] = [pairings[0].from, pairings.at(-1).shownTo ?? pairings.at(-1).to];
+    const failed = g.filter((l) => !sequences.get(l).ok);
+    if (!failed.length) {
+      ctx.note(from, 'רצף טיסות עם מנוחה קצרה – עומד בתנאי ההסכם.', rule, { to });
+      continue;
+    }
+    const why = [...new Set(failed.filter((l) => status.get(l) === 'open').map((l) => sequences.get(l).short))];
+    if (why.length) ctx.note(from, `רצף טיסות עם מנוחה קצרה – חורג מתנאי ההסכם: ${why.join('; ')}.`, rule, { to, ...red });
+  }
+  for (const l of links) {
+    if (sequences.has(l) || status.get(l) !== 'open') continue;
+    ctx.note(l.p1.shownTo ?? l.p1.to, `חריגה ממנוחה חוזית בין ${describeUnit(l.u1)} ל-${describeUnit(l.u2)}: מנוחה בבסיס ` +
+      `${minToHhmm(Math.max(l.rest, 0))}, והמנוחה החוזית ${minToHhmm(l.required)} (${l.basis}).`, rule, { to: l.p2.from, ...red });
+  }
+  if (units.length > 1 && links.every((l) => sequences.get(l)?.ok)) {
+    ctx.note(null, 'כל הטיסות עומדות במנוחה חוזית בין הטיסות.', rule, { order: 'last', kind: 'rest_ok' });
+  }
 }
 
 /**
@@ -425,8 +495,10 @@ function base_rest_shortfall(ctx, params, rule) {
  * `night_min_block_hours`, כשהשנייה נוחתת לפני `night_on_block_before` (ס' 57). טיסה חוצת לילה
  * וטיסה שאינה – אין רצף כזה. הרצפים בחודש צריכים להיכנס באחת מהמכסות של ס' 55 (`quotas`: `night2` –
  * 2 חוצות לילה, `day2`/`day3` – 2 או 3 שאינן חוצות לילה, `day` – אחת מהן). נבחרת המכסה שמכסה הכי
- * הרבה רצפים, לפי הסדר בחודש; רצף שאינו נכנס בה נשאל כמו כל מנוחה קצרה.
- * @returns {Map<object, {ok: boolean, why?: string}>} לכל קישור בין שתי טיסות סבב
+ * הרבה רצפים, לפי הסדר בחודש; רצף שאינו נכנס בה נשאל כמו כל מנוחה קצרה. שתי טיסות סבב באותו FDP
+ * (`planFdpUnits`) אינן חלק מרצף (בעל המוצר, 13/10/2026): המנוחה הקצרה לפניהן ואחריהן היא חריגה רגילה.
+ * @returns {Map<object, {ok: boolean, why?: string, short?: string}>} לכל קישור בין שתי טיסות סבב. `why` –
+ *   לשאלה, `short` – להערה, בלי "שתי טיסות סבב עוקבות".
  */
 function turnaroundSequences(ctx, seq, links, legal) {
   const out = new Map();
@@ -443,32 +515,34 @@ function turnaroundSequences(ctx, seq, links, legal) {
   };
   const tiers = [...seq.min_block].sort((a, b) => parseClock(b.report_after) - parseClock(a.report_after));
   const nightMin = H(seq.night_min_block_hours);
+  const PAIR = 'שתי טיסות סבב עוקבות';
 
   const chains = [];
   for (const link of links) {
     const { s1, s2 } = link;
+    if (link.u1.pairings.length > 1 || link.u2.pairings.length > 1) continue;
     if (!isTurnaround(s1, legal, ctx) || !isTurnaround(s2, legal, ctx)) continue;
     if (!seq.fleets.includes(ctx.fleet)) {
-      out.set(link, { ok: false, why: 'שתי טיסות סבב עוקבות, אבל רצף כזה עם מנוחה קצרה מותר רק בצי צר גוף' });
+      out.set(link, { ok: false, why: `${PAIR}, אבל רצף כזה עם מנוחה קצרה מותר רק בצי צר גוף`, short: 'רצף כזה מותר רק בצי צר גוף' });
       continue;
     }
     const block = s2.start - s1.end;
-    const gap = `שתי טיסות סבב עוקבות, ובין הנחיתה להמראה הבאה ${minToHhmm(Math.max(block, 0))}`;
-    let why = null;
+    const gap = `בין הנחיתה להמראה הבאה ${minToHhmm(Math.max(block, 0))}`;
+    let short = null;
     if (night(s1) !== night(s2)) {
-      why = 'שתי טיסות סבב עוקבות, אחת חוצת לילה והשנייה לא. ההסכם מתיר רצף רק של טיסות מאותו סוג';
+      short = 'אחת חוצת לילה והשנייה לא. ההסכם מתיר רצף רק של טיסות מאותו סוג';
     } else if (night(s1)) {
       if (block < nightMin || clockOf(s2.end) >= parseClock(seq.night_on_block_before)) {
-        why = `${gap}. ברצף של שתי טיסות חוצות לילה נדרשים לפחות ${minToHhmm(nightMin)}, והטיסה השנייה צריכה לנחות לפני ${seq.night_on_block_before}`;
+        short = `${gap}. ברצף של שתי טיסות חוצות לילה נדרשים לפחות ${minToHhmm(nightMin)}, והטיסה השנייה צריכה לנחות לפני ${seq.night_on_block_before}`;
       }
     } else {
       const reportAt = clockOf(s2.report);
       const tier = tiers.find((t) => reportAt > parseClock(t.report_after));
-      if (!tier) why = `${gap}, וההתייצבות לטיסה הבאה ב-${hhmm(s2.report)}. רצף כזה מותר רק כשההתייצבות אחרי ${tiers.at(-1).report_after}`;
-      else if (block < H(tier.hours)) why = `${gap}. כשההתייצבות לטיסה הבאה אחרי ${tier.report_after} נדרשים לפחות ${minToHhmm(H(tier.hours))}`;
+      if (!tier) short = `${gap}, וההתייצבות לטיסה הבאה ב-${hhmm(s2.report)}. רצף כזה מותר רק כשההתייצבות אחרי ${tiers.at(-1).report_after}`;
+      else if (block < H(tier.hours)) short = `${gap}. כשההתייצבות לטיסה הבאה אחרי ${tier.report_after} נדרשים לפחות ${minToHhmm(H(tier.hours))}`;
     }
-    if (why) {
-      out.set(link, { ok: false, why });
+    if (short) {
+      out.set(link, { ok: false, why: `${PAIR}, ${short}`, short });
       continue;
     }
     const last = chains.at(-1);
@@ -495,10 +569,10 @@ function turnaroundSequences(ctx, seq, links, legal) {
   }
   for (const c of chains) {
     const n = c.links.length + 1;
-    const why = c.type == null
-      ? `רצף של ${n} טיסות סבב${c.night ? ' חוצות לילה' : ''}. ההסכם מתיר רצף של 2 טיסות סבב חוצות לילה, או 2–3 שאינן חוצות לילה`
-      : 'רצף טיסות סבב עוקבות מעבר למכסה החודשית';
-    for (const link of c.links) out.set(link, best.has(c) ? { ok: true } : { ok: false, why });
+    const [why, short] = c.type == null
+      ? Array(2).fill(`רצף של ${n} טיסות סבב${c.night ? ' חוצות לילה' : ''}. ההסכם מתיר רצף של 2 טיסות סבב חוצות לילה, או 2–3 שאינן חוצות לילה`)
+      : ['רצף טיסות סבב עוקבות מעבר למכסה החודשית', 'מעבר למכסה החודשית'];
+    for (const link of c.links) out.set(link, best.has(c) ? { ok: true } : { ok: false, why, short });
   }
   return out;
 }
@@ -1522,7 +1596,7 @@ function legal_crew_composition(ctx, params, rule) {
   if (unknown.length) {
     ctx.note(null, `הרכב הצוות אינו ידוע ב${unknown.length === 1 ? 'טיסה שהצוות החוזי בה מוגבר או כפול' : `-${unknown.length} טיסות שהצוות החוזי בהן מוגבר או כפול`}, ולכן לא נבדק אם הוא חוזי: ${unknown.join('; ')}.`, rule, { order: 'last' });
   } else if (checked && !below && !pending.length) {
-    ctx.note(null, 'כל הטיסות עומדות בהרכב צוות חוזי.', rule, { order: 'last' });
+    ctx.note(null, 'כל הטיסות עומדות בהרכב צוות חוזי.', rule, { order: 'last', kind: 'crew_ok' });
   }
 }
 
