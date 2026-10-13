@@ -326,9 +326,9 @@ function second_unplanned_activity(ctx, params, rule) {
  * `span` של יחידה עם סבב אחד הוא `ctx.duty.span` שלו.
  * @returns {{pairings: object[], span: object}[]}
  */
-function planFdpUnits(ctx, legal) {
+function planFdpUnits(ctx, legal, pairings = planPairingsSorted(ctx)) {
   const units = [];
-  for (const p of planPairingsSorted(ctx)) {
+  for (const p of pairings) {
     const s = ctx.duty.span(p);
     const last = units.at(-1);
     if (last && last.span.release != null && last.span.flight != null && s.report != null && legalRestBetween(last.span, s) < legal) {
@@ -344,28 +344,9 @@ function planFdpUnits(ctx, legal) {
 /** "TLV-BUS-TLV (LY…) + TLV-LCA-TLV (LY…) (באותו FDP)", בלי תאריכים. */
 const describeUnit = (u) => `⁦${u.pairings.map(describeRoute).join(' + ')}⁩${u.pairings.length > 1 ? ' (באותו FDP)' : ''}`;
 
-/**
- * מנוחה חוזית בבסיס מתחילה `rest_buffer_minutes` אחרי תום ה-FDP ומסתיימת `rest_buffer_minutes`
- * לפני ההתייצבות (2018 ס' 53). משכה (ס' 54): בשהייה של עד `short_stay_max_hours` – פי
- * `short_stay_factor` משעות הטיסה; מעבר לזה – `long_stay_share` מהשהייה, בין
- * `long_stay_min_hours` ל-`long_stay_max_hours`. נבדקת בין כל שני FDP עוקבים (`planFdpUnits`): שתי טיסות
- * סבב באותו FDP אינן נבדקות ביניהן, ולפניהן ואחריהן נדרשת מנוחה חוזית מלאה, לפי כל ה-FDP (בעל המוצר,
- * 13/10/2026; עד אז לפי הטיסה הסמוכה בלבד).
- *
- * שני חוקים משתמשים באותה בדיקה ובאותה שאלה, וכל אחד מזכה רק בתשובה שלו (`answer_value`):
- * ויתור לבקשת החברה (2024 ס' 35) או תכנון שגוי שלא תוקן (ישן כ"ה ס' 12.טו).
- * רצף טיסות סבב עוקבות שעומד בתנאים של 2018 ס' 55–57 (`turnaroundSequences`) נשאל: אין בקבצים סימן
- * אם הוצג בתכנית החודשית כרצף, או שהחברה שיבצה מנוחה קצרה (בעל המוצר, 13/10/2026; עד אז הונח רצף, ועד
- * 09/10/2026 כל שתי טיסות סבב עוקבות דולגו). שאלה אחת לכל רצף, עם "רצף שהוצג בתכנית החודשית" (`sequence`,
- * ללא פיצוי); כל תשובה אחרת חלה על כל המנוחות שברצף, כמו על מנוחה קצרה רגילה.
- * ההערות (`restNotes`): כל רצף, וכל מנוחה קצרה שהרומה לא זיכתה.
- */
-function base_rest_shortfall(ctx, params, rule) {
-  if (!ctx.hasPlan) return;
+/** מנוחה קצרה מהחוזית בין כל שני FDP עוקבים (2018 ס' 53–54; ראו `base_rest_shortfall`). */
+function shortRests(units, params) {
   const buffer = params.rest_buffer_minutes ?? 0;
-  const legal = H(params.legal_rest_hours);
-  const units = planFdpUnits(ctx, legal);
-
   const links = [];
   for (let i = 1; i < units.length; i++) {
     const [u1, u2] = [units[i - 1], units[i]];
@@ -389,6 +370,43 @@ function base_rest_shortfall(ctx, params, rule) {
     }
     if (rest < required) links.push({ u1, u2, p1: u1.pairings.at(-1), p2: u2.pairings[0], s1, s2, rest, required, basis, capUnknown });
   }
+  return links;
+}
+
+/**
+ * מנוחה קצרה מהחוזית בביצוע (בעל המוצר, 13/10/2026; טיוטה 325): בין כל שני FDP עוקבים שבוצעו, כשלפחות סבב
+ * אחד בהם אינו סבב שבוצע כמתוכנן (בין סבבים שבוצעו כמתוכנן הבדיקה היא בתכנון). אותו חישוב כמו בתכנון, לפי
+ * ה-STD וה-STA של מה שבוצע. מנוחה קצרה שנוצרה בשינוי בביצוע מותרת ואין עליה פיצוי: להערות בלבד.
+ */
+function execRestShortfalls(ctx, params, legal) {
+  const asPlanned = new Set(ctx.planPairings.map((p) => performedAsPlanned(ctx, p)).filter(Boolean));
+  const units = planFdpUnits(ctx, legal, [...ctx.execPairings].sort((a, b) => a.from.localeCompare(b.from)));
+  return shortRests(units, params).filter((l) => !l.capUnknown &&
+    ![...l.u1.pairings, ...l.u2.pairings].every((p) => asPlanned.has(p)));
+}
+
+/**
+ * מנוחה חוזית בבסיס מתחילה `rest_buffer_minutes` אחרי תום ה-FDP ומסתיימת `rest_buffer_minutes`
+ * לפני ההתייצבות (2018 ס' 53). משכה (ס' 54): בשהייה של עד `short_stay_max_hours` – פי
+ * `short_stay_factor` משעות הטיסה; מעבר לזה – `long_stay_share` מהשהייה, בין
+ * `long_stay_min_hours` ל-`long_stay_max_hours`. נבדקת בין כל שני FDP עוקבים (`planFdpUnits`): שתי טיסות
+ * סבב באותו FDP אינן נבדקות ביניהן, ולפניהן ואחריהן נדרשת מנוחה חוזית מלאה, לפי כל ה-FDP (בעל המוצר,
+ * 13/10/2026; עד אז לפי הטיסה הסמוכה בלבד).
+ *
+ * שני חוקים משתמשים באותה בדיקה ובאותה שאלה, וכל אחד מזכה רק בתשובה שלו (`answer_value`):
+ * ויתור לבקשת החברה (2024 ס' 35) או תכנון שגוי שלא תוקן (ישן כ"ה ס' 12.טו).
+ * רצף טיסות סבב עוקבות שעומד בתנאים של 2018 ס' 55–57 (`turnaroundSequences`) נשאל: אין בקבצים סימן
+ * אם הוצג בתכנית החודשית כרצף, או שהחברה שיבצה מנוחה קצרה (בעל המוצר, 13/10/2026; עד אז הונח רצף, ועד
+ * 09/10/2026 כל שתי טיסות סבב עוקבות דולגו). שאלה אחת לכל רצף, עם "רצף שהוצג בתכנית החודשית" (`sequence`,
+ * ללא פיצוי); כל תשובה אחרת חלה על כל המנוחות שברצף, כמו על מנוחה קצרה רגילה.
+ * ההערות (`restNotes`): כל רצף, וכל מנוחה קצרה שהרומה לא זיכתה, ומול הרומה גם מנוחה קצרה בביצוע
+ * (`execRestShortfalls`).
+ */
+function base_rest_shortfall(ctx, params, rule) {
+  if (!ctx.hasPlan) return;
+  const legal = H(params.legal_rest_hours);
+  const units = planFdpUnits(ctx, legal);
+  const links = shortRests(units, params);
 
   const own = ctx.rulesWithLogic('base_rest_shortfall').map((r) => r.id);
   const performed = (link) => !ctx.hasExec || [...link.u1.pairings, ...link.u2.pairings].every((p) => performedAsPlanned(ctx, p));
@@ -400,7 +418,7 @@ function base_rest_shortfall(ctx, params, rule) {
   const declined = (c) => { const a = ctx.answer(c.id); return a ? a.value !== 'sequence' : c.links.every(paidOn); };
   const sequences = turnaroundSequences(ctx, params.turnaround_sequence, links, legal, declined);
   // מה קרה בכל מנוחה קצרה, להערות: 'open' – לא זוכתה (בתכנון לבד – תמיד), 'paid' – הרומה זיכתה,
-  // 'sequence' – רצף שהוצג בתכנית החודשית, 'skip' – לא בוצע כמתוכנן, או בדיקה ידנית.
+  // 'sequence' – רצף שהוצג בתכנית החודשית, 'unperformed' – לא בוצע כמתוכנן, 'skip' – בדיקה ידנית.
   const status = new Map();
   const asked = new Set();
   for (const link of links) {
@@ -417,7 +435,7 @@ function base_rest_shortfall(ctx, params, rule) {
     }
 
     if (!performed(link)) { // לא בוצע כמתוכנן: אין פיצוי על ויתור או על תכנון שגוי
-      status.set(link, 'skip');
+      status.set(link, 'unperformed');
       continue;
     }
 
@@ -465,7 +483,7 @@ function base_rest_shortfall(ctx, params, rule) {
       : `חריגה ממנוחה חוזית בין טיסות – מנוחה בבסיס ${minToHhmm(Math.max(rest, 0))}, והמנוחה החוזית ${minToHhmm(required)} (${basis}).`;
     ctx.expectPairing(target, keyFor(params.report_column), H(params.hours), rule, what, { explain });
   }
-  restNotes(ctx, rule, units, links, sequences, status);
+  restNotes(ctx, rule, units, links, sequences, status, ctx.hasExec ? execRestShortfalls(ctx, params, legal) : []);
 }
 
 /**
@@ -509,9 +527,10 @@ function askSequence(ctx, chain, rule) {
  * האחרונה: עומד בתנאי ההסכם (רק אחרי התשובה "רצף"; עד אז ובכל תשובה אחרת – כמו כל מנוחה קצרה), או באדום (`severity: 'bad'`) חורג, עם הסיבות. כל מנוחה קצרה אחרת – באדום,
  * מיום הנחיתה ועד יום ההמראה הבאה. מנוחה שהרומה זיכתה או שלא בוצעה כמתוכנן – בלי הערה. בלי מנוחה קצרה,
  * גם לא ברצף שעומד בתנאים (טיוטה 320) – "כל הטיסות עומדות במנוחה חוזית בין הטיסות." (`kind: 'rest_ok'`,
- * וב-`evaluate` יחד עם הרכב הצוות החוזי).
+ * וב-`evaluate` יחד עם הרכב הצוות החוזי). מול הרומה (טיוטה 325): מנוחה קצרה בתכנון שלא בוצעה כמתוכנן
+ * אינה נחשבת, ומנוחה קצרה בביצוע (`execShort`) – הערה רגילה, לא באדום.
  */
-function restNotes(ctx, rule, units, links, sequences, status) {
+function restNotes(ctx, rule, units, links, sequences, status, execShort) {
   const red = { severity: 'bad' };
   const groups = [];
   for (const link of links.filter((l) => sequences.has(l))) {
@@ -537,7 +556,11 @@ function restNotes(ctx, rule, units, links, sequences, status) {
     ctx.note(l.p1.shownTo ?? l.p1.to, `חריגה ממנוחה חוזית בין ${describeUnit(l.u1)} ל-${describeUnit(l.u2)}: מנוחה בבסיס ` +
       `${minToHhmm(Math.max(l.rest, 0))}, והמנוחה החוזית ${minToHhmm(l.required)} (${l.basis}).`, rule, { to: l.p2.from, ...red });
   }
-  if (units.length > 1 && !links.length) {
+  for (const l of execShort) {
+    ctx.note(l.p1.shownTo ?? l.p1.to, `מנוחה קצרה מהחוזית בביצוע, בין ${describeUnit(l.u1)} ל-${describeUnit(l.u2)}: מנוחה בבסיס ` +
+      `${minToHhmm(Math.max(l.rest, 0))}, והמנוחה החוזית ${minToHhmm(l.required)} (${l.basis}). שינוי בביצוע – אין פיצוי.`, rule, { to: l.p2.from });
+  }
+  if (units.length > 1 && !links.some((l) => status.get(l) !== 'unperformed') && !execShort.length) {
     ctx.note(null, 'כל הטיסות עומדות במנוחה חוזית בין הטיסות.', rule, { order: 'last', kind: 'rest_ok' });
   }
 }
