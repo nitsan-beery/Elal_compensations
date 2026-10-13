@@ -491,17 +491,23 @@ function base_rest_shortfall(ctx, params, rule) {
 
 /**
  * האפשרויות בשאלה על מנוחה קצרה (בעל המוצר, 13/10/2026). הסכום מהחוק שהתשובה מזכה בו (`answer_value`).
- * `sequence` – לרצף שעומד בתנאים בלבד.
+ * `sequence` – לרצף שעומד בתנאים בלבד. בתכנון לבד (גם מול היומן) הטיסה עוד לא בוצעה, ולכן "טעות בתכנון"
+ * עם מה שאפשר לעשות (בעל המוצר, 13/10/2026; טיוטה 329).
  */
 function baseRestOptions(ctx, sequence) {
+  const hours = (value) => ctx.rulesWithLogic('base_rest_shortfall').find((r) => r.logic.params?.answer_value === value)?.logic.params.hours;
   const paid = (value, where) => {
-    const h = ctx.rulesWithLogic('base_rest_shortfall').find((r) => r.logic.params?.answer_value === value)?.logic.params.hours;
+    const h = hours(value);
     return `${h != null ? `${h} שעות ` : ''}פיצוי לפי ${where}`;
   };
+  const h = hours('planning_error');
+  const planningError = !ctx.hasExec || ctx.calendarRun
+    ? { label: 'טעות בתכנון', hint: `האפשרויות שלך הן לדרוש שינוי תכנון או פיצוי ${h != null ? `${h} שעות ` : ''}לפי ההסכם הישן` }
+    : { label: 'טעות בתכנון שלא תוקנה, והסכמתי לבצע', hint: paid('planning_error', 'ההסכם הישן') };
   return [
     ...(sequence ? [{ value: 'sequence', label: 'רצף שהוצג בתכנית החודשית', hint: 'ללא פיצוי' }] : []),
     { value: 'company_request', label: 'לבקשת החברה ובהסכמתי', hint: paid('company_request', 'הסכם 2024') },
-    { value: 'planning_error', label: 'טעות בתכנון שלא תוקנה, והסכמתי לבצע', hint: paid('planning_error', 'ההסכם הישן') },
+    { value: 'planning_error', ...planningError },
     { value: 'my_request', label: 'ויתרתי על המנוחה בבקשות שלי', hint: 'ללא פיצוי' },
     otherOption(),
   ];
