@@ -277,7 +277,7 @@ function evaluateFiles({ rulesData, plan = null, exec = null, answers = {}, hist
   const crewOk = out.notes.find((n) => n.kind === 'crew_ok');
   const restOk = out.notes.find((n) => n.kind === 'rest_ok');
   if (crewOk && restOk) {
-    crewOk.message = 'כל הטיסות עומדות בהרכב צוות חוזי ובמנוחה חוזית בין הטיסות.';
+    crewOk.message = 'כל הטיסות עומדות בהרכב צוות חוזי ובמנוחה חוזית בבסיס בין הטיסות.';
     out.notes = out.notes.filter((n) => n !== restOk);
   }
   // סדר ההערות (בעל המוצר, 09/10/2026): ההערות על החודש כולו (בלי תאריך) קודם, וויתור מלון ראשונה ביניהן
