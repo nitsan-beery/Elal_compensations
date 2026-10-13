@@ -557,8 +557,8 @@ function restNotes(ctx, rule, units, links, sequences, status, execShort) {
       `${minToHhmm(Math.max(l.rest, 0))}, והמנוחה החוזית ${minToHhmm(l.required)} (${l.basis}).`, rule, { to: l.p2.from, ...red });
   }
   for (const l of execShort) {
-    ctx.note(l.p1.shownTo ?? l.p1.to, `מנוחה קצרה מהחוזית בביצוע, בין ${describeUnit(l.u1)} ל-${describeUnit(l.u2)}: מנוחה בבסיס ` +
-      `${minToHhmm(Math.max(l.rest, 0))}, והמנוחה החוזית ${minToHhmm(l.required)} (${l.basis}). שינוי בביצוע – אין פיצוי.`, rule, { to: l.p2.from });
+    ctx.note(l.p1.shownTo ?? l.p1.to, `מנוחה קצרה מהמנוחה החוזית, ${minToHhmm(Math.max(l.rest, 0))} בפועל לעומת ` +
+      `${minToHhmm(l.required)} בהסכם. שינוי בביצוע – אין פיצוי.`, rule, { to: l.p2.from });
   }
   if (units.length > 1 && !links.some((l) => status.get(l) !== 'unperformed') && !execShort.length) {
     ctx.note(null, 'כל הטיסות עומדות במנוחה חוזית בין הטיסות.', rule, { order: 'last', kind: 'rest_ok' });
