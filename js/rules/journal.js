@@ -20,6 +20,14 @@ export const pairingFlights = (p) => p.legs.filter((l) => !l.dh && !l.dhd && l.t
 /** אותו סבב בין היומן לרומה: מספרי הטיסות זהים, או שהיעדים זהים והתאריכים חופפים, כמו בהתאמה לרומה. */
 export const samePairing = (p, c) => pairingFlights(c) === pairingFlights(p) || (overlapDays(p, c) && c.destinations.join('-') === p.destinations.join('-'));
 
+/**
+ * סדר רגלי היומן: לפי ההמראה (`time`), וחזרה לבסיס אחרי ההמראה (רגל X→X) לפני הרגל באותו מספר טיסה
+ * שיוצאת אחריה מאותו שדה, גם כשה-STD שלה מוקדם יותר (15/02/2026 LY2367; בעל המוצר, 13/10/2026).
+ */
+export const legOrder = (time) => (a, b) =>
+  (a.flight === b.flight && a.org === a.dst && b.org === a.org && b.dst !== b.org ? -1 : 0) ||
+  (a.flight === b.flight && b.org === b.dst && a.org === b.org && a.dst !== a.org ? 1 : 0) || time(a) - time(b);
+
 /** תשובות שמקשרות סבב לסבב אחר. */
 const LINKED = ['voluntary_swap', 'replaced', 'bid'];
 const GAVE_AWAY = 'none';
@@ -40,7 +48,7 @@ export function calendarView(calendar, domicile, period) {
   if (!calendar || !domicile) return null;
   const month = `${period.year}-${String(period.month).padStart(2, '0')}`;
   const byDate = new Map();
-  for (const f of [...(calendar.flights ?? [])].sort((a, b) => a.std.localeCompare(b.std))) {
+  for (const f of [...(calendar.flights ?? [])].sort(legOrder((f) => Date.parse(f.std)))) {
     const t = baseTime(f.std, domicile);
     if (!t || t.date.slice(0, 7) !== month) continue;
     const end = f.sta ? baseTime(f.sta, domicile) : null;
@@ -291,10 +299,12 @@ export function reduceChain(chain, { toExec, credit, execAnswer, byExecId }) {
     return b !== chain.plan ? { basis: b } : {};
   };
   // שלב אחרון ידוע: `a` התשובה עליו, `at` הסבב שעליו נשאל, `e` הסבב ברומה שבקישור.
+  // תשובה ישנה שנשמרה בלי קישור (בלי `link`) נשארת כזאת: ההחלפה היא הסבב שבוצע באותם ימים, ולא טיסה בחודש אחר.
+  const linkOf = (a, e, own) => (e ? { link: e.id } : 'link' in a ? { link: own ?? null } : {});
   const last = (a, at, e) => {
-    if (a.value === 'voluntary_swap') return result('voluntary_swap', { link: e?.id ?? a.link ?? null, endsAt: e ?? at });
+    if (a.value === 'voluntary_swap') return result('voluntary_swap', { ...linkOf(a, e, a.link), endsAt: e ?? at });
     const pool = [base, ...company];
-    if (COMPANY.includes(a.value)) return result(a.value, { link: e?.id ?? null, endsAt: e ?? at, ...basis(pool) });
+    if (COMPANY.includes(a.value)) return result(a.value, { ...linkOf(a, e), endsAt: e ?? at, ...basis(pool) });
     return result(a.value, { ...(a.text && { text: a.text }), endsAt: at, ...(at !== chain.plan && { lostOn: at }), ...basis(pool) });
   };
   const open = (id, pairing) => result('chain_open', { open: { id, pairing }, endsAt: pairing });

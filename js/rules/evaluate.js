@@ -14,7 +14,7 @@ import { OPTIONAL_COLUMNS } from '../pdf/exec.js';
 import { checkLegalLimits, restDefinition, delayFitsFdp, baseReportMinutes, dutyTimes } from './legal.js';
 import { whiteFlightLegs, whiteCrew, contractCrewOf } from './duty.js';
 import { timeZones, legTimes, pairingTimes, crossesMidnight, dateOf } from '../flight-times.js';
-import { calendarView, buildJournal, reduceChain, sameAssignment, firstFdpLegs, overlapDays, samePairing } from './journal.js';
+import { calendarView, buildJournal, reduceChain, sameAssignment, firstFdpLegs, overlapDays, samePairing, legOrder } from './journal.js';
 import { baseTime } from '../airports.js';
 
 /** עמודות הדוח שכל סוג ציפייה נבדק מולן. */
@@ -47,8 +47,27 @@ const CREDIT_LABEL_COLUMNS = ['Credit', 'FLT+DH', 'Rig'];
  *        (`calendarIgnored` ברשומת החודש; בעל המוצר, 04/10/2026).
  * @param {Array<{flights, standby}>} [input.calendarHistory]  התמונות של החודש מהיומן לפני הרומה,
  *        לפי הסדר (`appendSnapshot` ב-js/rules/journal.js). בלעדיהן – היומן עצמו כתמונה אחת.
+ *
+ * בתכנון לבד, כשיש ביומן נתונים מהחודש, היומן נבדק כמו רומה, בלי פיצויים (בעל המוצר, 13/10/2026;
+ * requirements.md סעיף 5.3): החודש רץ פעמיים – לפי התכנון, וכמו מול רומה שנבנתה מהיומן
+ * (`calendarExec`) – ומהריצה השנייה נלקחות טבלת השינויים, מגבלות החוק והשאלות על השינויים
+ * (`mergeCalendarRun`).
  */
-export function evaluate({ rulesData, plan = null, exec = null, answers = {}, history = [], calendar = null, reopen = [], calendarHistory = null }) {
+export function evaluate(input) {
+  const run = input.plan && !input.exec ? calendarExec(input) : null;
+  if (!run) return evaluateFiles(input);
+  const out = evaluateFiles(input, { journal: false });
+  const cal = evaluateFiles({ ...input, exec: run.exec }, { calendarRun: run });
+  return mergeCalendarRun(out, cal, input.answers ?? {});
+}
+
+/**
+ * `journal`: false – בלי יומן השינויים (בריצה לפי התכנון, כשהשינויים באים מהריצה מול היומן).
+ * `calendarRun`: הריצה מול הרומה שנבנתה מהיומן (`calendarExec`): השאלות בנוסח של היומן
+ * (`ctx.calendarRun`), ומגבלות החוק לפי הזמנים שביומן, כמו בתכנון (`calendarRun.plan`).
+ */
+function evaluateFiles({ rulesData, plan = null, exec = null, answers = {}, history = [], calendar = null, reopen = [], calendarHistory = null },
+  { journal: useJournal = true, calendarRun = null } = {}) {
   calendar = withoutKept(calendar);
   // התשובות שהשרשרת מהיומן קובעת נוספות לכאן (`applyJournal`).
   answers = { ...answers };
@@ -127,6 +146,7 @@ export function evaluate({ rulesData, plan = null, exec = null, answers = {}, hi
   const assumed = new Map(); // planId → ערכי התשובה שהאפליקציה הניחה בלי לשאול
   const ctx = makeContext({ out, timeline, domicile, codes, holidays: rulesData.holidays ?? {}, answers, plan, exec, supported, matches, planPairings,
     period, fleet, fdp, tz, assumed, reportDays, calendarAnswer: (id) => (reopen.includes(id) ? null : cal.answer(id)), calendarFirstDay: cal.firstDay,
+    calendarRun: !!calendarRun,
     // בלי דוח ביצוע, הסבבים המתוכננים משמשים לחישוב הקרדיט והרי"ג הצפויים.
     execPairings: exec ? execPairings : planPairings });
   ctx.legalRest = legalRest;
@@ -167,7 +187,9 @@ export function evaluate({ rulesData, plan = null, exec = null, answers = {}, hi
       },
       calendarStandby: cal.standby,
     };
-    const legal = checkLegalLimits({ ...common, exec, answer: ctx.answer, ask: ctx.ask, crewMatters: ctx.crewMatters, whiteCrew: whiteCrewOf });
+    // מול היומן: לפי הזמנים שביומן, כמו בתכנון – בלי "הארכה בביצוע" ובלי שאלות על הרכב הצוות.
+    const legal = checkLegalLimits({ ...common, ...(calendarRun ? { plan: calendarRun.plan, exec: null } : { exec }),
+      answer: ctx.answer, ask: ctx.ask, crewMatters: ctx.crewMatters, whiteCrew: whiteCrewOf });
     out.legal = legal.result;
     crewIdOf = legal.crewIdOf;
     out.crewIdOf = Object.fromEntries(crewIdOf);
@@ -186,7 +208,7 @@ export function evaluate({ rulesData, plan = null, exec = null, answers = {}, hi
 
   // יומן השינויים מהיומן המחובר (בעל המוצר, 06/10/2026; js/rules/journal.js): בתכנון לבד – השאלות על
   // השינויים (`cancelled_no_compensation`); עם הרומה – השרשרת כתשובה אחת על כל סבב מתוכנן.
-  const journal = plan && domicile ? makeJournal({ ctx, rulesData, planPairings, calendar, calendarHistory, answers, period, domicile, fleet }) : null;
+  const journal = useJournal && plan && domicile ? makeJournal({ ctx, rulesData, planPairings, calendar, calendarHistory, answers, period, domicile, fleet }) : null;
   ctx.journal = journal;
   ctx.journalOpen = [];
   // שינוי תשובה על שלב מוחק גם את התשובות על השלבים שאחריו בשרשרת: הם נשאלו בזכותה.
@@ -271,8 +293,8 @@ export function evaluate({ rulesData, plan = null, exec = null, answers = {}, hi
   // יום הנחיתה בבסיס לפי מזהה הסבב, כשהוא אחרי יום ה-STD של הרגל האחרונה: לתיאור הסבב ב"תשובות שנשמרו",
   // שם הסבב מתואר מהמזהה (בעל המוצר, 08/10/2026).
   out.landingDays = Object.fromEntries([...planPairings, ...execPairings].filter((p) => p.shownTo).map((p) => [p.id, p.shownTo]));
-  // בתכנון לבד: מה שהיומן מראה אחרת מהתכנון (בעל המוצר, 04/10/2026), עם השרשרת מתחת לכל שינוי (06/10/2026).
-  out.calendarChanges = journal && mode === 'plan' ? journalRows(journal, out) : null;
+  // בתכנון לבד, מה שהיומן מראה אחרת מהתכנון: מהריצה מול היומן (`mergeCalendarRun`).
+  out.calendarChanges = null;
   // שלבים שחזרו למצב שלפניהם: התשובות עליהם נמחקות מהחודש (בעל המוצר, 06/10/2026).
   out.obsoleteAnswers = journal?.obsolete ?? [];
   out.calendarCrew = [...monthKeys].filter((k) => cal.has(k.slice(0, 10), k.slice(11))).length;
@@ -288,6 +310,148 @@ export function evaluate({ rulesData, plan = null, exec = null, answers = {}, hi
     ? [...monthKeys].filter((k) => k.startsWith(month) && read(k) && matters(k) && !cal.has(k.slice(0, 10), k.slice(11))).sort()
       .map((k) => ({ date: k.slice(0, 10), flight: k.slice(11) }))
     : [];
+  return out;
+}
+
+/**
+ * הרומה בלי סכומים שנבנית מהיומן בתכנון לבד (בעל המוצר, 13/10/2026; requirements.md סעיף 5.3), או null
+ * כשאין ביומן נתונים מהחודש. הטיסות בטווח שהיומן מכסה (`calendarView`) והכוננויות שבו – מהיומן; סבבי
+ * התכנון שאינם נוגעים בטווח הזה, ופעילויות שאינן ביומן (קרקע, סימולטור, חופשה, מחלה) – מהתכנון, כאילו
+ * בוצעו כמתוכנן. רגל ביומן שתוכננה כ-DH (אותה טיסה באותו יום) היא DH. בלי עמודות סכומים. הרגליים
+ * בפורמט של הרומה: STD ו-STA בשעון כל שדה, ATD ו-ATA כמתוכנן (`legTimes` ב-js/flight-times.js).
+ * `plan`: אותו דבר בפורמט של קובץ התכנון, למגבלות החוק.
+ */
+function calendarExec({ rulesData, plan, calendar = null, calendarHistory = null }) {
+  const domicile = guessDomicile(plan);
+  const view = domicile ? calendarView(withoutKept(calendar ?? calendarHistory?.at(-1) ?? null), domicile, plan.period) : null;
+  if (!view) return null;
+  const timeline = buildTimeline(plan.period, plan, null);
+  const tz = timeZones(domicile, plan.stationOffsets ?? null, timeline);
+  const touches = (p) => p.to >= view.first && p.from <= view.last;
+  const planLeg = new Map(); // "date|flight" → רגל בתכנון
+  for (const d of timeline) for (const l of d.plan?.legs ?? []) if (l.flight) planLeg.set(`${d.date}|${l.flight}`, { ...l, date: d.date });
+  const legs = []; // {date, flight, org, dst, std, sta, dh, ac} – זמנים בדקות מוחלטות בשעון הבסיס
+  for (const p of view.pairings) {
+    for (const l of p.legs) {
+      const pl = planLeg.get(`${l.date}|${l.flight}`);
+      const plt = pl && l.staAbs == null ? legTimes(pl, tz) : null;
+      const sta = l.staAbs ?? (plt?.sta != null ? l.stdAbs + (plt.sta - plt.std) : null);
+      legs.push({ date: l.date, flight: l.flight, org: l.org, dst: l.dst, std: l.stdAbs, sta, dh: !!pl?.dh, ac: pl?.ac ?? null });
+    }
+  }
+  for (const p of buildPairings(timeline, domicile, (d) => d.plan?.legs)) {
+    if (touches(p)) {
+      // DH בחברה אחרת (DH/LX 1487): אינו ביומן, ולכן מהתכנון, כשאין ביומן רגל באותו יום בין אותם שדות.
+      for (const l of p.legs) {
+        if (!l.dh || /^LY/.test(l.flight ?? '') || legs.some((x) => x.date === l.date && x.org === l.org && x.dst === l.dst)) continue;
+        const t = legTimes(l, tz);
+        if (t) legs.push({ date: l.date, flight: l.flight, org: l.org, dst: l.dst, std: t.std, sta: t.sta, dh: true, ac: l.ac ?? null });
+      }
+      continue;
+    }
+    for (const l of p.legs) {
+      const t = legTimes(l, tz);
+      if (t) legs.push({ date: l.date, flight: l.flight, org: l.org, dst: l.dst, std: t.std, sta: t.sta, dh: !!l.dh, ac: l.ac ?? null });
+    }
+  }
+  const codes = rulesData.codes ?? {};
+  const covered = (date) => date >= view.first && date <= view.last;
+  const sby = (c) => /^SBY/.test(c);
+  const clock = (abs, station, date) => {
+    const off = tz.offsetAt(station, date) ?? 0;
+    return (((abs + off) % 1440) + 1440) % 1440;
+  };
+  const execDays = {};
+  const planDays = {};
+  for (const d of timeline) {
+    const own = legs.filter((l) => l.date === d.date).sort(legOrder((l) => l.std));
+    // קודי התכנון בלי X (יום פנוי), ובטווח של היומן – הכוננויות מהיומן.
+    const planCodes = (d.plan?.codes ?? []).filter((c) => c !== 'X' && !(covered(d.date) && sby(c)));
+    const sbyCodes = covered(d.date) ? view.standby.filter((s) => s.date === d.date).map((s) => s.code) : [];
+    const details = [...planCodes.map((c) => reportCodeOf(c, codes)), ...sbyCodes.map((c) => c.slice(0, 5))];
+    execDays[d.date] = {
+      date: d.date, day: d.day, src: null, details: details.length ? details.join(',') : null, values: {}, sims: [],
+      legs: own.map((l) => ({
+        type: l.dh ? 'DHO' : 'LEG', flight: l.flight, seq: null, dhd: null, dd: null, org: l.org, dst: l.dst, pos: null,
+        std: clock(l.std, l.org, d.date), sta: l.sta == null ? null : clock(l.sta, l.dst, d.date),
+        atd: clock(l.std, l.org, d.date), ata: l.sta == null ? null : clock(l.sta, l.dst, d.date),
+        skdDur: l.sta == null ? null : l.sta - l.std, actDur: l.sta == null ? null : l.sta - l.std, occ: null,
+      })),
+    };
+    const dayStart = Date.parse(d.date) / 60000;
+    planDays[d.date] = {
+      ...(d.plan ?? { date: d.date, codes: [], legs: [] }),
+      codes: [...(d.plan?.codes ?? []).filter((c) => !(covered(d.date) && sby(c))), ...sbyCodes],
+      legs: own.map((l) => ({ flight: l.flight, org: l.org, dst: l.dst, ac: l.ac, ...(l.dh && { dh: true }),
+        dep: { min: l.std - dayStart, foreign: false }, arr: l.sta == null ? null : { min: (((l.sta - dayStart) % 1440) + 1440) % 1440, foreign: false } })),
+    };
+  }
+  return {
+    exec: { kind: 'exec', calendar: true, employee: plan.employee ?? null, period: plan.period, domicile, columns: [], missingColumns: [],
+      unknownColumns: [], legColumns: [], days: execDays, totals: {}, reportTotals: {}, warnings: [] },
+    plan: { ...plan, days: planDays },
+  };
+}
+
+/** קוד בתכנון → הקוד ברומה: לפי `plan_to_report`, ובלעדיו חמשת התווים הראשונים, כמו בקודים המקוצרים ברומה. */
+function reportCodeOf(code, codes) {
+  return codes.plan_to_report?.[code] ?? code.slice(0, 5);
+}
+
+/** שאלות על השינויים: מהריצה מול היומן (`mergeCalendarRun`; בעל המוצר, 13/10/2026). */
+export const CALENDAR_QUESTIONS = ['cancelled', 'unplanned', 'extended', 'second_activity', 'swap_conflict', 'standby_bid'];
+
+/** כותרת שינוי מול הרומה → מול היומן. */
+const CALENDAR_LABEL = [
+  [/^הוחלף בסבב אחר באותם ימים$/, 'ביומן רשום סבב אחר באותם ימים'],
+  [/^סבב מתוכנן שלא בוצע$/, 'סבב מתוכנן שאינו ביומן'],
+  [/ולא בוצע$/, ' וירד מהיומן'],
+  [/, ובמקומו בוצע סבב אחר$/, ', ועכשיו רשום במקומו סבב אחר'],
+  [/ומה שבוצע לא היה מתוכנן$/, 'ומה שביומן לא היה מתוכנן'],
+];
+const PENDING_NOTE = 'ממתין לתשובה בשאלה על הסבב.';
+/** התשובה על שינוי, מתחת לשורה שלו מול היומן: באותה לשון כמו ב"תשובות שנשמרו" (`ANSWER_LABEL` ב-js/app.js). */
+const CALENDAR_REASON = {
+  replaced: 'שינוי ביוזמת החברה', diversion: 'סטיה לשדה משנה', bid: 'זכייה במכרז', voluntary_swap: 'החלפה מרצוני או בהסכמתי',
+  cancelled: 'הטיסה המקורית בוטלה ללא קרדיט', wet_lease: 'הורדה מהטיסה המקורית', trainee: 'הורדה מהטיסה המקורית',
+  swap_777: 'הטיסה עברה ל-777 (לא כשיר MFF)', special_call: 'קריאה מיוחדת', added: 'הוספת טיסה בהסכמה', other: 'סיבה אחרת',
+};
+
+/**
+ * מתחת לשינוי מול היומן רק הסיבה, בלי מה שמגיע: הסיבות בשרשרת מהיומן (`reasons`, `chainNotes`), או התשובה
+ * על הסבב המתוכנן או על הפעילות שלא תוכננה – כשהכותרת אינה כבר אומרת אותה – או "ממתין לתשובה".
+ */
+function calendarReasons(c, answers) {
+  const pending = (n) => n.message.startsWith('ממתין לתשובה');
+  // שרשרת שעוד פתוחה, או של כמה שלבים: הסיבות לפי הסדר, חוץ ממה שהכותרת כבר אומרת.
+  if (c.reasons && (c.reasons.some(pending) || c.steps?.length > 1)) return c.reasons.filter((n) => n.message !== `${c.label}.`);
+  if ((c.notes ?? []).some(pending)) return [{ message: PENDING_NOTE, byUser: false }];
+  const a = (c.planId && answers[`cancelled:${c.planId}`]) || (c.execId && answers[`unplanned:${c.execId}`]);
+  const label = a && CALENDAR_REASON[a.value];
+  if (!label || label === c.label) return [];
+  return [{ message: `${label}${a.value === 'other' && a.text ? `: ${a.text}` : ''}.`, byUser: true }];
+}
+
+/**
+ * בתכנון לבד עם יומן (בעל המוצר, 13/10/2026): הריצה לפי התכנון (`out`) עם מה שהריצה מול היומן (`cal`)
+ * קובעת – טבלת השינויים (השורות של הרומה; מתחת לשינוי רק הסיבה, בלי מה שמגיע), מגבלות החוק לפי הזמנים
+ * שביומן, והשאלות על השינויים (`CALENDAR_QUESTIONS`). הקרדיט, הפיצויים, ההערות ושאר השאלות – לפי התכנון.
+ */
+function mergeCalendarRun(out, cal, answers) {
+  const kind = (q) => q.id.split(':')[0];
+  out.questions = [...out.questions.filter((q) => !CALENDAR_QUESTIONS.includes(kind(q))), ...cal.questions.filter((q) => CALENDAR_QUESTIONS.includes(kind(q)))];
+  out.calendarChanges = cal.changes.filter((c) => c.how !== 'exact' && c.how !== 'noplan').map((c) => ({
+    date: c.date, ...(c.dates && { dates: c.dates }), how: c.how,
+    label: CALENDAR_LABEL.reduce((s, [re, to]) => s.replace(re, to), c.label),
+    // סבב שאינו ביומן: בצד היומן רק הסבב שהוחלף בו (או "טיסה בחודש אחר"), ולא מה שמגיע לפי התשובה.
+    plan: c.plan, planId: c.planId ?? null, calendar: c.how === 'cancelled' && !LINKED_VALUES.includes(answers[`cancelled:${c.planId}`]?.value) ? null
+      : c.exec ?? (c.replacedBy?.join(', ') || null),
+    notes: calendarReasons(c, answers), ...(c.steps && { steps: c.steps }),
+  }));
+  out.legal = cal.legal;
+  for (const [id, list] of Object.entries(cal.dependentAnswers)) out.dependentAnswers[id] = [...new Set([...(out.dependentAnswers[id] ?? []), ...list])];
+  out.obsoleteAnswers = cal.obsoleteAnswers;
+  out.landingDays = { ...cal.landingDays, ...out.landingDays };
   return out;
 }
 
@@ -430,6 +594,9 @@ function chainNotes(out, journal, answers) {
     const said = view.reason && (c.notes ?? []).some((n) => norm(n.message).startsWith(`${norm(view.reason)}:`));
     const reason = view.reason && view.reason !== `${c.label}.` && !said ? [{ message: view.reason, byUser: true }] : [];
     c.notes = eff.value === 'chain_open' ? [...reason, { message: 'ממתין לתשובה בשאלה על הסבב.', byUser: false }] : [...reason, ...(c.notes ?? [])];
+    // מול היומן מתחת לשורה רק הסיבות (`calendarReasons`), גם כשהכותרת כבר אומרת אותן.
+    c.reasons = eff.value === 'chain_open' ? [...(view.reason ? [{ message: view.reason, byUser: true }] : []), { message: 'ממתין לתשובה בשאלה על הסבב.', byUser: false }]
+      : view.reason ? [{ message: view.reason, byUser: true }] : [];
     chained.add(c);
   }
   // סבב שנוסף ביומן אינו בתכנון, גם כשהוא נכנס להשוואה כאילו היה בו (בעל המוצר, 06/10/2026): בצד
@@ -467,52 +634,6 @@ function chainView(ch, root) {
     steps: [...(root?.note ? [{ message: `${describePairing(ch.plan)}: ${root.note}.`, byUser: true }] : []),
       ...ch.steps.filter((s) => s.note).map((s) => ({ message: `${s.note}.`, byUser: !!s.answer }))],
   };
-}
-
-/** תיאור השלב בטבלת השינויים, כשאין עליו עדיין תשובה. */
-const STEP_LABEL = {
-  moved: 'ביומן הסבב בתאריך אחר',
-  retimed: 'ביומן הסבב בשעה אחרת',
-  changed: 'ביומן רשום סבב אחר',
-  standby: 'ביומן רשומה כוננות במקום הסבב',
-  missing: 'הסבב אינו ביומן',
-};
-
-/**
- * בתכנון לבד: השינויים בין התכנון ליומן, שורה לכל סבב מתוכנן שהשתנה ולכל סבב ביומן שאינו בתכנון
- * (בעל המוצר, 04/10/2026). מתחת לשורה – השרשרת, שלב אחרי שלב עם התשובה עליו, ו"ממתין לתשובה" כשיש
- * שלב בלי תשובה (בעל המוצר, 06/10/2026). בצד היומן – הסבב שבו השרשרת נמצאת עכשיו, או מה שביומן
- * במקום הסבב כשעוד אין תשובה.
- */
-function journalRows(journal, out) {
-  const rows = [];
-  const pending = (id) => out.questions.some((q) => q.id === id);
-  const sby = (s) => s.standby?.map((x) => `${x.code} ${x.date.slice(8, 10)}/${x.date.slice(5, 7)}`).join(', ') ?? null;
-  for (const ch of journal.chains) {
-    const tail = ch.steps.at(-1);
-    // סבב שנוסף כאילו היה בתכנון: בצד התכנון "—" לפני השרשרת, והתשובה על ההוספה היא הסיבה הראשונה מתחתיו.
-    const root = ch.root ? journal.unplanned.find((n) => n.id === ch.plan.id) : null;
-    const calendar = ch.last ? describePairing(ch.last.pairing)
-      : tail.answer ? null
-        : tail.how === 'standby' ? sby(tail)
-          : tail.candidates.length ? tail.candidates.map(describePairing).join(', ') : null;
-    // בצד התכנון כל השרשרת, בצד היומן הסבב שבו היא נמצאת עכשיו, מתחת רק הסיבה, והפירוט בלחיצה על השורה
-    // (`chainView`; בעל המוצר, 06/10/2026). כוננות בלי תשובה כבר כתובה בכותרת.
-    const view = chainView(ch, root);
-    const notes = view.reason ? [{ message: view.reason, byUser: true }] : [];
-    if (ch.steps.some((s) => pending(s.id))) notes.push({ message: 'ממתין לתשובה בשאלה על הסבב.', byUser: false });
-    rows.push({ date: ch.plan.from, how: `cal_${tail.how}`, label: ch.root ? 'ביומן סבב שאינו בתכנון, ושהשתנה' : ch.steps.length > 1 ? 'כמה שינויים ביומן' : STEP_LABEL[tail.how],
-      plan: [...(ch.root ? ['—'] : []), ...ch.steps.map((s) => describePairing(s.fromPairing))].join(' → '), planId: ch.root ? null : ch.plan.id, calendar, notes,
-      ...((ch.steps.length > 1 || root) && { steps: view.steps }) });
-  }
-  for (const n of journal.unplanned) {
-    if (n.step) continue;
-    const id = `unplanned:${n.id}`;
-    rows.push({ date: n.pairing.from, how: 'cal_unplanned', label: 'ביומן סבב שאינו בתכנון', plan: null, planId: null,
-      calendar: describePairing(n.pairing),
-      notes: n.note ? [{ message: `${n.note}.`, byUser: true }] : pending(id) ? [{ message: 'ממתין לתשובה בשאלה על הסבב.', byUser: false }] : [] });
-  }
-  return rows.sort((a, b) => a.date.localeCompare(b.date));
 }
 
 /**
@@ -659,7 +780,7 @@ function calendarFacts(calendar, domicile) {
 
 // ---------- ctx: מה שהלוגיקות רואות ----------
 
-function makeContext({ out, timeline, domicile, codes, holidays, answers, plan, exec, supported, matches, planPairings, period, fleet, execPairings, fdp, tz, assumed, reportDays = [], calendarAnswer, calendarFirstDay }) {
+function makeContext({ out, timeline, domicile, codes, holidays, answers, plan, exec, supported, matches, planPairings, period, fleet, execPairings, fdp, tz, assumed, reportDays = [], calendarAnswer, calendarFirstDay, calendarRun = false }) {
   const absenceBy = new Map(); // date → Set(ruleId)
   const pairingTags = new Map(); // pairing.id → Set(tag)
   const askedIds = new Set();
@@ -697,6 +818,8 @@ function makeContext({ out, timeline, domicile, codes, holidays, answers, plan, 
     planSummary: plan?.summary ?? null,
     hasExec: !!exec,
     hasPlan: !!plan,
+    // בתכנון לבד, מול הרומה שנבנתה מהיומן (`calendarExec`): השאלות בנוסח של היומן ובלי סכומים (בעל המוצר, 13/10/2026).
+    calendarRun,
     // תשובת המשתמש, ובלעדיה – השלמה מהיומן, אם חובר.
     answer: (id) => answers[id] ?? calendarAnswer?.(id) ?? null,
     // מה היומן מראה ב-1 לחודש (`calendarFacts`).
@@ -1419,13 +1542,6 @@ function attachLinkCandidates(questions, matches, ctx) {
   const execLabel = new Map(matches.filter((m) => m.exec).map((m) => [m.exec.id, describePairing(m.exec)]));
   for (const q of questions) {
     const onCancelled = q.id.startsWith('cancelled:');
-    // בתכנון לבד, מול היומן: השאלה מביאה את הסבבים שביומן (`askJournal`; בעל המוצר, 06/10/2026).
-    if (q.linkPool) {
-      for (const o of q.options ?? []) {
-        if (o.needsLink) o.linkCandidates = [...q.linkPool, otherMonth, ...(onCancelled && !q.execId && o.value === 'voluntary_swap' ? [gaveAway] : [])];
-      }
-      continue;
-    }
     const own = onCancelled && q.execId ? [{ id: q.execId, label: execLabel.get(q.execId) ?? q.execId }] : [];
     const pool = q.id.startsWith('unplanned:') ? cancelled : onCancelled ? [...own, ...unplanned] : [];
     for (const o of q.options ?? []) {

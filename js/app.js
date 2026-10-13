@@ -1171,8 +1171,9 @@ function renderChanges(res) {
 }
 
 /**
- * בתכנון לבד, כשיש ביומן נתונים מהחודש: השינויים בין התכנון ליומן (בעל המוצר, 04/10/2026). הפיצויים
- * עליהם ייבדקו כשתועלה הרומה. מתחת לסבב מתוכנן שהשתנה – התשובה על הסיבה, או שהיא ממתינה (06/10/2026).
+ * בתכנון לבד, כשיש ביומן נתונים מהחודש: השינויים בין התכנון ליומן (בעל המוצר, 04/10/2026) – השורות של
+ * הרומה, כשהיומן נבדק כמו רומה בלי סכומים (`mergeCalendarRun` ב-js/rules/evaluate.js; 13/10/2026). הפיצויים
+ * עליהם ייבדקו כשתועלה הרומה. מתחת לשינוי – התשובה על הסיבה, או שהיא ממתינה (06/10/2026).
  */
 function renderCalendarChanges(res) {
   const changes = res.calendarChanges;
@@ -1181,7 +1182,7 @@ function renderCalendarChanges(res) {
     <summary><h2 style="display:inline">שינויים בין תכנון לביצוע <span class="count">${changes.length}</span></h2></summary>
     <p class="small muted">הקרדיט והפיצויים על השינויים ייבדקו כשתועלה הרומה.</p>
     ${changes.length ? `<ul class="list">${changes.map((c) => `<li>
-      <strong class="num">${ddmm(c.date)}</strong> ${esc(c.label)}
+      <strong class="num">${(c.dates ?? [c.date]).map(ddmm).join(' · ')}</strong> ${esc(c.label)}
       ${chainSides(c, `<span class="side-plan">תכנון: ${esc(datesFirst(c.plan ?? '—'))}</span> · <span class="side-exec">יומן: ${esc(datesFirst(c.calendar ?? '—'))}</span>`)}
       ${(c.notes ?? []).map((n) => `<div class="explain">${esc(datesFirst(n.message))}${n.byUser ? ' <span class="muted">לפי תשובת המשתמש</span>' : ''}</div>`).join('')}
     </li>`).join('')}</ul>` : '<p class="muted">היומן תואם את התכנון.</p>'}
