@@ -75,7 +75,11 @@ function evaluateFiles({ rulesData, plan = null, exec = null, answers = {}, hist
   const period = (exec ?? plan).period;
   const mode = plan && exec ? 'full' : plan ? 'plan' : 'exec';
   // חודש שנשמר בגרסה קודמת מחזיק אזהרת עמודות חסרות מהחילוץ; היא נבנית מחדש כאן.
-  const warnings = [...(plan?.warnings ?? []).filter((w) => !w.startsWith(CROSS_MONTH_WARNING_PREFIX)), ...(exec?.warnings ?? []).filter((w) => !w.startsWith(MISSING_COLUMNS_PREFIX) && !w.startsWith(IPAD_WARNING_PREFIX))];
+  const execWarnings = (exec?.warnings ?? []).filter((w) => !w.startsWith(MISSING_COLUMNS_PREFIX) && !w.startsWith(IPAD_WARNING_PREFIX));
+  // רומה שאינה סופית אינה חסרה נתונים: הודעת מערכת, בכחול (`infos`; בעל המוצר, 14/10/2026; טיוטה 332).
+  const infos = execWarnings.filter((w) => w.startsWith(STATUS_WARNING_PREFIX));
+  const warnings = [...(plan?.warnings ?? []).filter((w) => !w.startsWith(CROSS_MONTH_WARNING_PREFIX)),
+    ...execWarnings.filter((w) => !w.startsWith(STATUS_WARNING_PREFIX))];
   const missingRequired = (exec?.missingColumns ?? []).filter((c) => !OPTIONAL_COLUMNS.includes(c));
   if (missingRequired.length) {
     warnings.push(`${MISSING_COLUMNS_PREFIX}: ${missingRequired.join(', ')}. ייתכן שהן נחתכו בהדפסה. חוקים שתלויים בהן לא ייבדקו.`);
@@ -126,6 +130,7 @@ function evaluateFiles({ rulesData, plan = null, exec = null, answers = {}, hist
       unsupported: unsupported.map(({ rule, reason }) => ({ id: rule.id, title: rule.title, category: rule.category, reason })),
     },
     warnings,
+    infos,
     changes: [],
     expectations: [],
     flags: [],
@@ -1997,6 +2002,8 @@ const MISSING_COLUMNS_PREFIX = 'עמודות חסרות ברומה';
 const IPAD_WARNING_PREFIX = 'הקובץ הודפס מ-iPad';
 // אזהרה שהייתה נשמרת בחודשים שחולצו לפני שהוסרה: כל נתוני החודש בקובץ, ואין מה להזהיר (טיוטה 331).
 const CROSS_MONTH_WARNING_PREFIX = 'תקופת התכנון חוצה חודשים';
+// מ-`parseExec`: "סטטוס החודש הוא "Open" ולא Closed. הנתונים אינם סופיים."
+const STATUS_WARNING_PREFIX = 'סטטוס החודש הוא';
 
 /** שעות רגל שהחישובים צריכים, בדוח הביצוע (עמודה והשדה שנקרא ממנה). */
 const EXEC_LEG_FIELDS = { Flt: 'flight', ORG: 'org', DST: 'dst', STD: 'std', STA: 'sta', ATD: 'atd', ATA: 'ata', SkdDur: 'skdDur' };

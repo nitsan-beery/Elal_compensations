@@ -907,6 +907,10 @@ function renderAlerts(res) {
     // בלי כותרת "אזהרות" ובלי תבליטים: רק ההודעות, כל אחת בשורה משלה (בעל המוצר, 08/10/2026).
     out.push(`<div class="notice warn">${res.warnings.map((w) => `<div>${esc(w)}</div>`).join('')}</div>`);
   }
+  if (res.infos?.length) {
+    // רומה שאינה סופית: הודעת מערכת, בכחול (טיוטה 332).
+    out.push(`<div class="notice info">${res.infos.map((w) => `<div>${esc(w)}</div>`).join('')}</div>`);
+  }
   if (res.unknownCodes.length) {
     const open = res.unknownCodes.some((u) => !u.answer);
     // קוד לא מוכר הוא הודעת מערכת: בכחול עד התשובה, ואחריה בלי צבע (טיוטה 331).

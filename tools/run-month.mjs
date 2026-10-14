@@ -50,6 +50,7 @@ if (calendar) console.log(`יומן: הרכב הצוות של ${r.calendarCrew} 
 if (calendar && r.calendarNoMonth) console.log('יומן: לא נמצאו ביומן טיסות של החודש הזה');
 if (r.calendarMissing?.length) console.log(`יומן: אין הרכב צוות לטיסות שבוצעו: ${r.calendarMissing.map((m) => `${m.date.slice(8)}/${m.date.slice(5, 7)} ${m.flight}`).join(', ')}`);
 for (const w of r.warnings) console.log('אזהרה:', w);
+for (const w of r.infos ?? []) console.log('הודעה:', w);
 if (r.legal) {
   console.log('\n== מגבלות החוק ==');
   if (r.legal.skipped) console.log(r.legal.skipped);
