@@ -1258,7 +1258,7 @@ function voluntary_swap(ctx, params, rule) {
  * מוכיחה החלפה (בקשת בעל המוצר, 24/09/2026). שש התשובות ומה שכל אחת גוררת:
  * שינוי ביוזמת החברה, זכייה במכרז וסטיה לשדה משנה – הגבוה מבין שתי הטיסות (`higher_of_planned_performed`);
  * החלפה מרצוני – רק הקרדיט של הטיסה שבוצעה (`voluntary_swap`);
- * המתוכננת בוטלה ללא קרדיט – ימיה נחשבים ימים ללא פעילות, ומה שבוצע בהם לא היה מתוכנן,
+ * המתוכננת בוטלה ללא קרדיט – מה שבוצע בימיה לא היה מתוכנן,
  * כלומר מגיעה עליו קריאה מיוחדת (`special_call`);
  * הורדה מהטיסה המקורית – השעות שהפסיד, בנוסף לקרדיט של מה שבוצע (`lost_hours_credit`).
  * בשינוי, במכרז ובהחלפה מרצוני נבחרת הטיסה שבוצעה במקום: קודם זו שבאותם ימים, ואחריה כל פעילות שלא תוכננה.
@@ -1481,12 +1481,18 @@ function noteDiversion(ctx, match, rule) {
   ctx.markPairing(match.exec, 'diversion');
 }
 
-/** סבב שבוטל ללא קרדיט: ימיו נספרים כימים ללא פעילות, ומה שבוצע בהם לא היה מתוכנן. */
+/**
+ * סבב שבוטל ללא קרדיט: מה שבוצע בימיו לא היה מתוכנן. ימיו אינם נספרים כימים ללא פעילות, שהם לפי
+ * התכנון בלבד (בעל המוצר, 14/10/2026). מתחת לשינוי, כשבוצעה טיסה באותם ימים, נוסף מה שמגיע עליה
+ * (`performed`, `explainChanges` ב-js/rules/evaluate.js).
+ */
 function noteCancelled(ctx, match, rule, why) {
   ctx.markPairing(match.plan, 'cancelled_no_compensation');
-  ctx.note(match.plan.from, `סבב מתוכנן שלא בוצע: בוטל ללא קרדיט${why ? ` (${why})` : ''}. ` +
-    'ימיו נספרים כימים ללא פעילות' +
-    (match.exec ? ', ומה שבוצע בהם הוא פעילות שלא תוכננה.' : '.'), rule);
+  // ימי הטיסה שבוצעה, עד סוף החודש: "קריאה מיוחדת על כל אחד מהימים" לפיהם.
+  const last = ctx.timeline.at(-1).date;
+  const to = match.exec ? match.exec.shownTo ?? match.exec.to : null;
+  ctx.note(match.plan.from, `סבב מתוכנן שלא בוצע: בוטל ללא קרדיט${why ? ` (${why})` : ''}.`, rule,
+    match.exec ? { performed: { id: match.exec.id, from: match.exec.from, to: to < last ? to : last } } : undefined);
 }
 
 /**

@@ -1372,25 +1372,11 @@ function explainChanges(out, supported) {
     const change = out.notes.filter((n) => n.change && within(n.date) && (!n.pairingId || ids.includes(n.pairingId)));
     for (const n of change) n.placed = true;
     const diverted = change.map((n) => ({ message: n.message.startsWith(`${c.label}: `) ? n.message.slice(c.label.length + 2) : n.message, byUser: false }));
-    if (ruled.length) {
-      // שם השינוי כבר בשורה שלו, ולכן הוא יורד מראש ההערה.
-      const leads = [`${c.label}: `];
-      c.notes = ruled.map((n) => {
-        n.placed = true;
-        const lead = leads.find((l) => n.message.startsWith(l));
-        return { message: lead ? n.message.slice(lead.length) : n.message, byUser: !!n.byUser };
-      });
-      c.notes.unshift(...diverted);
-      continue;
-    }
-
-    // קצר ובלי מספרי הטיסות, שכבר מופיעים בשינויים: רק מה מגיע או לא מגיע (בעל המוצר, 29/09/2026).
-    // התוצאה לפי התשובה (למשל "הורדה מהטיסה ביוזמת החברה") כשהיא אינה תיאור של טיסה.
-    const outcome = c.how === 'cancelled' && !c.execId && c.exec ? `${c.exec}: ` : '';
-    let due;
-    if (out.questions.some((q) => ids.some((id) => q.id.endsWith(`:${id}`)))) {
-      due = 'ממתין לתשובה בשאלה על הסבב';
-    } else {
+    // מה שמגיע לפי החוקים על הסבבים `of` (בדרך כלל `ids`, השורה כולה), כמשפט קצר בלי סכומים.
+    // `from`–`last`: הימים ל"קריאה מיוחדת על כל אחד מהימים".
+    const rowEnd = c.until ? new Date(Date.parse(c.until) - 86400000).toISOString().slice(0, 10) : c.lastDay;
+    const dueOf = (of, from = c.date, last = rowEnd) => {
+      if (out.questions.some((q) => of.some((id) => q.id.endsWith(`:${id}`)))) return 'ממתין לתשובה בשאלה על הסבב';
       const items = new Set();
       // זיכוי יומי על כמה ימים: במספר המדויק וברבים ("קרדיט 2 ימי מחלה"; בעל המוצר, 07/10/2026).
       const days = new Map();
@@ -1398,10 +1384,10 @@ function explainChanges(out, supported) {
       for (const e of out.expectations) {
         const logic = logicOf.get(e.ruleId);
         if (!CHANGE_DUE_LOGIC.has(logic)) continue;
-        if (e.chainFor ? !ids.includes(e.chainFor) : e.pairingId ? !ids.includes(e.pairingId) || !own(e.date) : !within(e.date)) continue;
+        if (e.chainFor ? !of.includes(e.chainFor) : e.pairingId ? !of.includes(e.pairingId) || !own(e.date) : !within(e.date)) continue;
         // רשום על הטיסה הזאת, אבל שייך להחלפה של סבב מתוכנן אחר (`forPlan`): לא חלק ממה שמגיע עליה,
         // ובפירוט הוא מוצג על הטיסה שהחליפה (10/06/2026: ה-RIG ‏05:10 של ההחלפה של LTN ב-11/06).
-        if (e.forPlan && !ids.includes(e.forPlan)) continue;
+        if (e.forPlan && !of.includes(e.forPlan)) continue;
         if (logic === 'absence_day_credit') {
           if (!days.has(e.ruleId)) days.set(e.ruleId, { e, dates: new Set() });
           days.get(e.ruleId).dates.add(e.date);
@@ -1414,8 +1400,7 @@ function explainChanges(out, supported) {
       // קריאה מיוחדת על כל יום של שורה שמשתרעת על כמה ימים, עד הנחיתה בבסיס (בעל המוצר, 08/10/2026;
       // ‏BCN ‏23–25/09/2026). כשיום אחד לא עמד בסף – בלי התוספת, וההערה על היום ההוא בהערות.
       const rowDays = [];
-      const end = c.until ? new Date(Date.parse(c.until) - 86400000).toISOString().slice(0, 10) : c.lastDay;
-      for (let d = c.date; end && d <= end; d = new Date(Date.parse(d) + 86400000).toISOString().slice(0, 10)) rowDays.push(d);
+      for (let d = from; last && d <= last; d = new Date(Date.parse(d) + 86400000).toISOString().slice(0, 10)) rowDays.push(d);
       if (rowDays.length > 1 && rowDays.every((d) => callDays.has(d)) && items.delete(DUE_WORDING.special_call)) {
         items.add(`${DUE_WORDING.special_call} על כל אחד מהימים`);
       }
@@ -1426,8 +1411,28 @@ function explainChanges(out, supported) {
       };
       // בלי "מגיע" בראש המשפט, כמו בהערות שהחוקים רושמים על שינוי (בעל המוצר, 01/10/2026).
       const list = [...items].map((t) => (t.startsWith('absence:') ? dayWording(days.get(t.slice(8))) : t));
-      due = list.length ? (list.length > 1 ? `${list.slice(0, -1).join(', ')} ו${list.at(-1)}` : list[0]) : 'לא מגיע קרדיט ולא פיצוי';
+      return list.length ? (list.length > 1 ? `${list.slice(0, -1).join(', ')} ו${list.at(-1)}` : list[0]) : 'לא מגיע קרדיט ולא פיצוי';
+    };
+    if (ruled.length) {
+      // שם השינוי כבר בשורה שלו, ולכן הוא יורד מראש ההערה.
+      // סבב שבוטל ללא קרדיט ובמקומו טיסה באותם ימים: השורה כבר אומרת שהמתוכנן לא בוצע.
+      const leads = [`${c.label}: `, 'סבב מתוכנן שלא בוצע: '];
+      c.notes = ruled.map((n) => {
+        n.placed = true;
+        const lead = leads.find((l) => n.message.startsWith(l));
+        // סבב שבוטל ללא קרדיט, ובאותם ימים בוצעה טיסה: מה שמגיע עליה, לפי התשובה (בעל המוצר, 14/10/2026).
+        const p = n.performed;
+        const performed = p ? ` על הטיסה שבוצעה: ${dueOf([p.id], p.from, p.to)}.` : '';
+        return { message: (lead ? n.message.slice(lead.length) : n.message) + performed, byUser: !!n.byUser };
+      });
+      c.notes.unshift(...diverted);
+      continue;
     }
+
+    // קצר ובלי מספרי הטיסות, שכבר מופיעים בשינויים: רק מה מגיע או לא מגיע (בעל המוצר, 29/09/2026).
+    // התוצאה לפי התשובה (למשל "הורדה מהטיסה ביוזמת החברה") כשהיא אינה תיאור של טיסה.
+    const outcome = c.how === 'cancelled' && !c.execId && c.exec ? `${c.exec}: ` : '';
+    const due = dueOf(ids);
     c.notes = [...diverted, { message: `${outcome}${due}.`, byUser: false }];
   }
 }
