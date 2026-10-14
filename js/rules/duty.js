@@ -913,15 +913,13 @@ function night_landings(ctx, params, rule) {
       `המינימום הוא ${min}, כך שייתכן שמגיע פיצוי, וזה ייבדק אחרי הביצוע.`, rule);
     return;
   }
+  // פיצוי שהרומה זיכתה אינו בהערות, רק בשורה שלו (בעל המוצר, 14/10/2026; טיוטה 333).
+  const paidAll = ctx.hasExec && paying.every((n) => (n.target ? ctx.paidOn(n.target, params.report_column, key, hours)
+    : ctx.paidOnDate(n.pairing.from, params.report_column, key, hours)));
+  // הרומה מזכה את כולן: הרכב הצוות שלא נענה מוסק ממנה ואינו נשאל, וזה כתוב בשורת הפיצוי.
+  const assumed = open.length > 0 && paidAll;
   if (open.length) {
-    const unpaid = paying.filter((n) => !(n.target ? ctx.paidOn(n.target, params.report_column, key, hours)
-      : ctx.paidOnDate(n.pairing.from, params.report_column, key, hours)));
-    if (!unpaid.length) {
-      const one = paying.length === 1;
-      ctx.note(null, `${planned}, והרומה מזכה ${minToHhmm(hours)} על ` +
-        `${names(paying)}. לכן ${one ? 'היא בוצעה' : 'הן בוצעו'} בצוות ${crewNames}, ` +
-        'ולא נשאלה שאלה על הרכב הצוות.', rule);
-    } else {
+    if (!paidAll) {
       // שואלים אחת בכל פעם, מהטיסה הארוכה ביותר (בקשת בעל המוצר, 23/09/2026): תשובה שאינה
       // נספרת מורידה את המספר ומייתרת את השאר, והסיכוי לכך גדול יותר בטיסה ארוכה.
       const block = (n) => legBlock(ctx, n.crewLeg) ?? n.crewLeg.skdDur ?? 0;
@@ -955,14 +953,18 @@ function night_landings(ctx, params, rule) {
   const byPlan = counted.filter(byContract);
   const contractNote = !byPlan.length ? '' : ` הרכב הצוות ב-${names(byPlan)}, ${byPlan.length === 1 ? 'שלא בוצעה, הוא' : 'שלא בוצעו, הוא'} ` +
     `הצוות החוזי (${[...new Set(byPlan.map((n) => CREW_LABEL[crewOf(n)]))].join(' או ')}).`;
-  ctx.note(null, `${counts} (${list(counted)}). הפיצוי הוא מהטיסה ה-${threshold} שבוצעה, ` +
-    `ולכן מגיע פיצוי של ${minToHhmm(hours)} על ${names(paying)}.${contractNote}`, rule);
+  if (!paidAll) {
+    ctx.note(null, `${counts} (${list(counted)}). הפיצוי הוא מהטיסה ה-${threshold} שבוצעה, ` +
+      `ולכן מגיע פיצוי של ${minToHhmm(hours)} על ${names(paying)}.${contractNote}`, rule);
+  }
   paying.forEach((n) => {
     const why = `${ddmm(n.leg.date)} ${n.leg.flight}, נחיתה ${minToHhmm(n.clock)} שעון ישראל: הטיסה ה-${counted.indexOf(n) + 1} מתוך ` +
       `${base.length} מתוכננות עם נחיתת לילה${known ? ` בצוות ${crewNames}` : ''}` +
       (n.bid?.landing ? ` (זכייה במכרז ב-${ddmm(n.bid.landing.leg.date)} ${n.bid.landing.leg.flight}, גם היא נחיתת לילה)` : '');
-    if (n.target) ctx.expectPairing(n.target, key, hours, rule, why);
-    else ctx.expect(n.pairing.from, key, hours, rule, `${why} (בוטלה ביוזמת החברה)`);
+    const note = n.target ? why : `${why} (בוטלה ביוזמת החברה)`;
+    const extra = assumed ? { explain: `${note}. הרומה מזכה את הפיצוי, ולכן האפליקציה מניחה שהטיסות בוצעו בצוות ${crewNames}.` } : undefined;
+    if (n.target) ctx.expectPairing(n.target, key, hours, rule, note, extra);
+    else ctx.expect(n.pairing.from, key, hours, rule, note, extra);
   });
 }
 
@@ -1678,15 +1680,18 @@ function legal_crew_composition(ctx, params, rule) {
       const by = { calendar: 'לפי היומן', white: 'לפי התשובה על הטיסה הלבנה', white_paid: 'לפי הפיצוי על טיסה לבנה ברומה' }[answered.source] ?? 'לפי תשובתך';
       const verb = ctx.hasExec ? 'בוצעה' : 'מתוכננת';
       // היומן מראה צוות קטן מהחוזי והרומה אינה מזכה: ייתכן שהיומן אינו מעודכן.
-      const stale = answered.source === 'calendar' && ctx.hasExec && !ctx.paidOn(pairing, params.report_column, key, amount, own)
+      const paid = ctx.hasExec && ctx.paidOn(pairing, params.report_column, key, amount, own);
+      const stale = answered.source === 'calendar' && ctx.hasExec && !paid
         ? ' ייתכן שהיומן אינו מעודכן: ודא שבוצע סנכרון של היומן מהאורגנייזר.' : '';
       ctx.expectPairingDay(pairing, day, key, amount, rule,
         `${rule.title}: ${fdp.what} ${verb} בצוות ${CREW_LABEL[answered.value]} ${by}, ו${contract}`,
         { explain: `צוות ${CREW_LABEL[answered.value]} ${by}, ו${contract}.${stale}` });
-      ctx.note(fdp.date, `${routeOnly(fdp.what)} ${verb} בצוות ${CREW_LABEL[answered.value]} ${by}, קטן מהצוות החוזי (${CREW_LABEL[need]}).${stale}`, rule, { aside: true });
+      // פיצוי שהרומה זיכתה אינו בהערות, רק בשורה שלו (בעל המוצר, 14/10/2026; טיוטה 333).
+      if (!paid) {
+        ctx.note(fdp.date, `${routeOnly(fdp.what)} ${verb} בצוות ${CREW_LABEL[answered.value]} ${by}, קטן מהצוות החוזי (${CREW_LABEL[need]}).${stale}`, rule, { aside: true });
+      }
     } else if (ctx.paidOn(pairing, params.report_column, key, amount, own)) {
       below++;
-      ctx.note(fdp.date, `${routeOnly(fdp.what)}: הרומה מזכה את הפיצוי, ולכן הצוות היה קטן מהצוות החוזי (${CREW_LABEL[need]}).`, rule, { aside: true });
       ctx.expectPairingDay(pairing, day, key, amount, rule,
         `${rule.title}: ${fdp.what}. הרומה מזכה את הפיצוי, ולכן הצוות היה קטן מהחוזי (${CREW_LABEL[need]})`,
         { explain: `הרומה מזכה את הפיצוי, ו${contract}. האפליקציה מניחה שהטיסה בוצעה בצוות קטן ממנו.` });
