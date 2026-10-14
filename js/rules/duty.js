@@ -26,13 +26,13 @@ export const otherOption = () => ({ value: 'other', label: 'סיבה אחרת', 
  * כשיש טיסה שבוצעה, ואחרת על `date`. תשובה שנשמרה לפני שנשאל על הקרדיט מחזירה false, והקורא
  * שולח אותה לבדיקה ידנית כמו קודם.
  */
-export function applyOtherReason(ctx, answer, rule, { what, date, pairing = null, extra }) {
+export function applyOtherReason(ctx, answer, rule, { what, date, pairing = null, planId = null, extra }) {
   if (typeof answer.creditMin !== 'number') return false;
   const min = answer.creditMin;
   const note = `${what}: "${answer.text}"`;
-  ctx.note(date, `${note} – ${min > 0 ? 'קרדיט נוסף' : 'לא מגיע קרדיט'}.`, rule, { byUser: true, ruleTitle: null });
+  ctx.note(date, `${note} – ${min > 0 ? 'קרדיט נוסף' : 'לא מגיע קרדיט'}.`, rule, { byUser: true, ruleTitle: null, pairingId: planId ?? pairing?.id });
   // בשורת ההשוואה: "סיבה אחרת" ולא שם החוק, שאינו מתאר את מה שקרה ("טיסה שבוטלה ללא פיצוי").
-  const shown = { ...extra, ruleTitle: 'סיבה אחרת' };
+  const shown = { ...extra, ruleTitle: 'סיבה אחרת', ...(!pairing && planId && { forPlan: planId }) };
   if (min > 0 && pairing) ctx.expectPairing(pairing, 'rig', min, rule, note, shown);
   else if (min > 0) ctx.expect(date, 'rig', min, rule, note, shown);
   return true;
