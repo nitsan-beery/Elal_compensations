@@ -934,7 +934,7 @@ function makeContext({ out, timeline, domicile, codes, holidays, answers, plan, 
     /**
      * `date` הוא null בהערה על החודש כולו, בלי יום מסוים. `extra.byUser`: ההערה מצטטת את מה
      * שהמשתמש כתב, ומוצגת עם "לפי תשובת המשתמש". `extra.order`: 'first' או 'last' – מקום קבוע ברשימה.
-     * `extra.to`: היום האחרון, כשההערה על כמה ימים. `extra.severity`: 'bad' – הערה אדומה (חריגה).
+     * `extra.to`: היום האחרון, כשההערה על כמה ימים. `extra.severity`: 'warn' – הערה צהובה, כשיש מה לטפל בו (טיוטה 330).
      */
     note(date, message, rule, extra) {
       const k = `${date}|${message}`;

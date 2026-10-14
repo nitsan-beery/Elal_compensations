@@ -418,8 +418,9 @@ function base_rest_shortfall(ctx, params, rule) {
   // רצף של 3 טיסות יום אינו נשאל (טיוטה 328), ותשובה קודמת עליו אינה נקראת.
   const declined = (c) => { const a = c.type === 'day3' ? null : ctx.answer(c.id); return a ? a.value !== 'sequence' : c.links.every(paidOn); };
   const sequences = turnaroundSequences(ctx, params.turnaround_sequence, links, legal, declined);
-  // מה קרה בכל מנוחה קצרה, להערות: 'open' – לא זוכתה (בתכנון לבד – תמיד), 'paid' – הרומה זיכתה,
-  // 'sequence' – רצף שהוצג בתכנית החודשית, 'unperformed' – לא בוצע כמתוכנן, 'skip' – בדיקה ידנית.
+  // מה קרה בכל מנוחה קצרה, להערות: 'open' – לא זוכתה ולא נענתה (בתכנון לבד – תמיד), 'answered' – נענתה
+  // (חוץ מ"רצף"), 'paid' – הרומה זיכתה, 'sequence' – רצף שהוצג בתכנית החודשית, 'unperformed' – לא בוצע
+  // כמתוכנן, 'skip' – בדיקה ידנית.
   const status = new Map();
   const asked = new Set();
   for (const link of links) {
@@ -469,6 +470,7 @@ function base_rest_shortfall(ctx, params, rule) {
       status.set(link, 'sequence');
       continue;
     }
+    if (!paid) status.set(link, 'answered');
     if (a.value === 'other') {
       // שני החוקים שחולקים את השאלה מגיעים לכאן: הקרדיט נרשם פעם אחת.
       if (ctx.pairingHandledBy(p2, 'base_rest_other')) continue;
@@ -533,14 +535,16 @@ function askSequence(ctx, chain, rule) {
 
 /**
  * הערות על המנוחה בבסיס (בעל המוצר, 13/10/2026). רצף טיסות סבב עם מנוחה קצרה – הערה אחת, מהטיסה הראשונה עד
- * האחרונה: עומד בתנאי ההסכם (רק אחרי התשובה "רצף", או ברצף של 3 טיסות יום – בלי שאלה, טיוטה 328; עד אז ובכל תשובה אחרת – כמו כל מנוחה קצרה), או באדום (`severity: 'bad'`) חורג, עם הסיבות. כל מנוחה קצרה אחרת – באדום,
- * מיום הנחיתה ועד יום ההמראה הבאה. מנוחה שהרומה זיכתה או שלא בוצעה כמתוכנן – בלי הערה. בלי מנוחה קצרה,
+ * האחרונה: עומד בתנאי ההסכם (רק אחרי התשובה "רצף", או ברצף של 3 טיסות יום – בלי שאלה, טיוטה 328; עד אז ובכל תשובה אחרת – כמו כל מנוחה קצרה), או חורג, עם הסיבות. כל מנוחה קצרה אחרת – הערה
+ * מיום הנחיתה ועד יום ההמראה הבאה. שתיהן בצהוב (`severity: 'warn'`) רק עד התשובה, ואחריה בצבע רגיל: צהוב רק
+ * כשיש מה לטפל בו (בעל המוצר, 14/10/2026; טיוטה 330; עד אז באדום). מנוחה שהרומה זיכתה או שלא בוצעה כמתוכנן – בלי הערה. בלי מנוחה קצרה,
  * גם לא ברצף שעומד בתנאים (טיוטה 320) – "כל הטיסות עומדות במנוחה חוזית בבסיס בין הטיסות." (`kind: 'rest_ok'`,
  * וב-`evaluate` יחד עם הרכב הצוות החוזי). מול הרומה (טיוטה 325): מנוחה קצרה בתכנון שלא בוצעה כמתוכנן
- * אינה נחשבת, ומנוחה קצרה בביצוע (`execShort`) – הערה רגילה, לא באדום.
+ * אינה נחשבת, ומנוחה קצרה בביצוע (`execShort`) – הערה רגילה.
  */
 function restNotes(ctx, rule, units, links, sequences, status, execShort) {
-  const red = { severity: 'bad' };
+  const warn = (pending) => (pending ? { severity: 'warn' } : {});
+  const shown = (l) => status.get(l) === 'open' || status.get(l) === 'answered';
   const groups = [];
   for (const link of links.filter((l) => sequences.has(l))) {
     const last = groups.at(-1);
@@ -561,14 +565,17 @@ function restNotes(ctx, rule, units, links, sequences, status, execShort) {
       }
       continue;
     }
-    const why = [...new Set(failed.filter((l) => status.get(l) === 'open').map((l) => sequences.get(l).short))];
-    if (why.length) ctx.note(from, `רצף טיסות עם מנוחה קצרה – חורג מתנאי ההסכם: ${why.join('; ')}.`, rule, { to, ...red });
+    const why = [...new Set(failed.filter(shown).map((l) => sequences.get(l).short))];
+    if (why.length) {
+      ctx.note(from, `רצף טיסות עם מנוחה קצרה – חורג מתנאי ההסכם: ${why.join('; ')}.`, rule,
+        { to, ...warn(failed.some((l) => status.get(l) === 'open')) });
+    }
   }
   for (const l of links) {
     // רצף שעומד בתנאים ולא נענה "רצף" – כמו כל מנוחה קצרה.
-    if (sequences.get(l)?.ok === false || status.get(l) !== 'open') continue;
+    if (sequences.get(l)?.ok === false || !shown(l)) continue;
     ctx.note(l.p1.shownTo ?? l.p1.to, `חריגה ממנוחה חוזית בין ${describeUnit(l.u1)} ל-${describeUnit(l.u2)}: מנוחה בבסיס ` +
-      `${minToHhmm(Math.max(l.rest, 0))}, והמנוחה החוזית ${minToHhmm(l.required)} (${l.basis}).`, rule, { to: l.p2.from, ...red });
+      `${minToHhmm(Math.max(l.rest, 0))}, והמנוחה החוזית ${minToHhmm(l.required)} (${l.basis}).`, rule, { to: l.p2.from, ...warn(status.get(l) === 'open') });
   }
   for (const l of execShort) {
     ctx.note(l.p1.shownTo ?? l.p1.to, `מנוחה קצרה מהמנוחה החוזית, ${minToHhmm(Math.max(l.rest, 0))} בפועל לעומת ` +
