@@ -1103,6 +1103,18 @@ function special_date_activity(ctx, params, rule) {
     }
     if (hit) {
       if (askDate && !ctx.paidOn(hit, params.report_column, key, H(params.hours))) { askDate(); continue; }
+      // הרומה רושמת לפעמים את הפיצוי ביום אחר בחלון, שאין בו טיסה (21/04/2026: ערב יום העצמאות,
+      // והטיסה ב-22/04). לחוקים הציפייה על היום שברומה, ובפירוט על הטיסה, עם איפה זה ברומה (`showOn`).
+      const own = ctx.reportDates(hit);
+      const elsewhere = !ctx.paidOn(hit, params.report_column, key, H(params.hours)) &&
+        ctx.timeline.find((d) => d.date >= dateOf(wFrom) && d.date <= dateOf(wTo - 1) && !own.includes(d.date) &&
+          !ctx.execPairings.some((p) => ctx.reportDates(p).includes(d.date)) &&
+          ctx.paidOnDate(d.date, params.report_column, key, H(params.hours)));
+      if (elsewhere) {
+        ctx.expect(elsewhere.date, key, H(params.hours), rule, `${occ.title}: ${describePairing(hit)} בחלון ${window}, ונרשם ב-${ddmm(elsewhere.date)}`,
+          { explain: `${explain} הפיצוי הזה מופיע ברומה ב-${ddmm(elsewhere.date)}.`, showOn: hit.id });
+        continue;
+      }
       ctx.expectPairing(hit, key, H(params.hours), rule, `${occ.title}: ${describePairing(hit)} בחלון ${window}`, { explain });
       continue;
     }
