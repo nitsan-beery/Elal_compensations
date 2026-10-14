@@ -1417,13 +1417,16 @@ function explainChanges(out, supported) {
       // שם השינוי כבר בשורה שלו, ולכן הוא יורד מראש ההערה.
       // סבב שבוטל ללא קרדיט ובמקומו טיסה באותם ימים: השורה כבר אומרת שהמתוכנן לא בוצע.
       const leads = [`${c.label}: `, 'סבב מתוכנן שלא בוצע: '];
-      c.notes = ruled.map((n) => {
+      c.notes = ruled.flatMap((n) => {
         n.placed = true;
         const lead = leads.find((l) => n.message.startsWith(l));
-        // סבב שבוטל ללא קרדיט, ובאותם ימים בוצעה טיסה: מה שמגיע עליה, לפי התשובה (בעל המוצר, 14/10/2026).
+        // סבב שבוטל ללא קרדיט, ובאותם ימים בוצעה טיסה: מה שמגיע עליה, לפי התשובה. "בוטל ללא קרדיט" כבר
+        // בשורה ("בוטל ללא פיצוי", או הכותרת), ולכן נשאר רק כשיש בו סיבה (בעל המוצר, 14/10/2026).
         const p = n.performed;
-        const performed = p ? ` על הטיסה שבוצעה: ${dueOf([p.id], p.from, p.to)}.` : '';
-        return { message: (lead ? n.message.slice(lead.length) : n.message) + performed, byUser: !!n.byUser };
+        const performed = p ? `על הטיסה שבוצעה: ${dueOf([p.id], p.from, p.to)}.` : '';
+        const own = n.plain ? '' : lead ? n.message.slice(lead.length) : n.message;
+        const message = [own, performed].filter(Boolean).join(' ');
+        return message ? [{ message, byUser: !!n.byUser }] : [];
       });
       c.notes.unshift(...diverted);
       continue;

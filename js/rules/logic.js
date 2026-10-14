@@ -1483,16 +1483,18 @@ function noteDiversion(ctx, match, rule) {
 
 /**
  * סבב שבוטל ללא קרדיט: מה שבוצע בימיו לא היה מתוכנן. ימיו אינם נספרים כימים ללא פעילות, שהם לפי
- * התכנון בלבד (בעל המוצר, 14/10/2026). מתחת לשינוי, כשבוצעה טיסה באותם ימים, נוסף מה שמגיע עליה
- * (`performed`, `explainChanges` ב-js/rules/evaluate.js).
+ * התכנון בלבד (בעל המוצר, 14/10/2026). מתחת לשינוי ההערה עצמה רק כשיש סיבה בסוגריים (`plain`), וכשבוצעה
+ * טיסה באותם ימים – מה שמגיע עליה (`performed`, `explainChanges` ב-js/rules/evaluate.js).
  */
 function noteCancelled(ctx, match, rule, why) {
   ctx.markPairing(match.plan, 'cancelled_no_compensation');
   // ימי הטיסה שבוצעה, עד סוף החודש: "קריאה מיוחדת על כל אחד מהימים" לפיהם.
   const last = ctx.timeline.at(-1).date;
   const to = match.exec ? match.exec.shownTo ?? match.exec.to : null;
-  ctx.note(match.plan.from, `סבב מתוכנן שלא בוצע: בוטל ללא קרדיט${why ? ` (${why})` : ''}.`, rule,
-    match.exec ? { performed: { id: match.exec.id, from: match.exec.from, to: to < last ? to : last } } : undefined);
+  ctx.note(match.plan.from, `סבב מתוכנן שלא בוצע: בוטל ללא קרדיט${why ? ` (${why})` : ''}.`, rule, {
+    plain: !why,
+    ...(match.exec ? { performed: { id: match.exec.id, from: match.exec.from, to: to < last ? to : last } } : {}),
+  });
 }
 
 /**
