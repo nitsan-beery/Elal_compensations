@@ -596,7 +596,7 @@ function chainNotes(out, journal, answers) {
     // מתחת לשורה רק הסיבה, ומה שמגיע עליה; כשהיא כבר הכותרת של השורה, או בראש ההערה על מה שמגיע
     // ("החלפה מרצוני או בהסכמתי: לא מגיע קרדיט על היום הזה."), – רק מה שמגיע (בעל המוצר, 07/10/2026; 21/07/2026 ATH).
     const norm = (t) => t.replace(/\.$/, '');
-    const said = view.reason && (c.notes ?? []).some((n) => norm(n.message).startsWith(`${norm(view.reason)}:`));
+    const said = view.reason && (c.notes ?? []).some((n) => norm(n.message) === norm(view.reason) || norm(n.message).startsWith(`${norm(view.reason)}:`));
     const reason = view.reason && view.reason !== `${c.label}.` && !said ? [{ message: view.reason, byUser: true }] : [];
     c.notes = eff.value === 'chain_open' ? [...reason, { message: 'ממתין לתשובה בשאלה על הסבב.', byUser: false }] : [...reason, ...(c.notes ?? [])];
     // מול היומן מתחת לשורה רק הסיבות (`calendarReasons`), גם כשהכותרת כבר אומרת אותן.
@@ -938,7 +938,7 @@ function makeContext({ out, timeline, domicile, codes, holidays, answers, plan, 
     },
     /**
      * `date` הוא null בהערה על החודש כולו, בלי יום מסוים. `extra.byUser`: ההערה מצטטת את מה
-     * שהמשתמש כתב, ומוצגת עם "לפי תשובת המשתמש". `extra.order`: 'first' או 'last' – מקום קבוע ברשימה.
+     * שהמשתמש כתב. `extra.order`: 'first' או 'last' – מקום קבוע ברשימה.
      * `extra.to`: היום האחרון, כשההערה על כמה ימים. `extra.severity`: 'warn' – הערה צהובה, כשיש מה לטפל בו (טיוטה 330).
      */
     note(date, message, rule, extra) {
@@ -1420,11 +1420,11 @@ function explainChanges(out, supported) {
       c.notes = ruled.flatMap((n) => {
         n.placed = true;
         const lead = leads.find((l) => n.message.startsWith(l));
-        // סבב שבוטל ללא קרדיט, ובאותם ימים בוצעה טיסה: מה שמגיע עליה, לפי התשובה. "בוטל ללא קרדיט" כבר
-        // בשורה ("בוטל ללא פיצוי", או הכותרת), ולכן נשאר רק כשיש בו סיבה (בעל המוצר, 14/10/2026).
+        // סבב שבוטל ללא קרדיט, ובאותם ימים בוצעה טיסה: מה שמגיע עליה, לפי התשובה (בעל המוצר, 14/10/2026).
+        // בלי טיסה כזאת – התשובה עצמה, כמו בשרשרת מהיומן, כדי שתמיד תהיה שורה מתחת לשינוי.
         const p = n.performed;
         const performed = p ? `על הטיסה שבוצעה: ${dueOf([p.id], p.from, p.to)}.` : '';
-        const own = n.plain ? '' : lead ? n.message.slice(lead.length) : n.message;
+        const own = n.plain ? (p ? '' : `${CALENDAR_REASON.cancelled}.`) : lead ? n.message.slice(lead.length) : n.message;
         const message = [own, performed].filter(Boolean).join(' ');
         return message ? [{ message, byUser: !!n.byUser }] : [];
       });

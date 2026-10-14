@@ -63,16 +63,16 @@ if (r.legal) {
 console.log('\n== שינויים ==');
 for (const c of r.changes) {
   console.log(`${(c.dates ?? [c.date]).map((d) => d.slice(8)).join('·')}  ${c.label.padEnd(34)} תכנון: ${c.plan ?? '—'}  |  ביצוע: ${c.exec ?? '—'}${c.replacedBy ? '  ← ' + c.replacedBy.join(', ') : ''}`);
-  for (const n of c.notes ?? []) console.log(`      ${n.message}${n.byUser ? ' (לפי תשובת המשתמש)' : ''}`);
-  for (const n of c.steps ?? []) console.log(`        ⤷ ${n.message}${n.byUser ? ' (לפי תשובת המשתמש)' : ''}`);
+  for (const n of c.notes ?? []) console.log(`      ${n.message}`);
+  for (const n of c.steps ?? []) console.log(`        ⤷ ${n.message}`);
 }
 
 if (r.calendarChanges) {
   console.log('\n== שינויים בין התכנון ליומן ==');
   for (const c of r.calendarChanges) {
     console.log(`${c.date.slice(8)}  ${c.label.padEnd(30)} תכנון: ${c.plan ?? '—'}  |  יומן: ${c.calendar ?? '—'}`);
-    for (const n of c.notes ?? []) console.log(`      ${n.message}${n.byUser ? ' (לפי תשובת המשתמש)' : ''}`);
-  for (const n of c.steps ?? []) console.log(`        ⤷ ${n.message}${n.byUser ? ' (לפי תשובת המשתמש)' : ''}`);
+    for (const n of c.notes ?? []) console.log(`      ${n.message}`);
+  for (const n of c.steps ?? []) console.log(`        ⤷ ${n.message}`);
   }
 }
 
@@ -106,7 +106,7 @@ if (r.reviews.length) {
 }
 if (r.notes.length) {
   console.log('\n== הערות ==');
-  for (const n of r.notes) console.log(`- ${n.severity === 'bad' ? '[אדום] ' : n.severity === 'warn' ? '[צהוב] ' : ''}${n.date ? n.date.slice(8) + (n.to && n.to !== n.date ? '–' + n.to.slice(8) : '') + " " : ""}${n.message}${n.byUser ? ' (לפי תשובת המשתמש)' : ''}`);
+  for (const n of r.notes) console.log(`- ${n.severity === 'bad' ? '[אדום] ' : n.severity === 'warn' ? '[צהוב] ' : ''}${n.date ? n.date.slice(8) + (n.to && n.to !== n.date ? '–' + n.to.slice(8) : '') + " " : ""}${n.message}`);
 }
 if (r.unknownCodes.length) {
   console.log('\n== קודים לא מוכרים ==');

@@ -1158,7 +1158,7 @@ const datesFirst = (text) => text.replace(/⁦(\d[^\s⁦⁩]*) ([^⁦⁩]*)⁩/g
 function chainSides(c, sides) {
   if (!c.steps?.length) return `<div class="small">${sides}</div>`;
   return `<details class="chain"><summary class="small">${sides}</summary>
-    ${c.steps.map((n) => `<div class="explain small">${esc(datesFirst(n.message))}${n.byUser ? ' <span class="muted">לפי תשובת המשתמש</span>' : ''}</div>`).join('')}
+    ${c.steps.map((n) => `<div class="explain small">${esc(datesFirst(n.message))}</div>`).join('')}
   </details>`;
 }
 
@@ -1171,7 +1171,7 @@ function renderChanges(res) {
     ${changes.length ? `<ul class="list">${changes.map((c) => `<li${ruleAttr((c.notes ?? []).map((n) => n.ruleTitle))}>
       <strong class="num">${(c.dates ?? [c.date]).map(ddmm).join(' · ')}</strong> ${esc(c.label)}
       ${chainSides(c, `<span class="side-plan">תכנון: ${esc(datesFirst(c.plan ?? '—'))}</span> · <span class="side-exec">ביצוע: ${esc(datesFirst(c.exec ?? (c.replacedBy?.join(', ') || '—')))}</span>`)}
-      ${(c.notes ?? []).map((n) => `<div class="explain">${esc(n.message)}${n.byUser ? ' <span class="muted">לפי תשובת המשתמש</span>' : ''}</div>`).join('')}
+      ${(c.notes ?? []).map((n) => `<div class="explain">${esc(n.message)}</div>`).join('')}
     </li>`).join('')}</ul>` : '<p class="muted">כל הסבבים בוצעו כמתוכנן.</p>'}
   </details>`;
 }
@@ -1190,7 +1190,7 @@ function renderCalendarChanges(res) {
     ${changes.length ? `<ul class="list">${changes.map((c) => `<li>
       <strong class="num">${(c.dates ?? [c.date]).map(ddmm).join(' · ')}</strong> ${esc(c.label)}
       ${chainSides(c, `<span class="side-plan">תכנון: ${esc(datesFirst(c.plan ?? '—'))}</span> · <span class="side-exec">יומן: ${esc(datesFirst(c.calendar ?? '—'))}</span>`)}
-      ${(c.notes ?? []).map((n) => `<div class="explain">${esc(datesFirst(n.message))}${n.byUser ? ' <span class="muted">לפי תשובת המשתמש</span>' : ''}</div>`).join('')}
+      ${(c.notes ?? []).map((n) => `<div class="explain">${esc(datesFirst(n.message))}</div>`).join('')}
     </li>`).join('')}</ul>` : '<p class="muted">היומן תואם את התכנון.</p>'}
   </details>`;
 }
@@ -1226,7 +1226,7 @@ function renderNotes(res) {
   if (!count) return '';
   return `<details class="card" data-section="notes">
     <summary><h2 style="display:inline">הערות <span class="count">${count}</span></h2></summary>
-    <ul class="list">${res.notes.map((n) => `<li${n.severity ? ` class="${n.severity}"` : ''}${ruleAttr([n.ruleTitle])}>${n.date ? `<strong class="num">${ddmm(n.date)}${n.to && n.to !== n.date ? `–${ddmm(n.to)}` : ''}</strong> ` : ''}${esc(n.message)}${n.byUser ? ' <span class="small muted">לפי תשובת המשתמש</span>' : ''}</li>`).join('')}${legal ? `<li${ruleAttr([legalTip])}>${esc(legal)}</li>` : ''}</ul>
+    <ul class="list">${res.notes.map((n) => `<li${n.severity ? ` class="${n.severity}"` : ''}${ruleAttr([n.ruleTitle])}>${n.date ? `<strong class="num">${ddmm(n.date)}${n.to && n.to !== n.date ? `–${ddmm(n.to)}` : ''}</strong> ` : ''}${esc(n.message)}</li>`).join('')}${legal ? `<li${ruleAttr([legalTip])}>${esc(legal)}</li>` : ''}</ul>
   </details>`;
 }
 

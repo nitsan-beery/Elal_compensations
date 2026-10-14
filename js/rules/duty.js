@@ -22,7 +22,7 @@ export const amountWord = (column) => (column === 'COM' || column === 'S/C' ? '�
 export const otherOption = () => ({ value: 'other', label: 'סיבה אחרת', needsText: true, needsCredit: true });
 
 /**
- * הערה עם הסיבה כלשונה, מסומנת "לפי תשובת המשתמש", והקרדיט שהמשתמש אמר שמגיע – על `pairing`
+ * הערה עם הסיבה כלשונה, בין מירכאות, והקרדיט שהמשתמש אמר שמגיע – על `pairing`
  * כשיש טיסה שבוצעה, ואחרת על `date`. תשובה שנשמרה לפני שנשאל על הקרדיט מחזירה false, והקורא
  * שולח אותה לבדיקה ידנית כמו קודם.
  */
@@ -32,7 +32,7 @@ export function applyOtherReason(ctx, answer, rule, { what, date, pairing = null
   const note = `${what}: "${answer.text}"`;
   ctx.note(date, `${note} – ${min > 0 ? 'קרדיט נוסף' : 'לא מגיע קרדיט'}.`, rule, { byUser: true, ruleTitle: null });
   // בשורת ההשוואה: "סיבה אחרת" ולא שם החוק, שאינו מתאר את מה שקרה ("טיסה שבוטלה ללא פיצוי").
-  const shown = { ...extra, ruleTitle: 'סיבה אחרת, לפי תשובת המשתמש' };
+  const shown = { ...extra, ruleTitle: 'סיבה אחרת' };
   if (min > 0 && pairing) ctx.expectPairing(pairing, 'rig', min, rule, note, shown);
   else if (min > 0) ctx.expect(date, 'rig', min, rule, note, shown);
   return true;
