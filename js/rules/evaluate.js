@@ -75,7 +75,7 @@ function evaluateFiles({ rulesData, plan = null, exec = null, answers = {}, hist
   const period = (exec ?? plan).period;
   const mode = plan && exec ? 'full' : plan ? 'plan' : 'exec';
   // חודש שנשמר בגרסה קודמת מחזיק אזהרת עמודות חסרות מהחילוץ; היא נבנית מחדש כאן.
-  const warnings = [...(plan?.warnings ?? []), ...(exec?.warnings ?? []).filter((w) => !w.startsWith(MISSING_COLUMNS_PREFIX) && !w.startsWith(IPAD_WARNING_PREFIX))];
+  const warnings = [...(plan?.warnings ?? []).filter((w) => !w.startsWith(CROSS_MONTH_WARNING_PREFIX)), ...(exec?.warnings ?? []).filter((w) => !w.startsWith(MISSING_COLUMNS_PREFIX) && !w.startsWith(IPAD_WARNING_PREFIX))];
   const missingRequired = (exec?.missingColumns ?? []).filter((c) => !OPTIONAL_COLUMNS.includes(c));
   if (missingRequired.length) {
     warnings.push(`${MISSING_COLUMNS_PREFIX}: ${missingRequired.join(', ')}. ייתכן שהן נחתכו בהדפסה. חוקים שתלויים בהן לא ייבדקו.`);
@@ -1995,6 +1995,8 @@ function warnMissingColumns(out, exec) {
 const MISSING_COLUMNS_PREFIX = 'עמודות חסרות ברומה';
 // אזהרה שהייתה נשמרת בחודשים שחולצו לפני שהוסרה (קובץ שהודפס מ-iPad).
 const IPAD_WARNING_PREFIX = 'הקובץ הודפס מ-iPad';
+// אזהרה שהייתה נשמרת בחודשים שחולצו לפני שהוסרה: כל נתוני החודש בקובץ, ואין מה להזהיר (טיוטה 331).
+const CROSS_MONTH_WARNING_PREFIX = 'תקופת התכנון חוצה חודשים';
 
 /** שעות רגל שהחישובים צריכים, בדוח הביצוע (עמודה והשדה שנקרא ממנה). */
 const EXEC_LEG_FIELDS = { Flt: 'flight', ORG: 'org', DST: 'dst', STD: 'std', STA: 'sta', ATD: 'atd', ATA: 'ata', SkdDur: 'skdDur' };

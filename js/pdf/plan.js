@@ -75,9 +75,6 @@ function parseHeader(page, warnings) {
   const month = MONTHS.indexOf(capitalize(period[2])) + 1;
   const year = 2000 + Number(period[3]);
   if (month === 0) throw new Error(`חודש לא מזוהה בשורת Period: ${period[2]}`);
-  if (period[2].toLowerCase() !== period[5].toLowerCase()) {
-    warnings.push('תקופת התכנון חוצה חודשים. האפליקציה מטפלת בחודש הראשון בלבד.');
-  }
 
   return {
     employee: employee ? { last: employee[1].trim(), first: employee[2].trim(), id: staff?.[1] ?? null } : null,

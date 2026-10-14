@@ -90,11 +90,11 @@ async function init() {
     state.rulesSource = source;
     state.rulesError = error;
   } catch (err) {
-    showBanner('bad', esc(err.message));
+    showBanner('info', esc(err.message));
     return;
   }
   if (state.rulesSource === 'cache') {
-    showBanner('warn', `לא ניתן היה לטעון את החוקים מהרשת${state.rulesError ? ` (<bdi dir="ltr">${esc(state.rulesError)}</bdi>)` : ''}. הם נטענו מהעותק השמור על המכשיר (גרסה ${esc(state.rulesData.rules_version)}).`);
+    showBanner('info', `לא ניתן היה לטעון את החוקים מהרשת${state.rulesError ? ` (<bdi dir="ltr">${esc(state.rulesError)}</bdi>)` : ''}. הם נטענו מהעותק השמור על המכשיר (גרסה ${esc(state.rulesData.rules_version)}).`);
   }
   state.calendar = calendarSetting(await safe(() => store.getSetting(CAL_SETTING), null));
   // החודש האחרון שעבדו עליו נפתח אוטומטית.
@@ -187,7 +187,7 @@ const PARSERS = { plan: parsePlan, exec: parseExec };
 // לעמודה אחרת) מעלה אותה, וחודש שנשמר בגרסה קודמת נקרא מחדש מהקבצים השמורים כשהוא נפתח (בעל המוצר,
 // 08/10/2026: HHM ב-COM של היום, ספטמבר 2026 של רון).
 // 2: מספר העובד בתכנון (בעל המוצר, 08/10/2026).
-const PARSE_VERSION = 3;
+const PARSE_VERSION = 4;
 
 async function reparseStale(record) {
   if (record.parseVersion === PARSE_VERSION) return;
@@ -252,11 +252,11 @@ async function handleFile(file, expected, calToken = null) {
     if (samePeriod && prev.key !== record.key && prev[other] && !store.samePilot(prev, pilot)) {
       const was = prev.person ?? `מספר עובד ${prev.staff}`;
       const now = pilot.person ?? `מספר עובד ${pilot.staff}`;
-      state.notices.push({ kind: 'warn', text: record[other]
+      state.notices.push({ kind: 'info', text: record[other]
         ? `${THE_KIND[other]} שהיה פתוח שייך לטייס אחר (${was}). נפתח החודש השמור של ${now}.`
         : `${THE_KIND[other]} שהיה פתוח שייך לטייס אחר (${was}), ולכן נסגר. העלה את ${THE_KIND[other]} של ${now}.` });
     } else if (kind === 'exec' && !record.plan) {
-      state.notices.push({ kind: 'warn', text: 'אין קובץ תכנון לחודש הזה, ולכן אין השוואה לתכנון. אפשר להעלות אותו עכשיו.' });
+      state.notices.push({ kind: 'info', text: 'אין קובץ תכנון לחודש הזה, ולכן אין השוואה לתכנון. אפשר להעלות אותו עכשיו.' });
     }
     record[kind] = parsed;
     record[`${kind}File`] = file.name;
@@ -267,7 +267,7 @@ async function handleFile(file, expected, calToken = null) {
   } catch (err) {
     console.error(err);
     if (err.exact) state.result = null;
-    state.notices.push({ kind: 'bad', text: err.exact ? err.message : `לא ניתן לקרוא את "${file.name}": ${err.message}` });
+    state.notices.push({ kind: 'info', text: err.exact ? err.message : `לא ניתן לקרוא את "${file.name}": ${err.message}` });
     renderResults();
   } finally {
     zone.classList.remove('busy');
@@ -452,8 +452,9 @@ function renderCalendarBar() {
   if (!bar) return;
   const c = state.calendar;
   const notices = [];
-  if (state.calError) notices.push(`<div class="notice bad">${esc(state.calError)}</div>`);
-  else if (c?.synced && !c.facts?.flights?.length) notices.push(`<div class="notice warn">${esc(CAL_NO_DATA)}</div>`);
+  // הודעות היומן הן הודעות מערכת: בכחול (בעל המוצר, 14/10/2026; טיוטה 331).
+  if (state.calError) notices.push(`<div class="notice info">${esc(state.calError)}</div>`);
+  else if (c?.synced && !c.facts?.flights?.length) notices.push(`<div class="notice info">${esc(CAL_NO_DATA)}</div>`);
   // יומן של טייס אחר, וחודש שאין ביומן אף טיסה שלו: ההודעה בשורת היומן, במקום "יומן מעודכן ל…"
   // (`calendarParts`; בעל המוצר, 08/10/2026).
   // בתכנון לבד, טיסה שירדה מהיומן היא שינוי בסבב, והוא נשאל בשאלה עליו. לכן אין עליה הודעה (בעל
@@ -461,14 +462,14 @@ function renderCalendarBar() {
   const gaps = (state.calGaps && state.calGaps.key === state.record?.key ? state.calGaps.items : [])
     .filter((g) => g.kind !== 'removed' || state.result?.mode !== 'plan');
   if (gaps.length) {
-    notices.push(`<div class="notice warn">היומן המעודכן שונה ממה שנשמר בחודש הזה:<ul>${gaps.map((g) => `<li>${esc(describeGap(g))}</li>`).join('')}</ul></div>`);
+    notices.push(`<div class="notice info">היומן המעודכן שונה ממה שנשמר בחודש הזה:<ul>${gaps.map((g) => `<li>${esc(describeGap(g))}</li>`).join('')}</ul></div>`);
   }
   const review = crewReview();
   if (review.length) notices.push(renderCrewReview(review));
   // טיסות שבוצעו ואין ביומן הרכב הצוות שלהן: כנראה שהיומן לא מעודכן (בעל המוצר, 04/10/2026).
   const missing = c && !state.calBusy ? state.result?.calendarMissing ?? [] : [];
   if (missing.length) {
-    notices.push(`<div class="notice warn">ביומן לא מופיע הרכב הצוות של ${missing.length === 1 ? 'טיסה אחת שבוצעה' : `${missing.length} טיסות שבוצעו`}: ${
+    notices.push(`<div class="notice info">ביומן לא מופיע הרכב הצוות של ${missing.length === 1 ? 'טיסה אחת שבוצעה' : `${missing.length} טיסות שבוצעו`}: ${
       missing.map((m) => esc(`⁦${ddmm(m.date)} ${m.flight}⁩`)).join(', ')}. ודא שבוצע סנכרון של היומן מהאורגנייזר.</div>`);
   }
   const parts = calendarParts(c);
@@ -507,7 +508,7 @@ function renderCrewReview(review) {
   const lead = diff.length === n
     ? (n === 1 ? 'היומן שונה מהתשובה שלך, והשאלה תישאל שוב' : 'בכולן היומן שונה מהתשובה שלך, והן יישאלו שוב')
     : `ב-${diff.length} מהן היומן שונה מהתשובה שלך, ו${diff.length === 1 ? 'היא תישאל' : 'הן יישאלו'} שוב`;
-  return `<div class="notice warn">ביומן מופיע הרכב הצוות של ${n === 1 ? 'טיסה אחת' : `${n} טיסות`} שכבר ענית עליהן. לעדכן אותן מהיומן?
+  return `<div class="notice info">ביומן מופיע הרכב הצוות של ${n === 1 ? 'טיסה אחת' : `${n} טיסות`} שכבר ענית עליהן. לעדכן אותן מהיומן?
     ${diff.length ? `<p class="small">${lead}:</p>
     <ul>${diff.map((x) => `<li>${esc(describeQuestionId(x.id))}: ענית ${esc(answerLabel(x.answer, kind(x)))}, ביומן ${esc(answerLabel(x.calendar, kind(x)))}</li>`).join('')}</ul>` : ''}
     <div class="row"><button type="button" class="btn primary" data-crew-review="yes">עדכן מהיומן</button>
@@ -569,7 +570,7 @@ async function openCalendarDialog() {
   $('[data-cal="login"]', dlg).addEventListener('click', async () => {
     const clientId = (builtin || $('input[name="clientId"]', dlg).value).trim();
     if (!calendar.CLIENT_ID_PATTERN.test(clientId)) {
-      step('bad', 'ה-<bdi dir="ltr">Client ID</bdi> אינו תקין. הוא מסתיים ב-<bdi dir="ltr">.apps.googleusercontent.com</bdi>.');
+      step('info', 'ה-<bdi dir="ltr">Client ID</bdi> אינו תקין. הוא מסתיים ב-<bdi dir="ltr">.apps.googleusercontent.com</bdi>.');
       return;
     }
     // החלון של גוגל נפתח מיד, בלי המתנה לפניו בתוך הלחיצה.
@@ -587,7 +588,7 @@ async function openCalendarDialog() {
         await connectCalendar(clientId, found);
         return;
       }
-      step('warn', `לא נמצאו נתוני סבבים באף יומן בחשבון הזה. ייתכן שנבחר חשבון גוגל לא מתאים, או שלא בוצע סנכרון דרך האורגנייזר.
+      step('info', `לא נמצאו נתוני סבבים באף יומן בחשבון הזה. ייתכן שנבחר חשבון גוגל לא מתאים, או שלא בוצע סנכרון דרך האורגנייזר.
         <label>אפשר לבחור יומן בעצמך <select name="calendarId">${all.map((c) => `<option value="${esc(c.id)}">${esc(c.name)}</option>`).join('')}</select></label>
         <button type="button" class="btn" data-cal="pick">חיבור היומן הזה</button>`);
       $('[data-cal="pick"]', dlg).addEventListener('click', async () => {
@@ -596,7 +597,7 @@ async function openCalendarDialog() {
         await connectCalendar(clientId, [all.find((c) => c.id === id)], { manual: true });
       });
     } catch (err) {
-      step('bad', esc(err.message));
+      step('info', esc(err.message));
     }
   });
   dlg.showModal();
@@ -908,12 +909,13 @@ function renderAlerts(res) {
   }
   if (res.unknownCodes.length) {
     const open = res.unknownCodes.some((u) => !u.answer);
-    out.push(`<div class="notice ${open ? 'bad' : 'warn'}"><strong>${esc(unknownCodesMessage(res))}</strong>
+    // קוד לא מוכר הוא הודעת מערכת: בכחול עד התשובה, ואחריה בלי צבע (טיוטה 331).
+    out.push(`<div class="notice${open ? ' info' : ''}"><strong>${esc(unknownCodesMessage(res))}</strong>
       <ul class="codes">${res.unknownCodes.map(renderUnknownCode).join('')}</ul>
       <button class="btn no-print" data-action="copy-codes">העתק פרטים</button></div>`);
   }
   if (res.reviews.length) {
-    out.push(`<div class="notice bad"><strong>לבדיקה ידנית</strong><ul>${res.reviews.map((v) => `<li${ruleAttr([v.ruleTitle])}>${esc(v.message)}</li>`).join('')}</ul></div>`);
+    out.push(`<div class="notice warn"><strong>לבדיקה ידנית</strong><ul>${res.reviews.map((v) => `<li${ruleAttr([v.ruleTitle])}>${esc(v.message)}</li>`).join('')}</ul></div>`);
   }
   return out.length ? `<div class="card">${out.join('')}</div>` : '';
 }
@@ -1064,7 +1066,7 @@ function renderTotals(res) {
         <div class="val num">${minToHhmm(t.expected)}</div>
         <div class="rep">צפוי לפי התכנון</div>
       </div>`).join('')}${fd ? `
-      <div class="total free ${fd.free >= fd.due ? 'ok' : 'bad'}">
+      <div class="total free ${fd.free >= fd.due ? 'ok' : 'warn'}">
         <div class="label" style="direction:rtl">ימים פנויים בתכנון</div>
         <div class="val num">${fd.free}</div>
         <div class="rep">מינימום <span class="num">${fd.due}</span>${fd.free >= fd.due ? ' ✓' : ''}</div>
@@ -1389,7 +1391,7 @@ async function renderHistory() {
           m.plan ? '<span class="tag">תכנון</span>' : '',
           m.exec ? '<span class="tag">ביצוע</span>' : '',
           s.legal ? `<span class="tag bad">${s.legal === 1 ? 'חריגה ממגבלות החוק' : `${s.legal} חריגות ממגבלות החוק`}</span>` : '',
-          s.questions ? `<span class="tag warn">${s.questions === 1 ? 'שאלה פתוחה אחת' : `${s.questions} שאלות פתוחות`}</span>` : '',
+          s.questions ? `<span class="tag info">${s.questions === 1 ? 'שאלה פתוחה אחת' : `${s.questions} שאלות פתוחות`}</span>` : '',
           s.gaps ? `<span class="tag bad">${s.gaps === 1 ? 'פער אחד' : `${s.gaps} פערים`}</span>` : '',
           m.exec && !s.gaps && !s.questions ? '<span class="tag ok">תואם לרומה</span>' : '',
         ].join(' ');
@@ -1623,9 +1625,9 @@ function renderRuleList() {
     const reason = reasonOf.get(r.id);
     const tags = [
       `<span class="tag">${esc(CATEGORY_LABEL[r.category] ?? r.category)}</span>`,
-      r.status === 'cancelled' ? '<span class="tag bad">בוטל</span>' : '',
-      r.status === 'changed' ? '<span class="tag warn">שונה</span>' : '',
-      reason ? '<span class="tag warn">לא נתמך</span>' : '<span class="tag ok">נתמך</span>',
+      r.status === 'cancelled' ? '<span class="tag">בוטל</span>' : '',
+      r.status === 'changed' ? '<span class="tag">שונה</span>' : '',
+      reason ? '<span class="tag info">לא נתמך</span>' : '<span class="tag ok">נתמך</span>',
     ].join(' ');
     const validity = `מ-${dmy(r.valid_from) ?? 'תמיד'} עד ${validTo(r)}`;
     return `<article class="rule ${r.status === 'cancelled' ? 'inactive' : ''}">
