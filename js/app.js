@@ -11,6 +11,9 @@ import { minToHhmm } from './time.js';
 import * as store from './store.js';
 import * as calendar from './calendar.js';
 
+// מספר הגרסה של הקוד שרץ בדף. עולה יחד עם CACHE ב-sw.js, לאותו מספר (בעל המוצר, 15/10/2026).
+const APP_VERSION = 232;
+
 const $ = (sel, root = document) => root.querySelector(sel);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 const ddmm = (iso) => `${iso.slice(8, 10)}/${iso.slice(5, 7)}`;
@@ -111,6 +114,7 @@ function registerServiceWorker() {
   navigator.serviceWorker.register('sw.js').catch(() => { /* האפליקציה עובדת גם בלי */ });
   showVersion();
   navigator.serviceWorker.addEventListener('controllerchange', showVersion);
+  $('#app-update').addEventListener('click', () => location.reload());
 }
 
 /**
@@ -118,10 +122,18 @@ function registerServiceWorker() {
  * המספר הוא של המטמון של ה-service worker (`CACHE` ב-sw.js), שעולה בכל שינוי בקבצי האפליקציה, כך שאין
  * מספר נוסף לעדכן. בזמן עדכון יש שני מטמונים, והחדש הוא הגבוה.
  */
+/**
+ * מספר הגרסה בשורת הקרדיט הוא של הקוד שרץ בדף. גרסה חדשה שהותקנה בזמן שהדף פתוח (המטמון שלה חדש
+ * מהקוד) אינה מחליפה אותו: לידו הכפתור "גרסה N מוכנה – רענון" (בעל המוצר, 15/10/2026; עד אז המספר
+ * נלקח מהמטמון, והתחלף לפני שהקוד התחלף).
+ */
 async function showVersion() {
+  $('#app-version').textContent = `גרסה ${APP_VERSION}`;
   const keys = await caches.keys().catch(() => []);
-  const version = Math.max(0, ...keys.map((k) => Number(k.match(/^elal-compensations-v(\d+)$/)?.[1] ?? 0)));
-  if (version) $('#app-version').textContent = `גרסה ${version}`;
+  const cached = Math.max(0, ...keys.map((k) => Number(k.match(/^elal-compensations-v(\d+)$/)?.[1] ?? 0)));
+  const button = $('#app-update');
+  button.hidden = cached <= APP_VERSION;
+  if (cached > APP_VERSION) button.textContent = `גרסה ${cached} מוכנה – רענון`;
 }
 
 function showBanner(kind, html) {

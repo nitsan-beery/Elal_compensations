@@ -81,8 +81,11 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .tabs button[aria-selected="true"] { opacity: 1; background: rgba(255,255,255,.18); font-weight: 600; }
 .topbar .credit { flex-basis: 100%; margin: 0; text-align: right; color: #fff; font-size: .8rem; opacity: .85;
   display: flex; flex-wrap: wrap; justify-content: space-between; gap: 0 1rem; }
-/* מספר הגרסה בקצה השמאלי, גם כשבמסך צר הוא יורד לשורה משלו. */
-#app-version { margin-inline-start: auto; }
+/* מספר הגרסה בקצה השמאלי, גם כשבמסך צר הוא יורד לשורה משלו. לידו הכפתור לגרסה חדשה שהותקנה. */
+.topbar .version { margin-inline-start: auto; display: flex; align-items: center; gap: .5rem; }
+#app-update { background: var(--brand-ink); color: var(--brand); border: 0; border-radius: 999px;
+  padding: .1rem .7rem; font-size: .8rem; font-weight: 600; cursor: pointer; }
+#app-update[hidden] { display: none; }
 main { max-width: 1100px; margin: 0 auto; padding: 1rem 16px 3rem; }
 
 .card {
