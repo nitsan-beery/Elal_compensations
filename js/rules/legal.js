@@ -364,29 +364,36 @@ function restClass(ac, limits) {
   return hit ? hit[1] : null;
 }
 
-/** המגבלות לפי הרכב הצוות: {ft, fdp, seg}, או null כשאין מתקן מנוחה (צוות מוגבר אינו מאריך). */
+/**
+ * המגבלות לפי הרכב הצוות: {ft, fdp, seg, comb}, או null כשאין מתקן מנוחה (צוות מוגבר אינו מאריך).
+ * `comb` – כוננות קצרה ו-FDP אחריה, מתחילת הכוננות (7.2.12): בצוות בודד טבלה B ועוד `rap_fdp_extra_hours`,
+ * ולא יותר מ-`rap_fdp_max_hours`; במוגבר או כפול טבלה C ועוד `rap_fdp_extra_hours` (בעל המוצר, 15/10/2026).
+ */
 function limitsFor(crew, ch, limits) {
   const report = clockOf(ch.fdpStart + ch.acc);
   const red = ch.notAcclimated ? limits.not_acclimated_reduction_minutes ?? 0 : 0;
   const seg = ch.flights.length;
+  const extra = limits.rap_fdp_extra_hours ?? 0;
   if (crew === 'single') {
     const ftRow = tableRow(limits.flight_time_unaugmented, report);
     const fdpRow = tableRow(limits.fdp_unaugmented, report);
-    return { ft: H(ftRow.hours), fdp: H(fdpRow.hours[Math.min(seg, fdpRow.hours.length) - 1]) - red, seg: Infinity };
+    const hours = fdpRow.hours[Math.min(seg, fdpRow.hours.length) - 1];
+    return { ft: H(ftRow.hours), fdp: H(hours) - red, seg: Infinity, comb: Math.min(H(hours + extra), H(limits.rap_fdp_max_hours ?? Infinity)) };
   }
   const pilots = CREW[crew].pilots;
   const cls = restClass(ch.flights[0].ac, limits);
   if (!cls) return null;
   const row = tableRow(limits.fdp_augmented, report);
-  return { ft: H(limits.flight_time_augmented[String(pilots)]), fdp: H(row[`class${cls}`][pilots - 3]) - red, seg: limits.augmented_max_segments ?? Infinity };
+  const hours = row[`class${cls}`][pilots - 3];
+  return { ft: H(limits.flight_time_augmented[String(pilots)]), fdp: H(hours) - red, seg: limits.augmented_max_segments ?? Infinity, comb: H(hours + extra) };
 }
 
 /**
  * האם טיסה שנדחתה עדיין ב-FDP המקורי (בעל המוצר, 06/10/2026; `sameAssignment` ב-js/rules/journal.js):
  * החברה יכולה להעביר לכוננות קצרה מההתייצבות המקורית (7.2.9), והיא אינה ביומן. הכוננות עד
  * `max_rap_hours`, ה-FDP מההתייצבות החדשה עד המגבלה של הרכב הצוות, בלי הארכה (7.2.10), והכוננות
- * וה-FDP יחד עד טבלה B ועוד `rap_fdp_extra_hours`, ולא יותר מ-`rap_fdp_max_hours` (7.2.12), כמו
- * ב-`checkReserve`; בצוות מוגבר או כפול – לפחות המגבלה שלו. כל הזמנים בדקות, בשעון הבסיס.
+ * וה-FDP יחד עד המגבלה המשולבת של אותו הרכב (7.2.12, `comb` ב-`limitsFor`), כמו ב-`checkFdp`.
+ * כל הזמנים בדקות, בשעון הבסיס.
  */
 export function delayFitsFdp(limits, { crew = 'single', ac = null, oldReport, newReport, end, segments }) {
   const ch = { fdpStart: newReport, acc: 0, notAcclimated: false, flights: Array.from({ length: Math.max(segments, 1) }, () => ({ ac })) };
@@ -395,9 +402,7 @@ export function delayFitsFdp(limits, { crew = 'single', ac = null, oldReport, ne
   const rap = newReport - oldReport;
   if (rap <= 0) return true;
   if (rap > H(limits.max_rap_hours)) return false;
-  const row = tableRow(limits.fdp_unaugmented, clockOf(newReport));
-  const combined = Math.min(H(row.hours[Math.min(ch.flights.length, row.hours.length) - 1] + limits.rap_fdp_extra_hours), H(limits.rap_fdp_max_hours));
-  return end - oldReport <= Math.max(combined, lim.fdp);
+  return end - oldReport <= lim.comb;
 }
 
 const isDeadhead = (l) => !!(l.dh || l.dhd || l.type === 'DHO' || l.type === 'DHX');
@@ -453,7 +458,10 @@ function checkFdp(ch, id, o, flag, extend, needCrew) {
   const ft = ch.flights.reduce((s, f) => s + f.block, 0);
   const fdp = ch.fdpEnd - ch.fdpStart;
   const seg = ch.flights.length;
-  const fits = (lim) => lim && ft <= lim.ft && fdp <= lim.fdp && seg <= lim.seg;
+  // כוננות קצרה לפני ה-FDP (7.2.12): הכוננות וה-FDP יחד, מתחילת הכוננות, לפי אותו הרכב צוות.
+  const rap = ch.items.find((it) => it.kind === 'rap' && it.start <= ch.fdpStart);
+  const comb = rap ? ch.fdpEnd - rap.start : 0;
+  const fits = (lim) => lim && ft <= lim.ft && fdp <= lim.fdp && seg <= lim.seg && comb <= lim.comb;
   // טיסה לבנה לעולם אינה בצוות בודד, והרכב הצוות שלה נשאל רק בשאלה עליה (בעל המוצר, 06/10/2026): לפי
   // התשובה שם, ובלעדיה ההשוואה למגבלות ההרכב שה-FDP עומד בהן הכי טוב, בלי לשאול (`o.whiteCrew`).
   const white = ch.flights.map((f) => o.whiteCrew?.(f.date, f.flight)).find((w) => w !== undefined);
@@ -473,16 +481,21 @@ function checkFdp(ch, id, o, flag, extend, needCrew) {
     if (ft > l.ft) parts.push([`זמן טיסה ${hm(ft)}`, hm(l.ft)]);
     if (fdp > l.fdp) parts.push([`FDP ${hm(fdp)}`, hm(l.fdp)]);
     if (seg > l.seg) parts.push([`${seg} רגליים`, `${l.seg} רגליים`]);
-    return `${parts.map((p) => p[0]).join(' ו-')}, והמקסימום בצוות ${CREW[crew].label} ${parts.map((p) => p[1]).join(' ו-')}`;
+    if (comb > l.comb) parts.push([`כוננות ו-FDP ${hm(comb)}`, hm(l.comb)]);
+    // ו' החיבור צמודה למילה עברית, ועם מקף לפני מספר או לועזית ("וכוננות ו-FDP").
+    const and = (list) => list.map((s, i) => (!i ? s : /^[א-ת]/.test(s) ? ` ו${s}` : ` ו-${s}`)).join('');
+    return `${and(parts.map((p) => p[0]))}, והמקסימום בצוות ${CREW[crew].label} ${and(parts.map((p) => p[1]))}`;
   };
-  // בביצוע (7.2.10): FDP עד `execution_fdp_extension_hours` מעל המותר, כשזמן הטיסה ומספר הרגליים
-  // בתוך המותר ואין מנוחה קצרה, הוא הארכה (בעל המוצר, 03/10/2026). 0 – עומד, 1 – הארכה, 2 – חריגה.
+  // בביצוע (7.2.10): FDP עד `execution_fdp_extension_hours` מעל המותר, וכך גם הכוננות וה-FDP יחד
+  // (בעל המוצר, 15/10/2026), כשזמן הטיסה ומספר הרגליים בתוך המותר ואין מנוחה קצרה, הוא הארכה
+  // (בעל המוצר, 03/10/2026). 0 – עומד, 1 – הארכה, 2 – חריגה.
   const ext = H(limits.execution_fdp_extension_hours ?? 0);
-  const grade = (l) => (fits(l) ? 0 : o.exec && l && !why && ft <= l.ft && seg <= l.seg && fdp <= l.fdp + ext ? 1 : 2);
+  const grade = (l) => (fits(l) ? 0
+    : o.exec && l && !why && ft <= l.ft && seg <= l.seg && fdp <= l.fdp + ext && comb <= l.comb + ext ? 1 : 2);
   // מה חורג גם בהרכבים האחרים, כדי שלא ייראה שכל מה שחורג בצוות בודד חורג גם בהם (בעל המוצר, 03/10/2026).
   // רק מה שחורג גם בצוות בודד: "גם" מתייחס למה שכבר נכתב.
   const exceeded = (l) => [ft > l.ft && ft > single.ft && 'מזמן הטיסה', fdp > l.fdp && fdp > single.fdp && 'מ-FDP',
-    seg > l.seg && seg > single.seg && 'ממספר הרגליים'].filter(Boolean).join(' ו');
+    seg > l.seg && seg > single.seg && 'ממספר הרגליים', comb > l.comb && comb > single.comb && 'מהכוננות וה-FDP'].filter(Boolean).join(' ו');
   const alsoOver = () => {
     const others = ['augmented', 'double'].filter((c) => lim[c] && exceeded(lim[c]));
     if (!others.length) return '';
@@ -567,7 +580,10 @@ function plannedFdp(ch, id, o) {
 
 // ---------- מנוחה ----------
 
-/** כוננות קצרה (7.2.12): עד `max_rap_hours`, מנוחה חוקית לפניה, ועם FDP אחריה – עד המגבלה המשולבת. */
+/**
+ * כוננות קצרה (7.2.12): עד `max_rap_hours`, ומנוחה חוקית לפניה. הכוננות וה-FDP אחריה – ב-`checkFdp`, לפי
+ * הרכב הצוות (בעל המוצר, 15/10/2026).
+ */
 function checkReserve(chains, limits, inMonth, flag) {
   const restMin = H(limits.rest_hours);
   chains.forEach((ch) => {
@@ -578,11 +594,6 @@ function checkReserve(chains, limits, inMonth, flag) {
       }
       const gap = ch.gaps.find((g) => g.next === it);
       if (gap) flag(it.date, `${describeItem(it)}: מנוחה של ${hm(gap.rest)} בלבד לפני הכוננות, אחרי ${describeItem(gap.prev)}. המינימום ${hm(restMin)}.`);
-      if (ch.fdpEnd != null && ch.fdpStart >= it.start) {
-        const fdpRow = tableRow(limits.fdp_unaugmented, clockOf(ch.fdpStart + ch.acc));
-        const max = Math.min(H(fdpRow.hours[Math.min(ch.flights.length, 7) - 1] + limits.rap_fdp_extra_hours), H(limits.rap_fdp_max_hours));
-        if (ch.fdpEnd - it.start > max) flag(it.date, `${describeItem(it)}: כוננות ו-FDP אחריה ${hm(ch.fdpEnd - it.start)}, מעל ${hm(max)}.`);
-      }
     });
   });
 }
