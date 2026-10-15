@@ -235,8 +235,11 @@ function absence_day_credit(ctx, params, rule) {
       if (pairing) {
         if (onFlightDay.has(pairing)) continue;
         onFlightDay.add(pairing);
+        // מספר הרגל הראשונה ביום בראש ההערה, כמו בשאר ההערות על יום של טיסה (בעל המוצר, 15/10/2026).
+        const leg = (day.exec?.legs ?? []).find((l) => l.flight) ?? pairing.legs?.find((l) => l.flight);
+        const who = leg ? `${leg.flight} ` : '';
         if (ctx.softStart(day.date)) {
-          ctx.note(day.date, 'הופעלת לטיסה מ-Soft Start, ללא פיצוי נוסף.', rule);
+          ctx.note(day.date, `${who}הופעלת מ-Soft Start, ללא פיצוי נוסף.`, rule);
           continue;
         }
         const days = ctx.timeline.filter((d) => pairing.dates.includes(d.date) && matchesCode(d, params, ctx)).length;
@@ -246,7 +249,7 @@ function absence_day_credit(ctx, params, rule) {
           ctx.review(`${describePairing(pairing)}: ${rule.title} ביום שבו הופעלת לסליפ. הקרדיט הוא הגבוה מבין הסליפ ` +
             `(${flown == null ? 'לא ידוע' : minToHhmm(flown)}) לבין ${days} ימים × ${minToHhmm(credit)}. דורש בדיקה ידנית.`, rule);
         } else {
-          ctx.note(day.date, `הופעלת מכוננות לסליפ, וקרדיט הסליפ (${minToHhmm(flown)}) גבוה מערך הכוננות, ולכן אין תוספת.`, rule);
+          ctx.note(day.date, `${who}הופעלת מכוננות, וקרדיט הסליפ (${minToHhmm(flown)}) גבוה מערך הכוננות, ולכן אין תוספת.`, rule);
         }
         continue;
       }
