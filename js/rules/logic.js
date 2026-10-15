@@ -239,7 +239,7 @@ function absence_day_credit(ctx, params, rule) {
         // מספר הרגל הראשונה ביום בראש ההערה, כמו בשאר ההערות על יום של טיסה (בעל המוצר, 15/10/2026).
         const leg = (day.exec?.legs ?? []).find((l) => l.flight) ?? pairing.legs?.find((l) => l.flight);
         const who = leg ? `${leg.flight} ` : '';
-        if (ctx.softStart(day.date)) ctx.note(day.date, `${who}הופעלת מ-Soft Start, ללא פיצוי נוסף.`, rule);
+        if (ctx.softStart(day.date)) ctx.note(day.date, `${who}הופעלת מ-Soft Start. אין פיצוי.`, rule);
         compareStandbyFlown(ctx, pairing, rule);
         continue;
       }
