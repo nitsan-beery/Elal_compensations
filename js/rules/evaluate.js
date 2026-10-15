@@ -163,6 +163,12 @@ function evaluateFiles({ rulesData, plan = null, exec = null, answers = {}, hist
   ctx.crewMatters = (date, flight) => crewMatters.add(`${date}|${flight}`);
   // האם היומן מכיר את הטיסה: null כשאין ביומן טיסות.
   ctx.inCalendar = (date, flight) => (calendar?.flights?.length ? cal.has(date, flight) : null);
+  // Soft Start (2018 ס' 91): הימים שבהם הופעלת לטיסה מהכן מיידי שהוצב בגלל דחיית ההמראה – לזיכוי הכוננות
+  // (`absence_day_credit`) ולמגבלות החוק (בעל המוצר, 15/10/2026).
+  const softStart = exec ? softStartDays({ timeline, execPairings, planPairings, codes, answer: ctx.answer, domicile,
+    snapshots: (calendarHistory?.length ? calendarHistory : calendar ? [calendar] : []).map(withoutKept),
+    isRap: (c) => (rulesData.legal_limits?.short_call_reserve_codes ?? []).some((x) => c === x || c === x.slice(0, 5)) }) : new Set();
+  ctx.softStart = (date) => softStart.has(date);
 
   // מגבלות החוק על התכנון (בעל המוצר, 03/10/2026). לפני החוקים, כדי ששאלת הרכב הצוות שלהן
   // תשמש גם את נחיתות הלילה.
@@ -194,7 +200,7 @@ function evaluateFiles({ rulesData, plan = null, exec = null, answers = {}, hist
     };
     // מול היומן: לפי הזמנים שביומן, כמו בתכנון – בלי "הארכה בביצוע" ובלי שאלות על הרכב הצוות.
     const legal = checkLegalLimits({ ...common, ...(calendarRun ? { plan: calendarRun.plan, exec: null } : { exec }),
-      answer: ctx.answer, ask: ctx.ask, crewMatters: ctx.crewMatters, whiteCrew: whiteCrewOf });
+      answer: ctx.answer, ask: ctx.ask, crewMatters: ctx.crewMatters, whiteCrew: whiteCrewOf, softStart });
     out.legal = legal.result;
     crewIdOf = legal.crewIdOf;
     out.crewIdOf = Object.fromEntries(crewIdOf);
@@ -315,6 +321,48 @@ function evaluateFiles({ rulesData, plan = null, exec = null, answers = {}, hist
     ? [...monthKeys].filter((k) => k.startsWith(month) && read(k) && matters(k) && !cal.has(k.slice(0, 10), k.slice(11))).sort()
       .map((k) => ({ date: k.slice(0, 10), flight: k.slice(11) }))
     : [];
+  return out;
+}
+
+/**
+ * Soft Start (2018 ס' 91; OMA 7.2.9; בעל המוצר, 15/10/2026): מי שקיבל הודעה על דחיית ההמראה, לפני האיסוף
+ * או אחריו ולפני ההתייצבות, עובר להכן מיידי ומופעל משם לטיסה, ואין עליו קרדיט כוננות (91.4). ברומה: SBY_S
+ * ביום שבתכנון אין בו כוננות מאף סוג, והרגל הראשונה ביום היא טיסה שהוצבה לפני הכוננות. כוננות שהוצבה
+ * קודם והופעלה לטיסה היא הפעלה מכוננות. מה הוצב קודם:
+ * 1. יומן השינויים: התמונה הראשונה שמופיעות בה ביום הזה הטיסה או כוננות – כשרק אחת מהן, היא קודמת.
+ *    כוננות קודם – הפעלה מכוננות, גם כשהטיסה בתכנון (מחלה ביום הראשון של סבב, וכוננות ביום השני).
+ * 2. הטיסה בתכנון המקורי באותו יום.
+ * 3. סידרת אותה בעצמך: זכייה במכרז או החלפה מרצוני על הסבב המתוכנן, עם קישור אליה, או הוספה בהסכמה או
+ *    החלפה מרצוני עליה. שינוי ביוזמת החברה אינו מראה מה קודם – ביטול, הצבה לכוננות והפעלה ממנה נראים
+ *    ברומה אותו דבר, והסכום זהה – ולכן הוא הפעלה מכוננות.
+ * אין תנאי על האיחור: גם המראה בזמן היא Soft Start. מחזירה את התאריכים.
+ */
+function softStartDays({ timeline, execPairings, planPairings, codes, answer, domicile, snapshots, isRap }) {
+  const out = new Set();
+  const on = (iso, date) => baseTime(iso, domicile)?.date === date;
+  const journalFirst = (date, flight) => {
+    for (const s of snapshots) {
+      const f = (s.flights ?? []).some((x) => x.flight === flight && on(x.std, date));
+      const sby = (s.standby ?? []).some((x) => on(x.start, date));
+      if (f || sby) return f && sby ? null : f ? 'flight' : 'standby';
+    }
+    return null;
+  };
+  const own = (pairing) => ['added', 'voluntary_swap'].includes(answer(`unplanned:${pairing.id}`)?.value) ||
+    planPairings.some((p) => {
+      const a = answer(`cancelled:${p.id}`);
+      return ['bid', 'voluntary_swap'].includes(a?.value) && a.link === pairing.id;
+    });
+  for (const day of timeline) {
+    const leg = day.exec?.legs?.[0];
+    if (leg?.type !== 'LEG' || !leg.flight || !execCodesOf(day, codes).some(isRap)) continue;
+    if ((day.plan?.codes ?? []).some((c) => c.startsWith('SBY'))) continue;
+    const first = journalFirst(day.date, leg.flight);
+    const pairing = execPairings.find((p) => p.dates.includes(day.date));
+    if (first ? first === 'flight' : (day.plan?.legs ?? []).some((l) => !l.dh && l.flight === leg.flight) || (pairing && own(pairing))) {
+      out.add(day.date);
+    }
+  }
   return out;
 }
 

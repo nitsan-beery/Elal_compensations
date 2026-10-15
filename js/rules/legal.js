@@ -77,7 +77,7 @@ export function checkLegalLimits(o) {
     return { result, crewIdOf, fdps };
   }
 
-  const own = o.exec ? execDuties(o.exec, o, plannedCodes(o.plan, o)) : planDuties(o.plan, o);
+  const own = o.exec ? execDuties(o.exec, o, plannedCodes(o.plan, o), o.softStart) : planDuties(o.plan, o);
   // החודשים הקודמים: לפי הרומה, כי המגבלות חלות על מה שבוצע בפועל; בלי רומה – לפי התכנון.
   // רק חודשים רצופים לאחור נחשבים כיסוי.
   let coverStart = monthStart;
@@ -180,12 +180,14 @@ function planDuties(plan, o) {
  * תפקידים מרומת ביצוע: הזמנים בפועל (ATD ו-ActDur), ובלעדיהם המתוכננים. השעות מקומיות, והרגל
  * רשומה ביום ההמראה בשעון הבסיס. לפעילות קרקע ולכוננות אין שעות ברומה: הן מהתכנון (`planned`),
  * כשאותו קוד מתוכנן באותו יום; בלעדיו – פעילות קרקע בשעות ברירת המחדל, וכוננות אינה נבדקת ואינה מוזכרת,
- * חוץ מעיכוב לפני FDP (7.2.9): כוננות קצרה שאינה בתכנון ביום של טיסה מתוכננת שהמריאה באיחור. החברה
- * העבירה לכוננות בשעת ההתייצבות המקורית, ובמקום FDP מתחיל בה RAP; ה-FDP מתחיל בהתייצבות החדשה, שאינה
- * בקבצים, ולכן לפי ההמראה בפועל (בעל המוצר, 03/10/2026; 21/08/2026 LY223 ל-NCE).
+ * חוץ מעיכוב לפני FDP (7.2.9): כוננות קצרה שאינה בתכנון ביום של טיסה מתוכננת, או ביום של Soft Start
+ * (2018 ס' 91; `softStart`, `softStartDays` ב-js/rules/evaluate.js), שבו הטיסה המריאה באיחור. החברה העבירה
+ * לכוננות בשעת ההתייצבות המקורית, ובמקום FDP מתחיל בה RAP; ה-FDP מתחיל בהתייצבות החדשה, שאינה בקבצים,
+ * ולכן לפי ההמראה בפועל (בעל המוצר, 03/10/2026; 21/08/2026 LY223 ל-NCE). כך גם בהפעלה מכוננות לטיסה
+ * מתוכננת שהמריאה באיחור: ה-FDP מתחיל בהתייצבות החדשה (בעל המוצר, 15/10/2026).
  * כוננות שאינה בתכנון ורשומה ביומן (`calendarStandby`) – בשעות שביומן, גם בעיכוב לפני FDP.
  */
-function execDuties(exec, o, planned = null) {
+function execDuties(exec, o, planned = null, softStart = null) {
   const { limits, domicile, offsetAt, classify } = o;
   const out = [];
   const days = Object.values(exec.days).sort((a, b) => a.date.localeCompare(b.date));
@@ -210,7 +212,8 @@ function execDuties(exec, o, planned = null) {
       return s ? { kind: reserveKind(code, limits), date: day.date, code, station: domicile, start: s.start, end: s.end } : null;
     };
     let delayed = null;
-    if (rap && first?.kind === 'flight' && first.std > first.skd && planned?.has(`${day.date}|F|${first.flight}`)) {
+    const delayable = softStart?.has(day.date) || planned?.has(`${day.date}|F|${first?.flight}`);
+    if (rap && first?.kind === 'flight' && first.std > first.skd && delayable) {
       for (const l of legs) l.delayedReport = true;
       out.push(fromCalendar(rap) ?? { kind: 'rap', date: day.date, code: rap, station: first.org, reserveFor: first });
       delayed = rap;

@@ -213,8 +213,9 @@ function expectMinSlip(ctx, group, min, params, rule) {
  * זיכוי יומי לפי קוד: חופשה, מחלה, אימון קרקע, סימולטור וכוננות.
  * כמה חוקים שונים משתמשים בלוגיקה הזאת, כל אחד עם קודים וערכים משלו.
  *
- * `flight_day_takes_higher`: יום שבו הופעל לסליפ (כוננות, 03/06/2026) מזוכה לפי הגבוה מבין
- * קרדיט הסליפ לבין ערך ימי הקוד שבו. כשהסליפ גבוה – הקרדיט שלו כבר צפוי ואין תוספת.
+ * `flight_day_takes_higher`: יום שבו הופעל מכוננות לסליפ מזוכה לפי הגבוה מבין קרדיט הסליפ (כולל ההשלמה
+ * ל-5 שעות) לבין ערך ימי הקוד שבו. כשהסליפ גבוה – הקרדיט שלו כבר צפוי ואין תוספת. ביום של Soft Start
+ * (2018 ס' 91; `ctx.softStart`) אין קרדיט כוננות (91.4), ולכן רק הערה (בעל המוצר, 15/10/2026).
  */
 function absence_day_credit(ctx, params, rule) {
   const credit = H(params.credit_hours);
@@ -234,13 +235,18 @@ function absence_day_credit(ctx, params, rule) {
       if (pairing) {
         if (onFlightDay.has(pairing)) continue;
         onFlightDay.add(pairing);
+        if (ctx.softStart(day.date)) {
+          ctx.note(day.date, 'הופעלת לטיסה מ-Soft Start, ללא פיצוי נוסף.', rule);
+          continue;
+        }
         const days = ctx.timeline.filter((d) => pairing.dates.includes(d.date) && matchesCode(d, params, ctx)).length;
-        const flown = sumLegs(pairing, ctx.domicile);
+        const legs = sumLegs(pairing, ctx.domicile);
+        const flown = legs == null ? null : legs + minSlipTopUp(ctx, pairing);
         if (flown == null || flown < credit * days) {
           ctx.review(`${describePairing(pairing)}: ${rule.title} ביום שבו הופעלת לסליפ. הקרדיט הוא הגבוה מבין הסליפ ` +
             `(${flown == null ? 'לא ידוע' : minToHhmm(flown)}) לבין ${days} ימים × ${minToHhmm(credit)}. דורש בדיקה ידנית.`, rule);
         } else {
-          ctx.note(day.date, `${rule.title}: הופעלת לסליפ, וקרדיט הסליפ (${minToHhmm(flown)}) גבוה מערך הכוננות, ולכן אין תוספת.`, rule);
+          ctx.note(day.date, `הופעלת מכוננות לסליפ, וקרדיט הסליפ (${minToHhmm(flown)}) גבוה מערך הכוננות, ולכן אין תוספת.`, rule);
         }
         continue;
       }
