@@ -12,7 +12,7 @@ import * as store from './store.js';
 import * as calendar from './calendar.js';
 
 // מספר הגרסה של הקוד שרץ בדף. עולה יחד עם CACHE ב-sw.js, לאותו מספר (בעל המוצר, 15/10/2026).
-const APP_VERSION = 234;
+const APP_VERSION = 235;
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -111,7 +111,13 @@ async function init() {
 
 function registerServiceWorker() {
   if (!('serviceWorker' in navigator) || location.protocol === 'file:') return;
-  navigator.serviceWorker.register('sw.js').catch(() => { /* האפליקציה עובדת גם בלי */ });
+  navigator.serviceWorker.register('sw.js').then((registration) => {
+    // הדפדפן בודק אם יש גרסה חדשה רק כשהדף נטען. בדף שנשאר פתוח: בכל חזרה אליו ופעם בשעה, כשיש רשת.
+    // גרסה חדשה מותקנת ברקע, ו-`controllerchange` מציג את הכפתור (בעל המוצר, 15/10/2026).
+    const check = () => { if (navigator.onLine) registration.update().catch(() => {}); };
+    document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') check(); });
+    setInterval(check, 60 * 60 * 1000);
+  }).catch(() => { /* האפליקציה עובדת גם בלי */ });
   showVersion();
   navigator.serviceWorker.addEventListener('controllerchange', showVersion);
   $('#app-update').addEventListener('click', () => location.reload());
