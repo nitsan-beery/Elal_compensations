@@ -1090,7 +1090,7 @@ function special_date_activity(ctx, params, rule) {
     if (wTo <= monthStart || wFrom >= monthEnd) { askDate?.(); continue; }
     const window = `${ddmm(dateOf(wFrom))} ${hhmm(wFrom)} – ${ddmm(dateOf(wTo))} ${hhmm(wTo)}`;
     // ההסבר שמוצג מתחת לטיסה, קצר: שהייתה פעילות מטעם החברה בשעות האלה, בלי הסכום (בעל המוצר,
-    // 01/10/2026). שם האירוע בראשו רק כשהוא אינו שם החוק, שמוצג ליד (ערב יום הזיכרון).
+    // 01/10/2026). שם האירוע בראשו רק כשהוא אינו שם החוק, שמוצג ליד (יום הזיכרון).
     const span = dateOf(wFrom) === dateOf(wTo - 1) ? `בין ${hhmm(wFrom)} ל-${hhmm(wTo)}` : `בחלון ${window}`;
     const explain = `${occ.title === rule.title ? '' : `${occ.title}: `}${ctx.hasExec ? 'בוצעה' : 'מתוכננת'} פעילות מטעם החברה ${span}.`;
 
