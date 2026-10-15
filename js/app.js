@@ -12,7 +12,7 @@ import * as store from './store.js';
 import * as calendar from './calendar.js';
 
 // מספר הגרסה של הקוד שרץ בדף. עולה יחד עם CACHE ב-sw.js, לאותו מספר (בעל המוצר, 15/10/2026).
-const APP_VERSION = 236;
+const APP_VERSION = 237;
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -205,8 +205,8 @@ const PARSERS = { plan: parsePlan, exec: parseExec };
 // גרסת הקריאה של קובצי ה-PDF. הנתונים שחולצו נשמרים בחודש, ולכן שינוי בקריאה (עמודה שנוספה, קוד שמתווסף
 // לעמודה אחרת) מעלה אותה, וחודש שנשמר בגרסה קודמת נקרא מחדש מהקבצים השמורים כשהוא נפתח (בעל המוצר,
 // 08/10/2026: HHM ב-COM של היום, ספטמבר 2026 של רון).
-// 2: מספר העובד בתכנון (בעל המוצר, 08/10/2026).
-const PARSE_VERSION = 4;
+// 2: מספר העובד בתכנון (בעל המוצר, 08/10/2026). 5: Pay Queries ברומה מדולגת (15/10/2026).
+const PARSE_VERSION = 5;
 
 async function reparseStale(record) {
   if (record.parseVersion === PARSE_VERSION) return;
