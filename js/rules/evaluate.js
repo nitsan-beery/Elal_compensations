@@ -165,9 +165,9 @@ function evaluateFiles({ rulesData, plan = null, exec = null, answers = {}, hist
   ctx.inCalendar = (date, flight) => (calendar?.flights?.length ? cal.has(date, flight) : null);
   // Soft Start (2018 ס' 91): הימים שבהם הופעלת לטיסה מהכן מיידי שהוצב בגלל דחיית ההמראה – לזיכוי הכוננות
   // (`absence_day_credit`) ולמגבלות החוק (בעל המוצר, 15/10/2026).
+  const isRap = (c) => (rulesData.legal_limits?.short_call_reserve_codes ?? []).some((x) => c === x || c === x.slice(0, 5));
   const softStart = exec ? softStartDays({ timeline, execPairings, planPairings, codes, answer: ctx.answer, domicile,
-    snapshots: (calendarHistory?.length ? calendarHistory : calendar ? [calendar] : []).map(withoutKept),
-    isRap: (c) => (rulesData.legal_limits?.short_call_reserve_codes ?? []).some((x) => c === x || c === x.slice(0, 5)) }) : new Set();
+    snapshots: (calendarHistory?.length ? calendarHistory : calendar ? [calendar] : []).map(withoutKept), isRap }) : new Set();
   ctx.softStart = (date) => softStart.has(date);
 
   // מגבלות החוק על התכנון (בעל המוצר, 03/10/2026). לפני החוקים, כדי ששאלת הרכב הצוות שלהן
@@ -277,7 +277,7 @@ function evaluateFiles({ rulesData, plan = null, exec = null, answers = {}, hist
   if (mode === 'full') addedNotes(out, answers);
   explainCompensations(out);
   if (exec) {
-    out.comparison = compare({ out, timeline, execPairings, tz, codes, fdp });
+    out.comparison = compare({ out, timeline, execPairings, tz, codes, fdp, hideCode: (d, c) => softStart.has(d) && isRap(c) });
     explainUnexplained(out, timeline, cal, execPairings.filter((p) => ctx.pairingHandledBy(p, 'diversion_assumed')));
     out.totals = compareTotals(out, exec);
     warnMissingColumns(out, exec);
@@ -1802,7 +1802,7 @@ function reportedValue(day, column) {
   return v[column]?.min ?? 0;
 }
 
-function compare({ out, timeline, execPairings, tz, codes: catalog, fdp }) {
+function compare({ out, timeline, execPairings, tz, codes: catalog, fdp, hideCode = () => false }) {
   // קבוצות ימים: סבב וימי הפיצול שלו מתאחדים; ימים שחולקים סבב מתאחדים גם הם.
   const parent = new Map(timeline.map((d) => [d.date, d.date]));
   const find = (x) => (parent.get(x) === x ? x : (parent.set(x, find(parent.get(x))), parent.get(x)));
@@ -1855,7 +1855,8 @@ function compare({ out, timeline, execPairings, tz, codes: catalog, fdp }) {
     const lines = parts.length === 1
       ? [[range(dates), describeRoute(parts[0].part)]]
       : parts.map(({ part, days }) => [range(days), describeRoute(part)]);
-    const codes = (dayCodes ?? dates.flatMap((d) => execCodesOf(dayOf(timeline, d), catalog))).join(' ');
+    // ביום של Soft Start קוד הכוננות אינו בשורת הטיסה: ההערה כבר אומרת זאת (`hideCode`; בעל המוצר, 15/10/2026).
+    const codes = (dayCodes ?? dates.flatMap((d) => execCodesOf(dayOf(timeline, d), catalog).filter((c) => !hideCode(d, c)))).join(' ');
     // בלי סבב שבוצע: הטיסה שתוכננה, כשציפייה עליה נושאת אותה (`plannedRoute`, הורדה מהטיסה).
     const planned = [...new Set(expectations.filter((e) => e.plannedRoute && dates.includes(e.dates[0])).map((e) => e.plannedRoute))];
     if (!lines.length) lines.push([range(dates), planned.join(', ')]);
@@ -1915,7 +1916,7 @@ function compare({ out, timeline, execPairings, tz, codes: catalog, fdp }) {
     // קודי היום של כל שורה: פעילות היום בשורה שלה, ושאר הקודים בשורות הסבבים.
     const split = new Set([...activities.values()].map((a) => a.id));
     const codesOf = (ps, own) => (ps.every((p) => p.activity) ? ps.map((p) => p.code)
-      : own.flatMap((d) => execCodesOf(dayOf(timeline, d), catalog).filter((c) => !split.has(`${c}@${d}`))));
+      : own.flatMap((d) => execCodesOf(dayOf(timeline, d), catalog).filter((c) => !split.has(`${c}@${d}`) && !hideCode(d, c))));
     return [...units].map(([key, ps]) => {
       const own = dates.filter((d) => ps.some((p) => occupants(d).includes(p)));
       // שורה משותפת כוללת רק את הציפיות המשותפות; ימים שאינם משותפים שייכים לשורה של כל סבב.
