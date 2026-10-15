@@ -214,8 +214,8 @@ function expectMinSlip(ctx, group, min, params, rule) {
  * כמה חוקים שונים משתמשים בלוגיקה הזאת, כל אחד עם קודים וערכים משלו.
  *
  * `flight_day_takes_higher`: יום שבו הופעל מכוננות לסליפ מזוכה לפי הגבוה מבין קרדיט הסליפ (כולל ההשלמה
- * ל-5 שעות) לבין ערך ימי הקוד שבו. כשהסליפ גבוה – הקרדיט שלו כבר צפוי ואין תוספת. ביום של Soft Start
- * (2018 ס' 91; `ctx.softStart`) אין קרדיט כוננות (91.4), ולכן רק הערה (בעל המוצר, 15/10/2026).
+ * ל-5 שעות) לבין ערך כל ימי הכוננות שבו (`compareStandbyFlown`). ביום של Soft Start (2018 ס' 91;
+ * `ctx.softStart`) אין קרדיט כוננות (91.4), ולכן רק הערה (בעל המוצר, 15/10/2026).
  */
 function absence_day_credit(ctx, params, rule) {
   const credit = H(params.credit_hours);
@@ -231,26 +231,16 @@ function absence_day_credit(ctx, params, rule) {
   for (const day of ctx.timeline) {
     if (!matchesCode(day, params, ctx)) continue;
     if (params.flight_day_takes_higher) {
-      const pairing = ctx.execPairings.find((p) => p.dates.includes(day.date));
+      // כל ימי הסבב, גם יום שהייה שאין בו רגל (`standbyDaysFlown`).
+      const pairing = ctx.execPairings.find((p) => p.from <= day.date && day.date <= p.to);
       if (pairing) {
         if (onFlightDay.has(pairing)) continue;
         onFlightDay.add(pairing);
         // מספר הרגל הראשונה ביום בראש ההערה, כמו בשאר ההערות על יום של טיסה (בעל המוצר, 15/10/2026).
         const leg = (day.exec?.legs ?? []).find((l) => l.flight) ?? pairing.legs?.find((l) => l.flight);
         const who = leg ? `${leg.flight} ` : '';
-        if (ctx.softStart(day.date)) {
-          ctx.note(day.date, `${who}הופעלת מ-Soft Start, ללא פיצוי נוסף.`, rule);
-          continue;
-        }
-        const days = ctx.timeline.filter((d) => pairing.dates.includes(d.date) && matchesCode(d, params, ctx)).length;
-        const legs = sumLegs(pairing, ctx.domicile);
-        const flown = legs == null ? null : legs + minSlipTopUp(ctx, pairing);
-        if (flown == null || flown < credit * days) {
-          ctx.review(`${describePairing(pairing)}: ${rule.title} ביום שבו הופעלת לסליפ. הקרדיט הוא הגבוה מבין הסליפ ` +
-            `(${flown == null ? 'לא ידוע' : minToHhmm(flown)}) לבין ${days} ימים × ${minToHhmm(credit)}. דורש בדיקה ידנית.`, rule);
-        } else {
-          ctx.note(day.date, `${who}הופעלת מכוננות, וקרדיט הסליפ (${minToHhmm(flown)}) גבוה מערך הכוננות, ולכן אין תוספת.`, rule);
-        }
+        if (ctx.softStart(day.date)) ctx.note(day.date, `${who}הופעלת מ-Soft Start, ללא פיצוי נוסף.`, rule);
+        compareStandbyFlown(ctx, pairing, rule);
         continue;
       }
     }
@@ -1853,10 +1843,8 @@ function standbyRuns(ctx, params) {
  * האחרונים של הרצף הם של חוק סיום הכוננות למכרז, ומגיעים לכאן רק אחרי התשובה "הפעלת הכוננות".
  *
  * - הקרדיט על ימי הכוננות שבהם טס: הגבוה מבין קרדיט הטיסה, כולל ההשלמה לסליפ קצר (`minSlipTopUp`), לבין
- *   ערך ימי הכוננות האלה (2018 ס' 98.1–98.3, 98.5). כשהכוננות גבוהה – ההפרש ב-Rig (סבב של יומיים ומעלה; ביום
- *   אחד הטיסה תמיד גבוהה; בעל המוצר, 10/10/2026; העמודה לא אומתה מול הרומה). ערך יום הכוננות לפי חוק זיכוי
- *   היום של הקוד (הקוד בדוח הוא 5 התווים הראשונים של הקוד בתכנון). כשקוד הכוננות רשום גם בדוח ביום הטיסה,
- *   חוק זיכוי היום כבר בודק את זה.
+ *   סכום הערכים של ימי הכוננות האלה, כל יום לפי הקוד שלו (2018 ס' 98.1–98.3, 98.5; `compareStandbyFlown`).
+ *   כשהכוננות גבוהה – ההפרש ב-Rig (סבב של יומיים ומעלה; ביום אחד הטיסה תמיד גבוהה; בעל המוצר, 10/10/2026).
  * - החזרה אחרי סוף הכוננות: החברה רשאית להפעיל רק כשהחזרה מתוכננת בתוך הכוננות (2018 ס' 88), ולכן הימים
  *   שאחריה הם בהסכמה, ועל כל יום מהם שלא תוכנן בו כלום מגיעה קריאה מיוחדת, בלי הסף של היממה השנייה (בעל
  *   המוצר, 10/10/2026). ימי הכוננות עצמם – הפעלה, כמו בכל סבב.
@@ -1868,15 +1856,11 @@ function standby_activation(ctx, params, rule) {
   const pending = ['standby_bid', 'standby_bid_pending'];
   for (const run of standbyRuns(ctx, params)) {
     const range = run.length === 1 ? dayOf(run[0]) : `⁦${dayOf(run[0])}–${dayOf(run.at(-1))}⁩`;
-    const planCode = ctx.timeline.find((d) => d.date === run[0]).plan.codes.find((c) => codeIn(c, params.plan_codes, params.plan_code_prefixes));
-    const value = standbyDayRule(ctx, planCode);
-
     for (const match of ctx.matches) {
       if (match.how !== 'unplanned' || !run.includes(match.exec.from)) continue;
       const pairing = match.exec;
       if (pending.some((t) => ctx.pairingHandledBy(pairing, t))) continue;
       ctx.markPairing(pairing, 'standby_activated');
-      const flown = run.filter((d) => pairing.from <= d && d <= pairing.to);
       const after = daysAfterStandby(ctx, pairing, run);
       ctx.note(pairing.from, `הפעלה מהכוננות (${range}): קרדיט הטיסה${after.length
         ? `, וקריאה מיוחדת על ${after.length === 1 ? 'היום' : 'הימים'} שאחרי הכוננות` : ', בלי קריאה מיוחדת'}.`, rule, { pairingId: pairing.id });
@@ -1888,27 +1872,70 @@ function standby_activation(ctx, params, rule) {
           { date: d, dates: [d], perDay: true, explain: 'הסבב נמשך אחרי סוף הכוננות.' });
       }
 
-      // הכוננות רשומה בדוח בימי הטיסה: חוק זיכוי היום כבר משווה בין הטיסה לכוננות.
-      if (value && flown.some((d) => ctx.execCodes(ctx.timeline.find((x) => x.date === d)).some((c) => codeIn(c, value.rule.logic.params.report_codes, value.rule.logic.params.report_code_prefixes)))) continue;
-      const legs = sumLegs(pairing, ctx.domicile);
-      const credit = legs == null ? null : legs + minSlipTopUp(ctx, pairing);
-      const what = `${flown.length === 1 ? 'יום הכוננות שבו' : `${flown.length} ימי הכוננות שבהם`} טסת (${flown.map(dayOf).join(', ')})`;
-      if (!value) {
-        ctx.review(`${describePairing(pairing)}: על ${what} מגיע הגבוה מבין קרדיט הטיסה לבין ערך ימי הכוננות (2018 ס' 98). ` +
-          `אין חוק שקובע את ערך הכוננות לקוד ${planCode}. דורש בדיקה ידנית.`, rule);
-      } else if (credit == null) {
-        ctx.review(`${describePairing(pairing)}: על ${what} מגיע הגבוה מבין קרדיט הטיסה לבין ${flown.length} × ${minToHhmm(value.min)} ` +
-          `(${value.rule.title}; 2018 ס' 98), וקרדיט הטיסה אינו ידוע. דורש בדיקה ידנית.`, rule);
-      } else if (credit < value.min * flown.length) {
-        // הכוננות גבוהה (סבב של יומיים ומעלה): ההפרש מעבר לקרדיט ולהשלמה לסליפ קצר, ב-Rig (בעל המוצר, 10/10/2026).
-        const n = flown.length;
-        ctx.expectPairing(pairing, 'rig', value.min * n - credit, rule,
-          `${describePairing(pairing)}: ${n} × ${minToHhmm(value.min)} על ${what}, גבוה מקרדיט הטיסה ${minToHhmm(credit)}`,
-          { explain: `ערך ${n === 1 ? 'יום הכוננות' : `${n} ימי הכוננות`} שבהם טסת גבוה מקרדיט הסבב.` });
-      } else {
-        ctx.note(pairing.from, 'הפעלה מהכוננות: קרדיט הטיסה גבוה מערך הכוננות, ולכן אין תוספת.', rule, { pairingId: pairing.id });
-      }
+      compareStandbyFlown(ctx, pairing, rule);
     }
+  }
+}
+
+/**
+ * ימי הכוננות שבהם טס בסבב, וערך כל אחד (2018 ס' 98.1–98.3): לפי קוד הכוננות שברומה – מי שעבר ביממה ממצב
+ * הכן רגיל למיידי משולם עליה כמיידי (98.5) – ובלעדיו לפי הקוד שבתכנון. יום של Soft Start אינו יום כוננות
+ * (91.4). כל ימי הסבב, מההמראה עד הנחיתה, גם יום שהייה שאין בו רגל. רק קודים של חוקי זיכוי יומי עם
+ * `flight_day_takes_higher`. [{date, code, value}], ו-value ריק
+ * כשאין חוק לקוד שבתכנון.
+ */
+function standbyDaysFlown(ctx, pairing) {
+  const valueOf = (code) => {
+    const v = standbyDayRule(ctx, code);
+    return v?.rule.logic.params?.flight_day_takes_higher ? v : null;
+  };
+  const out = [];
+  for (const day of ctx.timeline) {
+    if (day.date < pairing.from || day.date > pairing.to || ctx.softStart(day.date)) continue;
+    const reported = ctx.execCodes(day).find(valueOf);
+    const planned = (day.plan?.codes ?? []).find((c) => c.startsWith('SBY'));
+    const code = reported ?? planned;
+    if (code) out.push({ date: day.date, code, value: valueOf(code) });
+  }
+  return out;
+}
+
+/**
+ * הפעלה מכוננות לסליפ (2018 ס' 98.1–98.3, 98.5): הגבוה מבין קרדיט הסליפ (כולל ההשלמה לסליפ קצר) לבין סכום
+ * הערכים של ימי הכוננות שבהם טס (`standbyDaysFlown`). פעם אחת לסבב, בין שהכוננות רשומה ברומה ביום הטיסה
+ * (`absence_day_credit`) ובין שרק בתכנון (`standby_activation`). הכוננות גבוהה – ההפרש ב-Rig (בעל המוצר,
+ * 10/10/2026; כל יום לפי הקוד שלו – 15/10/2026; העמודה לא אומתה מול הרומה).
+ */
+function compareStandbyFlown(ctx, pairing, rule) {
+  if (ctx.pairingHandledBy(pairing, 'standby_compared')) return;
+  ctx.markPairing(pairing, 'standby_compared');
+  const days = standbyDaysFlown(ctx, pairing);
+  if (!days.length) return;
+  const legs = sumLegs(pairing, ctx.domicile);
+  const credit = legs == null ? null : legs + minSlipTopUp(ctx, pairing);
+  const n = days.length;
+  const what = `${n === 1 ? 'יום הכוננות שבו' : `${n} ימי הכוננות שבהם`} טסת (${days.map((d) => dayOf(d.date)).join(', ')})`;
+  const unknown = days.find((d) => !d.value);
+  if (unknown) {
+    ctx.review(`${describePairing(pairing)}: על ${what} מגיע הגבוה מבין קרדיט הטיסה לבין ערך ימי הכוננות (2018 ס' 98). ` +
+      `אין חוק שקובע את ערך הכוננות לקוד ${unknown.code}. דורש בדיקה ידנית.`, rule);
+    return;
+  }
+  const value = days.reduce((s, d) => s + d.value.min, 0);
+  const parts = days.map((d) => `${dayOf(d.date)} ${d.code} ${minToHhmm(d.value.min)}`).join(', ');
+  if (credit == null) {
+    ctx.review(`${describePairing(pairing)}: על ${what} מגיע הגבוה מבין קרדיט הטיסה לבין ${minToHhmm(value)} (${parts}; 2018 ס' 98), ` +
+      'וקרדיט הטיסה אינו ידוע. דורש בדיקה ידנית.', rule);
+  } else if (credit < value) {
+    ctx.expectPairing(pairing, 'rig', value - credit, rule,
+      `${describePairing(pairing)}: ${parts} על ${what}, יחד ${minToHhmm(value)}, גבוה מקרדיט הטיסה ${minToHhmm(credit)}`,
+      { explain: `ערך ${n === 1 ? 'יום הכוננות' : `${n} ימי הכוננות`} שבהם טסת גבוה מקרדיט הסבב.` });
+  } else {
+    // מספר הרגל הראשונה ביום בראש ההערה, כמו בשאר ההערות על יום של טיסה (בעל המוצר, 15/10/2026).
+    const day = ctx.timeline.find((d) => d.date === days[0].date);
+    const leg = (day?.exec?.legs ?? []).find((l) => l.flight) ?? pairing.legs?.find((l) => l.flight);
+    ctx.note(days[0].date, `${leg ? `${leg.flight} ` : ''}הופעלת מכוננות, וקרדיט הסליפ (${minToHhmm(credit)}) גבוה מערך הכוננות, ולכן אין תוספת.`,
+      rule, { pairingId: pairing.id });
   }
 }
 
