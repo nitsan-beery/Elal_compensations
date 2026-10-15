@@ -12,7 +12,7 @@ import * as store from './store.js';
 import * as calendar from './calendar.js';
 
 // מספר הגרסה של הקוד שרץ בדף. עולה יחד עם CACHE ב-sw.js, לאותו מספר (בעל המוצר, 15/10/2026).
-const APP_VERSION = 235;
+const APP_VERSION = 236;
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -50,6 +50,7 @@ const ANSWER_LABEL = {
   yes: 'כן', no: 'לא',
   company: 'לבקשת החברה', own: 'ויתור מרצון',
   standby_bid: 'סיום כוננות בגלל זכייה במכרז', standby_activated: 'הפעלת הכוננות', regular_standby: 'מצב הכן רגיל',
+  standby_held: 'הכוננות התקיימה', standby_cancelled_mine: 'ביקשתי לבטל את הכוננות',
   single: 'צוות בודד (2 טייסים)', augmented: 'צוות מוגבר (3 טייסים)', double: 'צוות כפול (4 טייסים)',
 };
 

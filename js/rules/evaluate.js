@@ -932,6 +932,11 @@ function makeContext({ out, timeline, domicile, codes, holidays, answers, plan, 
       if (!absenceBy.has(date)) absenceBy.set(date, new Set());
       absenceBy.get(date).add(ruleId);
     },
+    /** שינוי שאינו סבב (יום כוננות שאינו ברומה, `standbyMissing`), עם מה שמתחתיו, במקום שלו לפי התאריך. */
+    addChange(row) {
+      const i = out.changes.findIndex((c) => c.date > row.date);
+      out.changes.splice(i < 0 ? out.changes.length : i, 0, row);
+    },
     isAbsenceBy: (date, ruleId) => absenceBy.get(date)?.has(ruleId) ?? false,
     execCodes: (day) => execCodesOf(day, codes),
     /** ימים ללא פעילות בתכנון מול המינימום בהסכם, לסיכום החודשי. */
@@ -1415,7 +1420,8 @@ function explainChanges(out, supported, moved = new Set()) {
   const logicOf = new Map(supported.map((r) => [r.id, r.logic.id]));
   const rangeOf = (id) => String(id ?? '').match(/^(\d{4}-\d{2}-\d{2})\.\.(\d{4}-\d{2}-\d{2}):/)?.slice(1) ?? null;
   for (const c of out.changes) {
-    if (c.how === 'exact' || c.how === 'noplan') continue;
+    // יום כוננות שאינו ברומה: מה שמתחתיו כבר נכתב בחוק (`standbyMissing`).
+    if (c.how === 'exact' || c.how === 'noplan' || c.how === 'standby_missing') continue;
     const ids = [c.planId, c.execId].filter(Boolean);
     const ranges = ids.map(rangeOf).filter(Boolean);
     // שורה אחת מכמה על אותו סבב (`splitChangesByFdp`): רק מה שנרשם בימים שלה.
@@ -1876,7 +1882,12 @@ function compare({ out, timeline, execPairings, tz, codes: catalog, fdp, hideCod
       ? [[range(dates), describeRoute(parts[0].part)]]
       : parts.map(({ part, days }) => [range(days), describeRoute(part)]);
     // ביום של Soft Start קוד הכוננות אינו בשורת הטיסה: ההערה כבר אומרת זאת (`hideCode`; בעל המוצר, 15/10/2026).
-    const codes = (dayCodes ?? dates.flatMap((d) => execCodesOf(dayOf(timeline, d), catalog).filter((c) => !hideCode(d, c)))).join(' ');
+    // יום שאין עליו קוד ברומה (יום כוננות שאינו ברומה, `standbyMissing`): הקוד שבציפייה, מהתכנון.
+    const codesOn = (d) => {
+      const own = execCodesOf(dayOf(timeline, d), catalog);
+      return own.length ? own.filter((c) => !hideCode(d, c)) : [...new Set(expectations.filter((e) => e.code && e.dates[0] === d).map((e) => e.code))];
+    };
+    const codes = (dayCodes ?? dates.flatMap(codesOn)).join(' ');
     // בלי סבב שבוצע: הטיסה שתוכננה, כשציפייה עליה נושאת אותה (`plannedRoute`, הורדה מהטיסה).
     const planned = [...new Set(expectations.filter((e) => e.plannedRoute && dates.includes(e.dates[0])).map((e) => e.plannedRoute))];
     if (!lines.length) lines.push([range(dates), planned.join(', ')]);

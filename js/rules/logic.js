@@ -216,6 +216,8 @@ function expectMinSlip(ctx, group, min, params, rule) {
  * `flight_day_takes_higher`: יום שבו הופעל מכוננות לסליפ מזוכה לפי הגבוה מבין קרדיט הסליפ (כולל ההשלמה
  * ל-5 שעות) לבין ערך כל ימי הכוננות שבו (`compareStandbyFlown`). ביום של Soft Start (2018 ס' 91;
  * `ctx.softStart`) אין קרדיט כוננות (91.4), ולכן רק הערה (בעל המוצר, 15/10/2026).
+ *
+ * `ask_when_missing`: יום שתוכנן בו הקוד, וברומה לא רשום בו כלום – שינוי ושאלה (`standbyMissing`).
  */
 function absence_day_credit(ctx, params, rule) {
   const credit = H(params.credit_hours);
@@ -266,18 +268,82 @@ function absence_day_credit(ctx, params, rule) {
         continue;
       }
     }
-    ctx.expect(day.date, 'absence', credit, rule, rule.title, { code: matchedCode(day, params, ctx) });
-    // יום בתוך סבב, בלי טיסה פעילה משלו (SIM_BER ב-18/11/2025, באמצע סבב BER; SIM_PRG ב-28/01/2025,
-    // עם DH ‏PRG→ZRH): ה-TAB הוא של השהייה בחו"ל, וסימון העמודה נרשם ביום תחילת הסבב.
-    const active = (legs, dh) => (legs ?? []).some((l) => !dh(l));
-    const away = !active(day.exec?.legs, (l) => l.dhd || l.type === 'DHO' || l.type === 'DHX') && !active(day.plan?.legs, (l) => l.dh)
-      ? ctx.execPairings.find((p) => p.from < day.date && day.date < p.to) : null;
-    if (params.report_flag_column) {
-      const flagDate = away && params.away_flag_on_pairing_start ? away.from : day.date;
-      ctx.expectFlag(flagDate, params.report_flag_column, 1, rule);
+    creditDay(ctx, day, params, rule, credit, matchedCode(day, params, ctx));
+  }
+  if (params.ask_when_missing) standbyMissing(ctx, params, rule, credit);
+}
+
+/** הזיכוי היומי על `day`: הקרדיט, ה-TAB וסימון העמודה, לפי הקוד `code`. */
+function creditDay(ctx, day, params, rule, credit, code) {
+  ctx.expect(day.date, 'absence', credit, rule, rule.title, { code });
+  // יום בתוך סבב, בלי טיסה פעילה משלו (SIM_BER ב-18/11/2025, באמצע סבב BER; SIM_PRG ב-28/01/2025,
+  // עם DH ‏PRG→ZRH): ה-TAB הוא של השהייה בחו"ל, וסימון העמודה נרשם ביום תחילת הסבב.
+  const active = (legs, dh) => (legs ?? []).some((l) => !dh(l));
+  const away = !active(day.exec?.legs, (l) => l.dhd || l.type === 'DHO' || l.type === 'DHX') && !active(day.plan?.legs, (l) => l.dh)
+    ? ctx.execPairings.find((p) => p.from < day.date && day.date < p.to) : null;
+  if (params.report_flag_column) {
+    const flagDate = away && params.away_flag_on_pairing_start ? away.from : day.date;
+    ctx.expectFlag(flagDate, params.report_flag_column, 1, rule);
+  }
+  if (params.tab_hours != null && !away) ctx.expectTab(day.date, H(params.tab_hours), rule);
+  ctx.markAbsence(day.date, rule.id);
+}
+
+/**
+ * יום שתוכננה בו כוננות, וברומה לא רשום בו כלום – לא כוננות, לא טיסה ולא קוד אחר (`ask_when_missing`; בעל
+ * המוצר, 15/10/2026). מול רומה הזיכוי היומי לפי הקודים שבה בלבד, ולכן בלי זה היום לא הופיע בשום מקום. ימים
+ * עוקבים הם שינוי אחד ושאלה אחת (`standby_missing:`): הכוננות התקיימה – הזיכוי של יום כוננות רגיל, ופער מול
+ * הרומה; ביקשתי לבטל אותה – אין קרדיט; או סיבה אחרת. אין ביטול ביוזמת החברה. רק מול רומה, ולא מול היומן.
+ */
+function standbyMissing(ctx, params, rule, credit) {
+  if (!ctx.hasExec || !ctx.hasPlan || ctx.calendarRun) return;
+  const planCode = (day) => (day.plan?.codes ?? []).find((c) => codeIn(c, params.plan_codes, params.plan_code_prefixes));
+  const empty = (day) => !ctx.execCodes(day).length && !(day.exec?.legs ?? []).length &&
+    !ctx.execPairings.some((p) => p.from <= day.date && day.date <= p.to);
+  const runs = [];
+  for (const day of ctx.timeline) {
+    if (!planCode(day) || !empty(day)) continue;
+    const run = runs.at(-1);
+    if (run && run.at(-1).date === addDays(day.date, -1)) run.push(day);
+    else runs.push([day]);
+  }
+  for (const run of runs) {
+    const from = run[0].date;
+    const to = run.at(-1).date;
+    const many = run.length > 1;
+    const codes = [...new Set(run.map(planCode))].join(', ');
+    const when = many ? `${from.slice(8, 10)}–${dayOf(to)}` : dayOf(from);
+    const what = many ? 'ימי כוננות שאינם ברומה' : 'יום כוננות שאינו ברומה';
+    const id = `standby_missing:${from}`;
+    const answer = ctx.answer(id);
+    const row = (label, message, byUser = false) => ctx.addChange({
+      how: 'standby_missing', label, date: from, lastDay: to, planId: null, execId: null,
+      plan: many ? `${codes} ${when}` : codes, exec: null, notes: [{ message, byUser, ruleTitle: rule.title }],
+    });
+    if (!answer) {
+      ctx.ask({
+        id,
+        date: from,
+        title: `ב-${when} תוכננה ${params.missing_label} (${codes}), וברומה לא רשום כלום ${many ? 'בימים האלה' : 'ביום הזה'}. מה קרה?`,
+        options: [
+          { value: 'standby_held', label: 'הכוננות התקיימה', hint: `${minToHhmm(credit * run.length)} – פער מול הרומה` },
+          { value: 'standby_cancelled_mine', label: 'ביקשתי לבטל את הכוננות', hint: 'אין קרדיט' },
+          otherOption(),
+        ],
+        ruleId: rule.id,
+      });
+      row(what, `ממתין לתשובה בשאלה על ${many ? 'הימים' : 'היום'}.`);
+    } else if (answer.value === 'standby_held') {
+      for (const day of run) creditDay(ctx, day, params, rule, credit, planCode(day));
+      row('הכוננות התקיימה', many ? `קרדיט ${run.length} ימי כוננות.` : 'קרדיט יום כוננות.');
+    } else if (answer.value === 'standby_cancelled_mine') {
+      row('ביטול הכוננות לבקשתי', 'לא מגיע קרדיט.');
+    } else if (applyOtherReason(ctx, answer, rule, { what: `${what} (${when})`, date: from, noteExtra: { placed: true } })) {
+      row('סיבה אחרת', `"${answer.text}" – ${answer.creditMin > 0 ? 'קרדיט נוסף' : 'לא מגיע קרדיט'}.`, true);
+    } else {
+      ctx.review(`${what} (${when}): ${answer.text || 'סיבה אחרת'}. דורש בדיקה ידנית.`, rule);
+      row('סיבה אחרת', 'דורש בדיקה ידנית.');
     }
-    if (params.tab_hours != null && !away) ctx.expectTab(day.date, H(params.tab_hours), rule);
-    ctx.markAbsence(day.date, rule.id);
   }
 }
 
@@ -2017,7 +2083,7 @@ export const LOGIC = {
 export const KNOWN_PARAMS = {
   credit_from_scheduled: [],
   min_slip_credit: ['min_credit_hours', 'per_fdp', 'legal_rest_hours'],
-  absence_day_credit: ['plan_codes', 'report_codes', 'plan_code_prefixes', 'report_code_prefixes', 'report_flag_column', 'credit_hours', 'tab_hours', 'requires_assigned_activity', 'flight_day_takes_higher', 'away_flag_on_pairing_start', 'confirm_code_prefixes', 'confirm_label', 'confirm_answer', 'exclude_codes'],
+  absence_day_credit: ['plan_codes', 'report_codes', 'plan_code_prefixes', 'report_code_prefixes', 'report_flag_column', 'credit_hours', 'tab_hours', 'requires_assigned_activity', 'flight_day_takes_higher', 'away_flag_on_pairing_start', 'confirm_code_prefixes', 'confirm_label', 'confirm_answer', 'exclude_codes', 'ask_when_missing', 'missing_label'],
   unpaid_leave_days: ['plan_codes', 'report_codes', 'plan_code_prefixes', 'report_code_prefixes'],
   hotel_waiver_days: ['report_column'],
   per_diem_estimate: ['rates', 'stay_column', 'flight_column', 'stay_deduction_usd', 'hotel_waiver_column', 'hotel_waiver'],
