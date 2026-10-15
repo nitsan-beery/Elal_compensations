@@ -2083,7 +2083,7 @@ export const LOGIC = {
 export const KNOWN_PARAMS = {
   credit_from_scheduled: [],
   min_slip_credit: ['min_credit_hours', 'per_fdp', 'legal_rest_hours'],
-  absence_day_credit: ['plan_codes', 'report_codes', 'plan_code_prefixes', 'report_code_prefixes', 'report_flag_column', 'credit_hours', 'tab_hours', 'requires_assigned_activity', 'flight_day_takes_higher', 'away_flag_on_pairing_start', 'confirm_code_prefixes', 'confirm_label', 'confirm_answer', 'exclude_codes', 'ask_when_missing', 'missing_label'],
+  absence_day_credit: ['plan_codes', 'report_codes', 'plan_code_prefixes', 'report_code_prefixes', 'report_flag_column', 'credit_hours', 'tab_hours', 'requires_assigned_activity', 'flight_day_takes_higher', 'away_flag_on_pairing_start', 'confirm_code_prefixes', 'confirm_label', 'confirm_answer', 'exclude_codes', 'ask_when_missing', 'missing_label', 'assume_unknown_codes'],
   unpaid_leave_days: ['plan_codes', 'report_codes', 'plan_code_prefixes', 'report_code_prefixes'],
   hotel_waiver_days: ['report_column'],
   per_diem_estimate: ['rates', 'stay_column', 'flight_column', 'stay_deduction_usd', 'hotel_waiver_column', 'hotel_waiver'],

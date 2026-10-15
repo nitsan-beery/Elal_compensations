@@ -88,10 +88,12 @@ function evaluateFiles({ rulesData, plan = null, exec = null, answers = {}, hist
   checkMissingData(plan, exec, warnings);
 
   const inEffect = rulesInEffect(rulesData, period.year, period.month);
-  const { supported, unsupported } = partitionRules(inEffect);
-  const codes = rulesData.codes ?? {};
-
+  const { supported: listed, unsupported } = partitionRules(inEffect);
   const timeline = buildTimeline(period, plan, exec);
+  // קוד לא מוכר ברומה עם CORS: פעילות קרקע, כמו קוד מוכר (בעל המוצר, 15/10/2026).
+  const ground = exec ? assumeGroundCodes(timeline, rulesData.codes ?? {}, listed) : null;
+  const supported = ground?.supported ?? listed;
+  const codes = ground?.codes ?? rulesData.codes ?? {};
   const domicile = exec?.domicile ?? guessDomicile(plan);
   if (!domicile) warnings.push('לא ניתן לקבוע את בסיס הבית מהקבצים. חוקים שתלויים בבסיס לא ייבדקו.');
   const fleet = fleetOf(plan) ?? rulesData.crew?.fleet ?? null;
@@ -140,7 +142,9 @@ function evaluateFiles({ rulesData, plan = null, exec = null, answers = {}, hist
     questions: [],
     // תשובות שנשאלו רק בגלל תשובה אחרת: שינוי שלה מוחק גם אותן (`splitSwappedElsewhere`).
     dependentAnswers,
-    unknownCodes: collectUnknownCodes(timeline, codes, supported, exec?.unknownColumns),
+    // לפי הקודים שב-`rules.json`: קוד שהונח כפעילות קרקע נשאר בהתראה, עם ההנחה.
+    unknownCodes: collectUnknownCodes(timeline, rulesData.codes ?? {}, listed, exec?.unknownColumns)
+      .map((u) => (ground?.assumed.has(u.code) ? { ...u, assumed: `ברומה רשום ${ground.column}, האפליקציה מניחה שזו פעילות קרקע.` } : u)),
     comparison: [],
     totals: [],
     freeDays: null,
@@ -1697,6 +1701,39 @@ function collectUnknownCodes(timeline, codes, supported, unknownColumns = []) {
       report: days.map((d) => ({ date: d.date, text: reportedCells(d) })) });
   }
   return [...found.values()];
+}
+
+/**
+ * קוד לא מוכר ברומה שבכל הימים שלו רשום CORS (העמודה ב-`assume_unknown_codes` של חוק אימון הקרקע), ובלי
+ * סימולטור ביום, הוא פעילות קרקע (בעל המוצר, 15/10/2026): CORS הוא מונה ימי פעילות הקרקע שבוצעו, ואינו
+ * רשום בסימולטור, בחופשה או בטיסה. הקוד נוסף לקודים של החוק ול-`ground_activity`, ומכאן הוא כמו CPT_B.
+ * קוד לא מוכר בתכנון שחמשת התווים הראשונים שלו הם הקוד ברומה באותו יום – גם הוא. בתכנון אין CORS.
+ * @returns {{supported, codes, assumed: Set<string>, column: string}|null}
+ */
+function assumeGroundCodes(timeline, codes, supported) {
+  const rule = supported.find((r) => r.logic.params?.assume_unknown_codes);
+  if (!rule) return null;
+  const column = rule.logic.params.assume_unknown_codes;
+  const unknown = (c) => classifyCode(c, codes, supported) === 'unknown';
+  const daysOf = new Map();
+  for (const day of timeline) for (const c of execCodesOf(day, codes)) if (unknown(c)) daysOf.set(c, [...(daysOf.get(c) ?? []), day]);
+  const values = (day) => day.exec?.values ?? {};
+  const marked = (day) => values(day)[column]?.count > 0 && !values(day).SIM && !values(day).SIMD && !(day.exec.sims ?? []).length;
+  const report = [...daysOf].filter(([, days]) => days.every(marked)).map(([c]) => c);
+  if (!report.length) return null;
+  const planCodes = [...new Set(timeline.flatMap((day) => (day.plan?.codes ?? []).filter((c) => unknown(c) &&
+    (report.includes(c) || execCodesOf(day, codes).some((x) => report.includes(x) && x === c.slice(0, 5))))))];
+  const p = rule.logic.params;
+  const widened = { ...rule, logic: { ...rule.logic, params: { ...p,
+    report_codes: [...(p.report_codes ?? []), ...report], plan_codes: [...(p.plan_codes ?? []), ...planCodes] } } };
+  return {
+    supported: supported.map((r) => (r === rule ? widened : r)),
+    codes: { ...codes, ground_activity: [...(codes.ground_activity ?? []), ...new Set([...report, ...planCodes])],
+      plan_to_report: { ...(codes.plan_to_report ?? {}),
+        ...Object.fromEntries(planCodes.filter((c) => !report.includes(c)).map((c) => [c, c.slice(0, 5)])) } },
+    assumed: new Set([...report, ...planCodes]),
+    column,
+  };
 }
 
 /** מה שהדוח רשם ביום, כלשונו: "Credit 03:45 · SBY 1.00". ריק כשאין דוח, או שאין בו ערך ביום. */

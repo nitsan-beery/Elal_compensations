@@ -12,7 +12,7 @@ import * as store from './store.js';
 import * as calendar from './calendar.js';
 
 // מספר הגרסה של הקוד שרץ בדף. עולה יחד עם CACHE ב-sw.js, לאותו מספר (בעל המוצר, 15/10/2026).
-const APP_VERSION = 237;
+const APP_VERSION = 238;
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -948,7 +948,8 @@ function renderAlerts(res) {
  * המשתמש עליו אם נשאל. כל אלה מה שדרוש כדי לעדכן את `rules.json` לפי הקוד החדש.
  */
 function renderUnknownCode(u) {
-  const lines = unknownCodeLines(u).map((l) => `<div class="small">${esc(l)}</div>`).join('');
+  // קוד שהונח כפעילות קרקע: רק ההנחה; מה שהרומה רשמה – בטקסט שמועתק (בעל המוצר, 15/10/2026).
+  const lines = (u.assumed ? [u.assumed] : unknownCodeLines(u)).map((l) => `<div class="small">${esc(l)}</div>`).join('');
   return `<li><span class="num">${esc(u.code)}</span> ${esc(whereOf(u))}, בתאריכים ${u.dates.map(ddmm).join(', ')}${lines}</li>`;
 }
 
@@ -958,13 +959,13 @@ const unknownCodesMessage = (res) =>
 
 const whereOf = (u) => (u.column ? 'עמודה ברומה' : u.where === 'both' ? 'בתכנון ובביצוע' : u.where === 'plan' ? 'בתכנון' : 'בביצוע');
 
-/** שורות הפירוט של קוד לא מוכר, בלי HTML: אותן שורות מוצגות ומועתקות. */
+/** שורות הפירוט של קוד לא מוכר, בלי HTML: אותן שורות מוצגות ומועתקות (קוד שהונח כפעילות קרקע – רק מועתקות). */
 function unknownCodeLines(u) {
   const lines = [];
   const texts = [...new Set((u.report ?? []).map((r) => r.text))];
   if (texts.length === 1) lines.push(`ברומה: ${texts[0]}`);
   else for (const r of u.report ?? []) lines.push(`ברומה ${ddmm(r.date)}: ${r.text}`);
-  lines.push(u.answer ? `לפי תשובתך: ${u.answer}` : 'האפליקציה לא יודעת מה מגיע עליו, ולא ניחשה.');
+  lines.push(u.answer ? `לפי תשובתך: ${u.answer}` : u.assumed ?? 'האפליקציה לא יודעת מה מגיע עליו, ולא ניחשה.');
   return lines;
 }
 
