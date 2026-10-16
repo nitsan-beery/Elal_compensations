@@ -206,7 +206,8 @@ const PARSERS = { plan: parsePlan, exec: parseExec };
 // לעמודה אחרת) מעלה אותה, וחודש שנשמר בגרסה קודמת נקרא מחדש מהקבצים השמורים כשהוא נפתח (בעל המוצר,
 // 08/10/2026: HHM ב-COM של היום, ספטמבר 2026 של רון).
 // 2: מספר העובד בתכנון (בעל המוצר, 08/10/2026). 5: Pay Queries ברומה מדולגת (15/10/2026).
-const PARSE_VERSION = 5;
+// 6: העמודה MIL ברומה נקראת, ו-MILUP מדולגת (16/10/2026).
+const PARSE_VERSION = 6;
 
 async function reparseStale(record) {
   if (record.parseVersion === PARSE_VERSION) return;

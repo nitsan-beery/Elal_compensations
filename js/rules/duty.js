@@ -1177,8 +1177,20 @@ function free_days_waived(ctx, params, rule) {
   const offFrom = parseClock(params.off_block_from);
   const onUntil = parseClock(params.on_block_until);
   const spans = spansOf(ctx, ctx.planPairings, (p) => pairingTimes(p, ctx.tz));
+  // ימי מילואים מהיום השלישי ברצף נחשבים פנויים (2018 ס' 71.1; בעל המוצר, 16/10/2026). הרצף נספר
+  // בתוך החודש: ימי מילואים בסוף החודש הקודם אינם בקובץ התכנון.
+  const reserve = (day) => {
+    const codes = ctx.planActivityCodes(day);
+    return codes.length > 0 && codes.every((c) => (params.reserve_code_prefixes ?? []).some((x) => c.startsWith(x)));
+  };
+  let run = 0;
+  const reserveFree = new Set();
+  for (const day of ctx.timeline) {
+    run = reserve(day) ? run + 1 : 0;
+    if (params.reserve_free_from_day && run >= params.reserve_free_from_day) reserveFree.add(day.date);
+  }
   const free = ctx.timeline.filter((day) => {
-    if (ctx.planActivityCodes(day).length) return false;
+    if (ctx.planActivityCodes(day).length && !reserveFree.has(day.date)) return false;
     const d0 = at(day.date, 0);
     return !spans.some((sp) => overlapsDay(sp, day.date) &&
       !(sp.start >= d0 + offFrom && sp.end >= d0 + 1440) && !(sp.start < d0 && sp.end <= d0 + onUntil));
@@ -2200,7 +2212,7 @@ export const DUTY_PARAMS = {
     'short_stay_max_hours', 'short_stay_factor', 'long_stay_share', 'long_stay_min_hours', 'long_stay_max_hours', 'turnaround_sequence'],
   night_landings: ['fleet', 'window_from', 'window_to', 'min_planned_count', 'paid_from_count', 'hours', 'report_column', 'base_landings_only', 'counted_crews', 'legal_rest_hours'],
   special_date_activity: ['occasions', 'flight_activity_only', 'hours', 'report_column'],
-  free_days_waived: ['hours', 'report_column', 'paid_from_day', 'off_block_from', 'on_block_until', 'min_free_days'],
+  free_days_waived: ['hours', 'report_column', 'paid_from_day', 'reserve_code_prefixes', 'reserve_free_from_day', 'off_block_from', 'on_block_until', 'min_free_days'],
   consecutive_saturdays: ['hours', 'report_column', 'shabbat_from', 'shabbat_to', 'ground_excluded_prefixes'],
   consecutive_night_rounds: ['hours', 'report_column', 'more_than', 'window_from', 'window_to', 'legal_rest_hours'],
   white_flight: ['hours', 'report_column', 'report_after', 'report_until', 'min_block_hours'],
