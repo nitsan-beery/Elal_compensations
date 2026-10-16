@@ -1299,7 +1299,8 @@ function free_days_waived(ctx, params, rule) {
  * שבת). גם פעילות קרקע בשבת נספרת, חוץ מלימוד עצמי בבית (`ground_excluded_prefixes`: HOME) ומכוננות
  * (בעל המוצר, 10/10/2026; לא אמורה להיות כזו). סימולטור עם שעות ברומה – כשהוא חופף לחלון (מוצ"ש אינו
  * נספר); פעילות קרקע בלי שעות – כל יום השבת. לפי הביצוע כשיש; סבב מתוכנן שבוטל ביוזמת החברה נחשב
- * ביצוע (ס' 40). בלי שאלת הסכמה (החלטת בעל המוצר, 21/09/2026). שלוש שבתות ברצף הן שני זוגות.
+ * ביצוע (ס' 40). רק לבקשת החברה: כשהרומה לא זיכתה, ובתכנון לבד תמיד, שואלים (`saturdays:`; בעל המוצר,
+ * 16/10/2026; עד אז ההסכמה לא נבדקה). שלוש שבתות ברצף הן שני זוגות.
  */
 function consecutive_saturdays(ctx, params, rule) {
   const key = keyFor(params.report_column);
@@ -1349,6 +1350,33 @@ function consecutive_saturdays(ctx, params, rule) {
     const grounds = [a1, a2].flatMap((a) => a.ground ?? []);
     const why = `${rule.title}: פעילות בשבתות ${ddmm(s1)} ו-${ddmm(s2)}${a2.cancelled ? ' (בשבת השנייה סבב שבוטל ביוזמת החברה)' : ''}` +
       (grounds.length ? ` (פעילות קרקע: ${grounds.join(', ')})` : '');
+    // הפיצוי רק לבקשת החברה (ס' 34); ויתור בבקשות (2018 ס' 61.2) אינו מזכה. כשהרומה זיכתה – מניחים
+    // לבקשת החברה; אחרת, ובתכנון לבד תמיד, שואלים (בעל המוצר, 16/10/2026).
+    const paid = ctx.hasExec && (a2.pairing ? ctx.paidOn(a2.pairing, params.report_column, key, H(params.hours))
+      : ctx.paidOnDate(s2, params.report_column, key, H(params.hours)));
+    if (!paid) {
+      const id = `saturdays:${s1}`;
+      const a = ctx.answer(id);
+      if (!a) {
+        ctx.ask({
+          id,
+          date: s2,
+          title: `${rule.title} (${ddmm(s1)}, ${ddmm(s2)}): האם זה תוכנן לבקשת החברה?`,
+          body: `${why}. הפיצוי מגיע רק כשהשבתות תוכננו לבקשת החברה${ctx.hasExec ? ', והרומה לא מזכה אותו' : ''}. ` +
+            'ויתור על כמות השבתות ברצף בבקשות אינו מזכה.',
+          options: [
+            { value: 'company', label: 'לבקשת החברה', hint: `${minToHhmm(H(params.hours))}${ctx.hasExec ? ' – פער מול הרומה' : ''}` },
+            { value: 'mine', label: 'לבקשתי (ויתור בבקשות)', hint: 'אין פיצוי' },
+          ],
+          ruleId: rule.id,
+        });
+        continue;
+      }
+      if (a.value !== 'company') {
+        ctx.note(s2, `${why}. תוכנן לבקשתך (ויתור בבקשות): אין פיצוי.`, rule);
+        continue;
+      }
+    }
     if (a2.pairing) ctx.expectPairing(a2.pairing, key, H(params.hours), rule, why);
     else ctx.expect(s2, key, H(params.hours), rule, why);
   }
