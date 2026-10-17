@@ -12,7 +12,7 @@ import * as store from './store.js';
 import * as calendar from './calendar.js';
 
 // מספר הגרסה של הקוד שרץ בדף. עולה יחד עם CACHE ב-sw.js, לאותו מספר (בעל המוצר, 15/10/2026).
-const APP_VERSION = 243;
+const APP_VERSION = 244;
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -1078,7 +1078,8 @@ function renderTotals(res) {
     <h2>${res.totals.length || plan.length ? 'סיכום' : 'סיכום חודשי'}<span class="spacer"></span>${PRINT_BUTTON}</h2>
     <div class="totals">${res.totals.map((t) => {
       const gap = `פער <span class="num">${signed(t.reported - t.expected)}</span>`;
-      const status = t.ok === true ? '✓' : t.ok === false ? (pending ? `ממתין · ${gap}` : `✗ ${gap}`) : '';
+      // ✗ רק כשהרומה זיכתה פחות מהצפוי. כשזיכתה יותר – הפער בירוק, בלי סימן (בעל המוצר, 17/10/2026).
+      const status = t.ok === true ? '✓' : t.ok === false ? (pending ? `ממתין · ${gap}` : t.reported > t.expected ? `· ${gap}` : `✗ ${gap}`) : '';
       return `
       <div class="total ${t.ok === true ? 'ok' : t.ok === false && !pending ? gapClass(t.reported - t.expected) : ''}">
         <div class="label">${esc(t.column)}</div>
@@ -1125,7 +1126,7 @@ function renderComparison(res) {
       <tbody>${rows.map((c) => {
         const gap = c.ok === false ? gapClass(c.diff) : c.marks.length ? 'bad' : '';
         const cls = gap || (c.pending ? 'pending' : '');
-        const status = gap ? `<span class="status ${gap}">✗</span>` : c.pending ? '<span class="status pending">ממתין</span>' : '<span class="status ok">✓</span>';
+        const status = gap === 'gain' ? '' : gap ? `<span class="status ${gap}">✗</span>` : c.pending ? '<span class="status pending">ממתין</span>' : '<span class="status ok">✓</span>';
         const why = [
           // שורת פיצוי או Rig כבר מוסברת מתחת לטיסה. שורת קרדיט מפורטת רק כשיש בה פער.
           ...c.items.filter((e) => !COMP_COLUMNS.has(c.column) && c.ok !== true && (e.ruleTitle || e.note))
