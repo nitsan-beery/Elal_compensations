@@ -12,7 +12,7 @@ import * as store from './store.js';
 import * as calendar from './calendar.js';
 
 // מספר הגרסה של הקוד שרץ בדף. עולה יחד עם CACHE ב-sw.js, לאותו מספר (בעל המוצר, 15/10/2026).
-const APP_VERSION = 246;
+const APP_VERSION = 247;
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -82,6 +82,16 @@ const state = {
 
 // ---------- אתחול ----------
 
+// מפתח החודש הפתוח, לרענון באותו חלון. `sessionStorage` נשאר ברענון ונמחק כשהחלון נסגר, ולכן
+// פתיחה חדשה של האפליקציה מתחילה מהחודש האחרון.
+const OPEN_MONTH = 'open-month';
+addEventListener('pagehide', () => {
+  try {
+    if (state.record?.key) sessionStorage.setItem(OPEN_MONTH, state.record.key);
+    else sessionStorage.removeItem(OPEN_MONTH);
+  } catch { /* אחסון חסום */ }
+});
+
 init();
 
 async function init() {
@@ -102,9 +112,11 @@ async function init() {
     showBanner('info', `לא ניתן היה לטעון את החוקים מהרשת${state.rulesError ? ` (<bdi dir="ltr">${esc(state.rulesError)}</bdi>)` : ''}. הם נטענו מהעותק השמור על המכשיר (גרסה ${esc(state.rulesData.rules_version)}).`);
   }
   state.calendar = calendarSetting(await safe(() => store.getSetting(CAL_SETTING), null));
-  // החודש האחרון שעבדו עליו נפתח אוטומטית.
+  // החודש האחרון שעבדו עליו נפתח אוטומטית. ברענון באותו חלון – החודש שהיה פתוח (בעל המוצר, 17/10/2026).
   const months = await safe(() => store.listMonths(), []);
-  if (months.length) await openMonth(months[0].key, { quiet: true });
+  let reopen = null;
+  try { reopen = sessionStorage.getItem(OPEN_MONTH); } catch { /* אחסון חסום: החודש האחרון */ }
+  if (months.length) await openMonth(months.find((m) => m.key === reopen)?.key ?? months[0].key, { quiet: true });
   else renderResults();
   // יומן מחובר: ספריית ההתחברות נטענת מראש, כדי שהחלון של גוגל ייפתח מיד בלחיצה. העדכון עצמו רק
   // בפעולה של המשתמש (`calendarToken`).
