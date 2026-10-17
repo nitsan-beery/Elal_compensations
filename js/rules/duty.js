@@ -1294,6 +1294,9 @@ function free_days_waived(ctx, params, rule) {
   } else if (a.value === 'company') {
     ctx.expect(ctx.monthFirst, key, paidDays * H(params.hours), rule,
       `${what}: ${missing} ימים חסרים, פיצוי על ${paidDays} (מהיום השני)`);
+  } else if (a.value === 'own') {
+    // בלי פיצוי אין שורה בפירוט, ולכן ההסבר בהערות (בעל המוצר, 17/10/2026).
+    ctx.note(null, `${what}. חסרים ${missing}, וויתרת מרצונך ${missing > params.paid_from_day ? 'על כולם' : 'לפחות על יום אחד'}, ולכן לא מגיע פיצוי.`, rule);
   }
 }
 
