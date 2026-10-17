@@ -1267,9 +1267,12 @@ function free_days_waived(ctx, params, rule) {
       date: ctx.monthFirst,
       title: `ימים ללא פעילות: חסרים ${missing}. האם הוויתור היה לבקשת החברה?`,
       body: `${what}. הימים הפנויים: ${free.map(ddmm).join(', ')}.`,
+      // בשני ימים חסרים ויתור מרצון על אחד מהם או על שניהם – אין פיצוי; מ-3 הפיצוי ליום ועל כמה ימים
+      // (בעל המוצר, 17/10/2026).
       options: [
-        { value: 'company', label: 'לבקשת החברה', hint: `מגיע פיצוי ${minToHhmm(paidDays * H(params.hours))}` },
-        { value: 'own', label: 'ויתור מרצון', hint: 'אין פיצוי' },
+        { value: 'company', label: 'לבקשת החברה',
+          hint: paidDays > 1 ? `מגיע פיצוי של ${minToHhmm(H(params.hours))} על ${days(paidDays)}` : `מגיע פיצוי ${minToHhmm(H(params.hours))}` },
+        { value: 'own', label: missing > params.paid_from_day ? 'ויתור מרצון' : 'ויתור מרצון לפחות על יום אחד', hint: 'אין פיצוי' },
         // ויתור מרצון על כל החסרים הוא האפשרות הקודמת, ולכן הבחירה עד אחד פחות. רק כשחסרים יותר
         // מ-`paid_from_day`: בשני ימים חסרים ויתור מרצון על אחד משאיר יום אחד לבקשת החברה, שאינו
         // מזכה – כמו ויתור מרצון (בעל המוצר, 17/10/2026).
