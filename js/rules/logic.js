@@ -1588,16 +1588,19 @@ function whatHappenedOptions(ctx, plan, exec, calendar = null) {
   const higher = 'מגיע הגבוה מבין שתי הטיסות' + (diff == null ? ''
     : diff > 0 ? `: ${amountWord(shortfall)} של ${minToHhmm(diff)}`
     : '; מה שבוצע אינו קצר מהמתוכנן, ולכן אין הפרש לתשלום');
+  // בלי טיסה באותם ימים, הטיסה השנייה נבחרת רק אחרי הבחירה, בקישור (בעל המוצר, 17/10/2026; טיוטה 366).
+  const later = (what) => `${what} תיבחר בהמשך.`;
   return [
-    { value: 'replaced', label: 'שינוי ביוזמת החברה', hint: higher, needsLink: true },
+    { value: 'replaced', label: 'שינוי ביוזמת החברה', hint: other ? higher : `${later('הטיסה שבאה במקומה')} מגיע הגבוה מבין שתיהן`, needsLink: true },
     // אותה טיסה, עם נחיתה ביעד שלא תוכנן: רק מול הסבב שבוצע באותם ימים, ולכן בלי קישור. משלמת כמו
     // שינוי ביוזמת החברה, ומוצגת בשמה בשינויים (בעל המוצר, 05/10/2026). רק כשלפחות אחד ממספרי הטיסה
     // המתוכננים נמצא במה שבוצע: בלי אף אחד זו טיסה אחרת, ולא סטיה (04/06/2024: SKG → WAW).
     ...(other && sharesFlight(plan, other) && other.destinations.join() !== plan.destinations.join() ? [{ value: 'diversion', label: 'סטיה לשדה משנה', hint: higher }] : []),
     // זכייה במכרז משלמת כמו שינוי ביוזמת החברה, אבל אינה "ביוזמת החברה" לעניין 2024 ס' 34–37 ו-39
     // (ס' 40): נחיתות לילה, שבתות ברצף וטיסות סבב לילה עוקבות (בעל המוצר, 05/10/2026).
-    { value: 'bid', label: 'זכייה במכרז', hint: higher, needsLink: true },
-    { value: 'voluntary_swap', label: 'החלפה מרצוני או בהסכמתי', hint: `רק הקרדיט של ${performed}`, needsLink: true },
+    { value: 'bid', label: 'זכייה במכרז', hint: other ? higher : `${later('הטיסה שזכית בה')} מגיע הגבוה מבין שתיהן`, needsLink: true },
+    { value: 'voluntary_swap', label: 'החלפה מרצוני או בהסכמתי',
+      hint: other ? `רק הקרדיט של ${performed}` : `${later('הטיסה שבאה במקומה, אם יש,')} רק הקרדיט שלה`, needsLink: true },
     { value: 'cancelled', label: 'הטיסה המקורית בוטלה ללא קרדיט',
       hint: other ? `מגיע פיצוי של קריאה מיוחדת על ${performed}` : 'לא מגיע כלום' },
     ...lostHoursOptions(ctx, plan, other ? `בנוסף לקרדיט של ${performed}` : undefined),
