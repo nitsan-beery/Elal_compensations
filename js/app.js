@@ -12,7 +12,7 @@ import * as store from './store.js';
 import * as calendar from './calendar.js';
 
 // מספר הגרסה של הקוד שרץ בדף. עולה יחד עם CACHE ב-sw.js, לאותו מספר (בעל המוצר, 15/10/2026).
-const APP_VERSION = 242;
+const APP_VERSION = 243;
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -131,7 +131,7 @@ function registerServiceWorker() {
  */
 /**
  * מספר הגרסה בשורת הקרדיט הוא של הקוד שרץ בדף. גרסה חדשה שהותקנה בזמן שהדף פתוח (המטמון שלה חדש
- * מהקוד) אינה מחליפה אותו: לידו הכפתור "גרסה N מוכנה – רענון" (בעל המוצר, 15/10/2026; עד אז המספר
+ * מהקוד) אינה מחליפה אותו: לידו הכפתור "גרסה N מוכנה – לחץ לרענון" (בעל המוצר, 15/10/2026 ו-17/10/2026; עד אז המספר
  * נלקח מהמטמון, והתחלף לפני שהקוד התחלף).
  */
 async function showVersion() {
@@ -140,7 +140,7 @@ async function showVersion() {
   const cached = Math.max(0, ...keys.map((k) => Number(k.match(/^elal-compensations-v(\d+)$/)?.[1] ?? 0)));
   const button = $('#app-update');
   button.hidden = cached <= APP_VERSION;
-  if (cached > APP_VERSION) button.textContent = `גרסה ${cached} מוכנה – רענון`;
+  if (cached > APP_VERSION) button.textContent = `גרסה ${cached} מוכנה – לחץ לרענון`;
 }
 
 function showBanner(kind, html) {
