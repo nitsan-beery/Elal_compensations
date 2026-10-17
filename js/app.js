@@ -12,7 +12,7 @@ import * as store from './store.js';
 import * as calendar from './calendar.js';
 
 // מספר הגרסה של הקוד שרץ בדף. עולה יחד עם CACHE ב-sw.js, לאותו מספר (בעל המוצר, 15/10/2026).
-const APP_VERSION = 254;
+const APP_VERSION = 255;
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -1116,6 +1116,12 @@ function renderTotals(res) {
   </div>`;
 }
 
+/**
+ * תווית של שורה בפירוט: התאריך (או הטווח) בראש כל שורה בבולד, כמו בטבלת השינויים (בעל המוצר, 17/10/2026; טיוטה 368).
+ */
+const boldDates = (label) => label.split('\n').map((line) => esc(line)
+  .replace(/^(⁦?\d{2}\/\d{2}(?:[–-]\d{2}\/\d{2})?⁩?)/, '<strong class="num">$1</strong>')).join('<br>');
+
 function renderComparison(res) {
   const all = shownComparison(res);
   if (!all.length) return '';
@@ -1148,7 +1154,7 @@ function renderComparison(res) {
         ].join('<br>');
         const rule = ruleAttr([...c.items, ...c.marks.flatMap((m) => m.items)].map((e) => e.ruleTitle));
         return `<tr class="${cls}"${rule}>
-          <td>${esc(c.label).replace(/\n/g, '<br>')}${explainOf(c)}</td><td class="col">${esc(c.column)}</td>
+          <td>${boldDates(c.label)}${explainOf(c)}</td><td class="col">${esc(c.column)}</td>
           <td class="num">${hm(c.expected, c.unit)}</td><td class="num">${hm(c.reported, c.unit)}</td>
           <td class="num">${c.ok ? '' : (c.diff > 0 ? '+' : '') + hm(c.diff, c.unit)}</td><td>${status}</td></tr>
           ${why ? `<tr class="detail"${rule}><td colspan="6">${why}</td></tr>` : ''}`;
@@ -1172,7 +1178,7 @@ function renderExpectations(res) {
     ${!shown.length ? '<p class="small muted">אין פיצויים צפויים לפי התכנון.</p>' : `<div class="table-wrap"><table>
       <thead><tr><th>תאריך</th><th>חוק</th><th>סוג</th><th>צפוי</th><th>הסבר</th></tr></thead>
       <tbody>${shown.map((e) => `<tr>
-        <td class="num">${e.monthly ? '' : e.dates.length > 1 ? `${ddmm(e.dates[0])}–${ddmm(e.dates.at(-1))}` : ddmm(e.date)}</td>
+        <td class="num"><strong>${e.monthly ? '' : e.dates.length > 1 ? `${ddmm(e.dates[0])}–${ddmm(e.dates.at(-1))}` : ddmm(e.date)}</strong></td>
         <td>${esc(e.ruleTitle)}${pairingOf(e) ? `<div class="small muted">${esc(pairingOf(e))}</div>` : ''}</td>
         <td>${esc(KEY_LABEL[e.key] ?? e.key)}</td>
         <td class="num">${minToHhmm(e.min)}</td>
@@ -1287,8 +1293,8 @@ const QUESTION_KIND = { cancelled: 'סבב שלא בוצע', unplanned: 'פעי�
   sim_extension: 'הארכת סימולטור', extended: 'סבב שהתארך', saturdays: 'שתי שבתות ברצף' };
 
 /**
- * ראש השורה ב"תשובות שנשמרו": התאריך (או טווח הסבב) בבולד, הכי מימין, ואחריו סוג השאלה והיעד או הטיסה
- * ("<b>07/07</b> סבב שלא בוצע LCA"); שאלה על החודש כולו – בלי תאריך ובלי חודש (בעל המוצר, 17/10/2026; טיוטה 367).
+ * ראש השורה ב"תשובות שנשמרו": התאריך (או טווח הסבב) בבולד, הכי מימין, ואחריו היעד או הטיסה וסוג השאלה
+ * ("<b>07/07</b> LCA סבב שלא בוצע"); שאלה על החודש כולו – בלי תאריך ובלי חודש (בעל המוצר, 17/10/2026; טיוטה 367).
  */
 function answeredHead(id) {
   const [kind, ...rest] = id.split(':');
@@ -1298,9 +1304,9 @@ function answeredHead(id) {
   if (!m) return esc(/^\d{4}-\d{2}$/.test(ref) ? name : describeQuestionId(id));
   const to = m[2] ? state.result?.landingDays?.[m[0]] ?? m[2] : m[1];
   const date = to === m[1] ? ddmm(m[1]) : `${ddmm(m[1])}–${ddmm(to)}`;
-  // אחרי התאריך: היעד של סבב או מספר טיסה; לא מה שמבדיל בין שאלות באותו יום (`sim_extension:<תאריך>:<STD>`).
+  // מיד אחרי התאריך (טיוטה 368): היעד של סבב או מספר טיסה; לא מה שמבדיל בין שאלות באותו יום (`sim_extension:<תאריך>:<STD>`).
   const what = m[3] && (m[2] || /^[A-Z]{2}\d+$/.test(m[3])) ? ` ⁦${esc(m[3])}⁩` : '';
-  return `<strong class="num">${date}</strong> ${esc(name)}${what}`;
+  return `<strong class="num">${date}</strong>${what} ${esc(name)}`;
 }
 
 /**
