@@ -1270,9 +1270,11 @@ function free_days_waived(ctx, params, rule) {
       options: [
         { value: 'company', label: 'לבקשת החברה', hint: `מגיע פיצוי ${minToHhmm(paidDays * H(params.hours))}` },
         { value: 'own', label: 'ויתור מרצון', hint: 'אין פיצוי' },
-        // ויתור מרצון על כל החסרים הוא האפשרות הקודמת, ולכן הבחירה עד אחד פחות.
-        { value: 'partial', label: 'ויתרתי מרצוני על', hint: 'מגיע פיצוי על הימים שלא ויתרתי מרצוני',
-          count: Array.from({ length: missing - 1 }, (_, i) => ({ value: i + 1, label: days(i + 1) })) },
+        // ויתור מרצון על כל החסרים הוא האפשרות הקודמת, ולכן הבחירה עד אחד פחות. רק כשחסרים יותר
+        // מ-`paid_from_day`: בשני ימים חסרים ויתור מרצון על אחד משאיר יום אחד לבקשת החברה, שאינו
+        // מזכה – כמו ויתור מרצון (בעל המוצר, 17/10/2026).
+        ...(missing > params.paid_from_day ? [{ value: 'partial', label: 'ויתרתי מרצוני על', hint: 'מגיע פיצוי על הימים שלא ויתרתי מרצוני',
+          count: Array.from({ length: missing - 1 }, (_, i) => ({ value: i + 1, label: days(i + 1) })) }] : []),
       ],
       ruleId: rule.id,
     });
