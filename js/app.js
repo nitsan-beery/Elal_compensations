@@ -12,7 +12,7 @@ import * as store from './store.js';
 import * as calendar from './calendar.js';
 
 // מספר הגרסה של הקוד שרץ בדף. עולה יחד עם CACHE ב-sw.js, לאותו מספר (בעל המוצר, 15/10/2026).
-const APP_VERSION = 253;
+const APP_VERSION = 254;
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -1234,7 +1234,9 @@ function renderCalendarChanges(res) {
 // לפי תאריך הטיסה או היום שבמזהה, ולא לפי סדר השאלות (בעל המוצר, 06/10/2026). בלי תאריך במזהה – התאריך
 // שנבחר בתשובה (פתיחת שנת הלימודים), ובלי שניהם – בסוף.
 const ISO_DATE = /\d{4}-\d{2}-\d{2}/;
-const answerDate = ([id, a]) => id.match(ISO_DATE)?.[0] ?? String(a?.value ?? '').match(ISO_DATE)?.[0] ?? '9999';
+// שאלה על החודש כולו (ימים ללא פעילות) – בראש הרשימה (טיוטה 367).
+const answerDate = ([id, a]) => id.match(ISO_DATE)?.[0] ?? (/:\d{4}-\d{2}$/.test(id) ? '0000' : null) ??
+  String(a?.value ?? '').match(ISO_DATE)?.[0] ?? '9999';
 
 /**
  * התשובות שנשמרו, ובינן ההנחות של האפליקציה כשהרומה זיכתה (`res.assumptions`; בעל המוצר, 17/10/2026, טיוטה 365):
@@ -1248,12 +1250,12 @@ function renderAnswered(res) {
   return `<details class="card" data-section="answered">
     <summary><h2 style="display:inline">תשובות שנשמרו <span class="count">${answers.length}</span></h2></summary>
     <ul class="list">${answers.map(([id, a, byApp]) => byApp ? `<li class="row">
-      <span>${esc(describeQuestionId(id))}: <strong>${esc(a.label ?? answerLabel(a.value, id.split(':')[0]))}</strong>
+      <span>${answeredHead(id)}: <strong>${esc(a.label ?? answerLabel(a.value, id.split(':')[0]))}</strong>
         <div class="explain">הנחת האפליקציה: הרומה מזכה את הפיצוי</div></span>
       <span class="spacer"></span>
       <button class="btn no-print" data-unassume="${esc(id)}">שנה</button>
     </li>` : `<li class="row">
-      <span>${esc(describeQuestionId(id))}: <strong>${esc(a.value === 'partial' && a.count ? `ויתרתי מרצוני על ${a.count === 1 ? 'יום אחד' : `${a.count} ימים`}` : a.label ?? answerLabel(a.value, id.split(':')[0]))}</strong>
+      <span>${answeredHead(id)}: <strong>${esc(a.value === 'partial' && a.count ? `ויתרתי מרצוני על ${a.count === 1 ? 'יום אחד' : `${a.count} ימים`}` : a.label ?? answerLabel(a.value, id.split(':')[0]))}</strong>
         ${a.link !== undefined ? `<span class="small muted">(${a.link === 'none' ? 'מסירת הטיסה ללא חלופה' : a.link ? `עם ${esc(describePairingId(a.link))}` : 'בחודש אחר'})</span>` : ''}
         ${a.text ? `<span class="small muted">– ${esc(a.text)}</span>` : ''}
         ${typeof a.creditMin === 'number' ? `<span class="small muted">(${a.creditMin ? `מגיע קרדיט ${minToHhmm(a.creditMin)}` : 'לא מגיע קרדיט'})</span>` : ''}</span>
@@ -1283,6 +1285,23 @@ const QUESTION_KIND = { cancelled: 'סבב שלא בוצע', unplanned: 'פעי�
   base_rest: 'מנוחה בבסיס', second_activity: 'פעילות נוספת באותו FDP', occasion: 'תאריך מיוחד', night_rounds: 'טיסות סבב לילה עוקבות',
   stay_extension: 'הארכת שהייה', miami_short_rest: 'קיצור מנוחה במיאמי', miami_delay: 'דחייה במיאמי', las_vegas_rest: 'קיצור מנוחה בלאס וגאס',
   sim_extension: 'הארכת סימולטור', extended: 'סבב שהתארך', saturdays: 'שתי שבתות ברצף' };
+
+/**
+ * ראש השורה ב"תשובות שנשמרו": התאריך (או טווח הסבב) בבולד, הכי מימין, ואחריו סוג השאלה והיעד או הטיסה
+ * ("<b>07/07</b> סבב שלא בוצע LCA"); שאלה על החודש כולו – בלי תאריך ובלי חודש (בעל המוצר, 17/10/2026; טיוטה 367).
+ */
+function answeredHead(id) {
+  const [kind, ...rest] = id.split(':');
+  const ref = rest.join(':').replace(/^(?:[a-z][a-z_]*:)+/, '');
+  const name = QUESTION_KIND[kind] ?? kind;
+  const m = ref.match(/^(\d{4}-\d{2}-\d{2})(?:\.\.(\d{4}-\d{2}-\d{2}))?(?::([^:]+))?/);
+  if (!m) return esc(/^\d{4}-\d{2}$/.test(ref) ? name : describeQuestionId(id));
+  const to = m[2] ? state.result?.landingDays?.[m[0]] ?? m[2] : m[1];
+  const date = to === m[1] ? ddmm(m[1]) : `${ddmm(m[1])}–${ddmm(to)}`;
+  // אחרי התאריך: היעד של סבב או מספר טיסה; לא מה שמבדיל בין שאלות באותו יום (`sim_extension:<תאריך>:<STD>`).
+  const what = m[3] && (m[2] || /^[A-Z]{2}\d+$/.test(m[3])) ? ` ⁦${esc(m[3])}⁩` : '';
+  return `<strong class="num">${date}</strong> ${esc(name)}${what}`;
+}
 
 /**
  * "diversion:2024-09-23:LY5104" → "סטיה לשדה משנה 23/09 LY5104". בחלק מהמזהים לפני התאריך יש מילה
