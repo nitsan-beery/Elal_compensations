@@ -12,7 +12,7 @@ import * as store from './store.js';
 import * as calendar from './calendar.js';
 
 // מספר הגרסה של הקוד שרץ בדף. עולה יחד עם CACHE ב-sw.js, לאותו מספר (בעל המוצר, 15/10/2026).
-const APP_VERSION = 249;
+const APP_VERSION = 250;
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -1163,7 +1163,8 @@ const pairingOf = (e) => e.pairing ?? String(e.note ?? '').match(/^⁦[^⁩]*⁩
 // בתכנון לבד בלבד. עם דוח ביצוע ספירת הימים מוצגת בסיכום החודשי מול הדוח.
 function renderExpectations(res) {
   if (!res.expectations.length || res.mode !== 'plan') return '';
-  const rows = [...res.expectations].sort((a, b) => a.date.localeCompare(b.date));
+  // ציפייה על החודש כולו (ימים ללא פעילות) – ראשונה, בלי תאריך.
+  const rows = [...res.expectations].sort((a, b) => (b.monthly ?? false) - (a.monthly ?? false) || a.date.localeCompare(b.date));
   // הקרדיט של כל טיסה הוא רק רעש: הסך הכול בכרטיס הסיכום (`planTotals`), ובטבלה רק הפיצויים.
   const shown = rows.filter((e) => !CREDIT_KEYS.has(e.key));
   return `<details class="card" data-section="expected" open>
@@ -1171,7 +1172,7 @@ function renderExpectations(res) {
     ${!shown.length ? '<p class="small muted">אין פיצויים צפויים לפי התכנון.</p>' : `<div class="table-wrap"><table>
       <thead><tr><th>תאריך</th><th>חוק</th><th>סוג</th><th>צפוי</th><th>הסבר</th></tr></thead>
       <tbody>${shown.map((e) => `<tr>
-        <td class="num">${e.dates.length > 1 ? `${ddmm(e.dates[0])}–${ddmm(e.dates.at(-1))}` : ddmm(e.date)}</td>
+        <td class="num">${e.monthly ? '' : e.dates.length > 1 ? `${ddmm(e.dates[0])}–${ddmm(e.dates.at(-1))}` : ddmm(e.date)}</td>
         <td>${esc(e.ruleTitle)}${pairingOf(e) ? `<div class="small muted">${esc(pairingOf(e))}</div>` : ''}</td>
         <td>${esc(KEY_LABEL[e.key] ?? e.key)}</td>
         <td class="num">${minToHhmm(e.min)}</td>

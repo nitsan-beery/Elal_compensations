@@ -1253,10 +1253,15 @@ function free_days_waived(ctx, params, rule) {
   }
   const id = `free_days:${ctx.monthFirst.slice(0, 7)}`;
   const key = keyFor(params.report_column);
-  // הדוח כבר מזכה ביום הראשון בחודש: לא שואלים.
-  const paid = ctx.hasExec &&
-    ctx.reportedOnDate(ctx.monthFirst, params.report_column) - ctx.expectedOnDate(ctx.monthFirst, key) >= paidDays * H(params.hours);
-  const a = ctx.answer(id) ?? (paid ? { value: 'company' } : null);
+  // לפיצוי אין יום משלו: הוא נרשם ביום שהרומה רשמה בו פיצוי שאף חוק אינו מסביר, קודם יום בלי טיסה
+  // (בעל המוצר, 17/10/2026; פברואר 2026 של יונתן, 07/02). כשיש יום כזה – לא שואלים.
+  const flown = new Set(ctx.execPairings.flatMap((p) => ctx.reportDates(p)));
+  const paidOn = (min) => {
+    const days = ctx.hasExec ? ctx.timeline.filter((d) => d.date.startsWith(ctx.monthFirst.slice(0, 7)) && ctx.paidOnDate(d.date, params.report_column, key, min)) : [];
+    return (days.find((d) => !flown.has(d.date)) ?? days[0])?.date ?? null;
+  };
+  const answered = ctx.answer(id);
+  const a = answered ?? (paidOn(paidDays * H(params.hours)) ? { value: 'company' } : null);
   // "היום השני" נספר מבין הימים שוויתרת עליהם לבקשת החברה בלבד (2024 ס' 33), ולכן ויתור מרצון
   // על חלק מהימים מוריד את הפיצוי לפי מה שנשאר לבקשת החברה (בעל המוצר, 29/09/2026).
   const paidFor = (companyDays) => Math.max(0, companyDays - (params.paid_from_day - 1));
@@ -1285,15 +1290,20 @@ function free_days_waived(ctx, params, rule) {
   }
   const own = a.value === 'own' ? missing : a.value === 'partial' ? Math.min(missing, Math.max(0, Number(a.count) || 0)) : 0;
   const n = paidFor(missing - own);
+  // בלי יום כזה ברומה – שורה בלי תאריך בראש הפירוט (`monthly`).
+  const expect = (min, note) => {
+    const date = paidOn(min);
+    const assumed = answered ? '' : ' הרומה מזכה את הפיצוי, ולכן האפליקציה מניחה שהוויתור היה לבקשת החברה.';
+    ctx.expect(date ?? ctx.monthFirst, key, min, rule, note,
+      date ? { explain: `${note}.${assumed}` } : { monthly: true, label: 'ימים ללא פעילות' });
+  };
   if (a.value === 'partial' && n) {
-    ctx.expect(ctx.monthFirst, key, n * H(params.hours), rule,
-      `${what}: ${missing} ימים חסרים, על ${days(own)} מהם ויתרת מרצונך, פיצוי על ${n} (מהיום השני שלבקשת החברה)`);
+    expect(n * H(params.hours), `${what}: ${missing} ימים חסרים, על ${days(own)} מהם ויתרת מרצונך, פיצוי על ${n} (מהיום השני שלבקשת החברה)`);
   } else if (a.value === 'partial') {
     ctx.note(null, `${what}. ויתרת מרצונך על ${days(own)} מתוך ${missing}, ולבקשת החברה ${missing - own === 1 ? 'נשאר יום אחד' : `נשארו ${missing - own}`}. ` +
       `הפיצוי רק מהיום השני שלבקשת החברה, ולכן לא מגיע.`, rule);
   } else if (a.value === 'company') {
-    ctx.expect(ctx.monthFirst, key, paidDays * H(params.hours), rule,
-      `${what}: ${missing} ימים חסרים, פיצוי על ${paidDays} (מהיום השני)`);
+    expect(paidDays * H(params.hours), `${what}: ${missing} ימים חסרים, פיצוי על ${paidDays} (מהיום השני)`);
   } else if (a.value === 'own') {
     // בלי פיצוי אין שורה בפירוט, ולכן ההסבר בהערות (בעל המוצר, 17/10/2026).
     ctx.note(null, `${what}. חסרים ${missing}, וויתרת מרצונך ${missing > params.paid_from_day ? 'על כולם' : 'לפחות על יום אחד'}, ולכן לא מגיע פיצוי.`, rule);

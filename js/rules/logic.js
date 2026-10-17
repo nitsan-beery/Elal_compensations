@@ -2142,13 +2142,14 @@ export const LOGIC_ORDER = [
   'short_rest_miami',
   'miami_delay',
   'short_rest_las_vegas',
-  'free_days_waived',
   'consecutive_saturdays',
   'consecutive_night_rounds',
   'sim_night_session',
   'sim_extension',
   'sim_friday_holiday_eve',
   'covered_by',
+  // אחרי שאר חוקי הפיצוי: הפיצוי נרשם ביום שה-COM בו לא מוסבר (`freeDaysPaidOn` ב-js/rules/duty.js).
+  'free_days_waived',
   // אחרון מבין חוקי הפיצוי: בלי הרכב צוות, הוא מניח צוות חוקי רק כשהפיצוי ברומה ושאר החוקים אינם מסבירים אותו.
   'legal_crew_composition',
   'absence_month_cap',

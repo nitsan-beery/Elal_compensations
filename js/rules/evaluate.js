@@ -1884,7 +1884,9 @@ function compare({ out, timeline, execPairings, tz, codes: catalog, fdp, hideCod
   const shift = new Map();
   const raw = (d, column) => reportedValue(dayOf(timeline, d), column);
   const bump = (d, column, min) => shift.set(`${d}|${column}`, (shift.get(`${d}|${column}`) ?? 0) + min);
-  const expectations = out.expectations.map((e) => {
+  // ציפייה על החודש כולו (`monthly`: ימים ללא פעילות, בלי יום ברומה) – שורה בלי תאריך, בראש הפירוט.
+  const monthly = out.expectations.filter((e) => e.monthly);
+  const expectations = out.expectations.filter((e) => !e.monthly).map((e) => {
     const to = e.showOn && execPairings.find((p) => p.id === e.showOn);
     if (!to) return e;
     const column = KEY_COLUMNS[e.key][0];
@@ -1903,7 +1905,8 @@ function compare({ out, timeline, execPairings, tz, codes: catalog, fdp, hideCod
     groups.get(root).push(d.date);
   }
 
-  const rows = [];
+  const rows = monthly.map((e) => ({ dates: [e.date], at: '', monthly: true, label: e.label ?? e.ruleTitle, column: KEY_COLUMNS[e.key][0],
+    expected: e.min, reported: 0, diff: -e.min, ok: false, pending: false, items: [e] }));
   const range = (ds) => (ds.length === 1 ? ddmm(ds[0]) : `${ddmm(ds[0])}–${ddmm(ds.at(-1))}`);
   // קטעים לועזיים, כל אחד מבודד (LRI/PDI): התאריכים הכי ימניים, ומשמאלם פרטי הטיסה. בלי בידוד
   // הדפדפן הופך את שני התאריכים, ובלי הפרדה התווית כולה נקראת משמאל לימין והתאריכים יוצאים משמאל.
