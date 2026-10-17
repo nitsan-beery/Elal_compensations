@@ -281,7 +281,9 @@ function evaluateFiles({ rulesData, plan = null, exec = null, answers = {}, hist
   if (mode === 'full') addedNotes(out, answers);
   explainCompensations(out);
   if (exec) {
-    out.comparison = compare({ out, timeline, execPairings, tz, codes, fdp, hideCode: (d, c) => softStart.has(d) && isRap(c) });
+    const runCompare = () => compare({ out, timeline, execPairings, tz, codes, fdp, hideCode: (d, c) => softStart.has(d) && isRap(c) });
+    out.comparison = runCompare();
+    if (assignFloating(out)) out.comparison = runCompare();
     explainUnexplained(out, timeline, cal, execPairings.filter((p) => ctx.pairingHandledBy(p, 'diversion_assumed')));
     out.totals = compareTotals(out, exec);
     warnMissingColumns(out, exec);
@@ -1534,6 +1536,61 @@ function explainCompensations(out) {
     const why = String(e.note ?? '').replace(/^\u2066[^\u2069]*\u2069(?: (?:→ |ו-)\u2066[^\u2069]*\u2069)*: /, '').replace(/\.$/, '');
     e.explain = why ? `${why}.` : '';
   }
+}
+
+/**
+ * שיוך פיצוי חסר (בעל המוצר, 17/10/2026; `requirements.md` סעיף 11, טיוטה 364): פיצוי שאינו מוצמד לתאריך
+ * (ימים ללא פעילות, שבתות ברצף) ומגיע לפי התשובה, אבל הרומה לא רשמה אותו במקום שלו (`floating`), משויך
+ * לשורות בפירוט שיש בהן פיצוי לא מוסבר באותה עמודה: פיצוי אחד לשורה אחת או לכמה שורות שהסכום שלהן שווה
+ * לו, או כמה פיצויים לשורה אחת בסכום שלהם. לפי סדר הציפיות (ימים פנויים לפני שבתות), ושורות מוקדמות קודם.
+ * הציפייה עוברת לשורה, ובהערות ההנחה. פברואר 2026 של יונתן: COM 02:30 ב-07/02. מחזירה אם השתנה משהו.
+ */
+function assignFloating(out) {
+  let pool = out.expectations.filter((e) => e.floating);
+  if (!pool.length) return false;
+  let rows = out.comparison
+    .filter((r) => COMPENSATION_COLUMNS.includes(r.column) && !r.pending && r.reported > r.expected && !r.items.some((e) => e.floating))
+    .map((r) => ({ row: r, min: r.reported - r.expected }));
+  const columnOf = (e) => KEY_COLUMNS[e.key][0];
+  const sum = (xs) => xs.reduce((s, x) => s + x.min, 0);
+  // כל תת-הקבוצות עד `max` איברים, הקטנות קודם ובכל גודל לפי הסדר.
+  const subsets = (xs, max) => {
+    const out = [[]];
+    for (const x of xs) for (const s of [...out]) if (s.length < max) out.push([...s, x]);
+    return out.filter((s) => s.length).sort((a, b) => a.length - b.length);
+  };
+  const where = (r) => (r.row.dates.length > 1 ? `${ddmm(r.row.dates[0])}–${ddmm(r.row.dates.at(-1))}` : ddmm(r.row.dates[0]));
+  const moveTo = (e, r, min = e.min) => {
+    const { pairingId, pairing, monthly, floating, ...rest } = e;
+    return { ...rest, min, date: r.row.dates[0], dates: [r.row.dates[0]] };
+  };
+  const moved = new Map(); // ציפייה → הציפיות שבמקומה
+  const find = () => {
+    for (const e of pool) {
+      const s = subsets(rows.filter((r) => r.row.column === columnOf(e)), 4).find((rs) => sum(rs) === e.min);
+      if (s) return { es: [e], rs: s };
+    }
+    for (const es of subsets(pool, pool.length).filter((x) => x.length > 1)) {
+      const r = rows.find((x) => es.every((e) => columnOf(e) === x.row.column) && sum(es) === x.min);
+      if (r) return { es, rs: [r] };
+    }
+    return null;
+  };
+  for (let m = find(); m; m = find()) {
+    const { es, rs } = m;
+    if (es.length === 1) moved.set(es[0], rs.map((r) => moveTo(es[0], r, r.min)));
+    else for (const e of es) moved.set(e, [moveTo(e, rs[0])]);
+    const amounts = rs.map((r) => `${minToHhmm(r.min)} ב-${where(r)}`);
+    const one = rs.length === 1;
+    const what = es.length === 1 ? `לפיצוי על ${es[0].floating}` : `לפיצויים על ${es.slice(0, -1).map((e) => e.floating).join(', ')} ועל ${es.at(-1).floating}`;
+    out.notes.push({ date: rs[0].row.dates[0], ruleId: es[0].ruleId, ruleTitle: es[0].ruleTitle,
+      message: `האפליקציה מניחה ש${one ? 'הזיכוי' : 'הזיכויים'} ${amounts.slice(0, -1).join(', ')}${one ? '' : ' ו-'}${amounts.at(-1)} ${one ? 'שייך' : 'שייכים'} ${what}.` });
+    pool = pool.filter((e) => !es.includes(e));
+    rows = rows.filter((r) => !rs.includes(r));
+  }
+  if (!moved.size) return false;
+  out.expectations = out.expectations.flatMap((e) => moved.get(e) ?? [e]);
+  return true;
 }
 
 /**
