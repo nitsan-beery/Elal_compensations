@@ -45,6 +45,8 @@ const CREDIT_LABEL_COLUMNS = ['Credit', 'FLT+DH', 'Rig'];
  *        אותו (`parseEvents` ב-js/calendar.js): הרכב הצוות ושעות הכוננות. תשובה של המשתמש קודמת להן.
  * @param {string[]} [input.reopen]  שאלות שהיומן אינו עונה עליהן, כי המשתמש החליט בהן בעצמו
  *        (`calendarIgnored` ברשומת החודש; בעל המוצר, 04/10/2026).
+ * @param {string[]} [input.assumedIgnored]  הנחות שהמשתמש ביטל ב"שנה" (`ctx.assume`; בעל המוצר, 17/10/2026,
+ *        טיוטה 365): השאלה נשאלת, כאילו הרומה לא זיכתה.
  * @param {Array<{flights, standby}>} [input.calendarHistory]  התמונות של החודש מהיומן לפני הרומה,
  *        לפי הסדר (`appendSnapshot` ב-js/rules/journal.js). בלעדיהן – היומן עצמו כתמונה אחת.
  *
@@ -66,7 +68,7 @@ export function evaluate(input) {
  * `calendarRun`: הריצה מול הרומה שנבנתה מהיומן (`calendarExec`): השאלות בנוסח של היומן
  * (`ctx.calendarRun`), ומגבלות החוק לפי הזמנים שביומן, כמו בתכנון (`calendarRun.plan`).
  */
-function evaluateFiles({ rulesData, plan = null, exec = null, answers = {}, history = [], calendar = null, reopen = [], calendarHistory = null },
+function evaluateFiles({ rulesData, plan = null, exec = null, answers = {}, history = [], calendar = null, reopen = [], calendarHistory = null, assumedIgnored = [] },
   { journal: useJournal = true, calendarRun = null } = {}) {
   calendar = withoutKept(calendar);
   // התשובות שהשרשרת מהיומן קובעת נוספות לכאן (`applyJournal`).
@@ -140,6 +142,8 @@ function evaluateFiles({ rulesData, plan = null, exec = null, answers = {}, hist
     notes: [],
     reviews: [],
     questions: [],
+    // תשובות שהאפליקציה הניחה כי הרומה זיכתה (`ctx.assume`): שורות ב"תשובות שנשמרו", עם "שנה" (טיוטה 365).
+    assumptions: [],
     // תשובות שנשאלו רק בגלל תשובה אחרת: שינוי שלה מוחק גם אותן (`splitSwappedElsewhere`).
     dependentAnswers,
     // לפי הקודים שב-`rules.json`: קוד שהונח כפעילות קרקע נשאר בהתראה, עם ההנחה.
@@ -154,7 +158,7 @@ function evaluateFiles({ rulesData, plan = null, exec = null, answers = {}, hist
 
   const assumed = new Map(); // planId → ערכי התשובה שהאפליקציה הניחה בלי לשאול
   const ctx = makeContext({ out, timeline, domicile, codes, holidays: rulesData.holidays ?? {}, answers, plan, exec, supported, matches, planPairings,
-    period, fleet, fdp, tz, assumed, reportDays, calendarAnswer: (id) => (reopen.includes(id) ? null : cal.answer(id)), calendarFirstDay: cal.firstDay,
+    period, fleet, fdp, tz, assumed, assumedIgnored, reportDays, calendarAnswer: (id) => (reopen.includes(id) ? null : cal.answer(id)), calendarFirstDay: cal.firstDay,
     calendarRun: !!calendarRun,
     // בלי דוח ביצוע, הסבבים המתוכננים משמשים לחישוב הקרדיט והרי"ג הצפויים.
     execPairings: exec ? execPairings : planPairings });
@@ -839,7 +843,7 @@ function calendarFacts(calendar, domicile) {
 
 // ---------- ctx: מה שהלוגיקות רואות ----------
 
-function makeContext({ out, timeline, domicile, codes, holidays, answers, plan, exec, supported, matches, planPairings, period, fleet, execPairings, fdp, tz, assumed, reportDays = [], calendarAnswer, calendarFirstDay, calendarRun = false }) {
+function makeContext({ out, timeline, domicile, codes, holidays, answers, plan, exec, supported, matches, planPairings, period, fleet, execPairings, fdp, tz, assumed, assumedIgnored = [], reportDays = [], calendarAnswer, calendarFirstDay, calendarRun = false }) {
   const absenceBy = new Map(); // date → Set(ruleId)
   const pairingTags = new Map(); // pairing.id → Set(tag)
   const askedIds = new Set();
@@ -887,6 +891,18 @@ function makeContext({ out, timeline, domicile, codes, holidays, answers, plan, 
     assumeAnswer(pairing, value) {
       assumed.set(pairing.id, [...new Set([...(assumed.get(pairing.id) ?? []), value])]);
     },
+    /**
+     * תשובה שהאפליקציה מניחה בלי לשאול, כי הרומה כבר זיכתה: `{ value }`, ושורה ב"תשובות שנשמרו" עם "שנה"
+     * (`out.assumptions`; בעל המוצר, 17/10/2026, טיוטה 365). null כשהמשתמש ביטל את ההנחה (`assumedIgnored`):
+     * החוק שואל כרגיל, כאילו הרומה לא זיכתה. `label`: התשובה, כפי שהיא בשאלה.
+     */
+    assume(id, value, label) {
+      if (assumedIgnored.includes(id)) return null;
+      if (!out.assumptions.some((a) => a.id === id)) out.assumptions.push({ id, value, label });
+      return { value, assumed: true };
+    },
+    /** האם המשתמש ביטל את ההנחה על השאלה (`assume`). */
+    assumeIgnored: (id) => assumedIgnored.includes(id),
 
     /** קודי פעילות ביום (קרקע, סימולטור, כוננות), בלי היעדרות, הערות ו-DUM. לפי הדוח כשיש. */
     activityCodes(day) {
@@ -1009,6 +1025,11 @@ function makeContext({ out, timeline, domicile, codes, holidays, answers, plan, 
     ask(question) {
       if (askedIds.has(question.id) || answers[question.id]) return;
       askedIds.add(question.id);
+      // הנחה שהמשתמש ביטל (`assume`): הרומה כן מזכה, והשאלה אומרת זאת (טיוטה 365).
+      if (assumedIgnored.includes(question.id) && question.body) {
+        const [, text, ask] = question.body.replaceAll('הרומה לא מזכה', 'הרומה מזכה').match(/^(.*?)(\s*מה קרה\?)?$/s);
+        question = { ...question, body: `${text} ביקשת לשנות את הנחת האפליקציה.${ask ?? ''}` };
+      }
       out.questions.push(question);
     },
 

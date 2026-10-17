@@ -216,11 +216,12 @@ function second_unplanned_activity(ctx, params, rule) {
   const simPlanned = (day) => planSimDay(day, params);
   const key = keyFor(params.report_column);
 
+  const restLabel = `הייתה מנוחה של ${params.legal_rest_hours} שעות לפחות`;
   const askRest = (id, date, title) => ctx.ask({
     id, date, title,
     body: `לסימולטור אין שעות בקבצים, והרומה לא מזכה על הפעילות השנייה. היא מזכה רק אם הייתה מנוחה חוקית (${params.legal_rest_hours} שעות לפחות) בין שתי הפעילויות, כלומר הן לא באותו FDP.`,
     options: [
-      { value: 'separate', label: `הייתה מנוחה של ${params.legal_rest_hours} שעות לפחות`, hint: `${minToHhmm(H(params.hours))} על הפעילות השנייה` },
+      { value: 'separate', label: restLabel, hint: `${minToHhmm(H(params.hours))} על הפעילות השנייה` },
       { value: 'same_fdp', label: 'שתיהן באותו FDP', hint: 'אין פיצוי' },
     ],
     ruleId: rule.id,
@@ -257,7 +258,7 @@ function second_unplanned_activity(ctx, params, rule) {
     if (!act.sim) continue;
     const id = `second_activity:${u.id}`;
     const answered = ctx.answer(id);
-    const a = answered ?? (ctx.paidOnDate(day, params.report_column, key, H(params.hours)) ? { value: 'separate' } : null);
+    const a = answered ?? (ctx.paidOnDate(day, params.report_column, key, H(params.hours)) ? ctx.assume(id, 'separate', restLabel) : null);
     if (!a) askRest(id, day, `${describePairing(u)} לא הייתה בתכנון, ובאותה יממה היה סימולטור. האם הייתה מנוחה ביניהם?`);
     else if (a.value === 'separate') ctx.expectPairing(u, key, H(params.hours), rule, `${describePairing(u)} לא הייתה בתכנון, ובאותה יממה היה סימולטור ` +
       `(${answered ? 'לפי תשובתך, עם מנוחה חוקית ביניהם' : `הרומה מזכה את הפיצוי`})`, { date: day, dates: [day] });
@@ -293,7 +294,7 @@ function second_unplanned_activity(ctx, params, rule) {
       }
       const id = `second_activity:${m.exec.id}:${d}`;
       const answered = ctx.answer(id);
-      const a = answered ?? (ctx.paidOnDate(d, params.report_column, key, H(params.hours)) ? { value: 'separate' } : null);
+      const a = answered ?? (ctx.paidOnDate(d, params.report_column, key, H(params.hours)) ? ctx.assume(id, 'separate', restLabel) : null);
       if (!a) askRest(id, d, `${what}, ובאותה יממה היה סימולטור. האם הייתה מנוחה ביניהם?`);
       else if (a.value === 'separate') ctx.expectPairing(m.exec, key, H(params.hours), rule, `${what}, ובאותה יממה היה סימולטור ` +
         `(${answered ? 'לפי תשובתך, עם מנוחה חוקית ביניהם' : 'הרומה מזכה את הפיצוי'})`, { date: d, dates: [d], explain: `הסבב התארך ל-${ddmm(d)}, ובאותה יממה היה סימולטור.` });
@@ -311,7 +312,7 @@ function second_unplanned_activity(ctx, params, rule) {
     if (!flights.length) continue;
     const id = `second_activity:sim:${day.date}`;
     const answered = ctx.answer(id);
-    const a = answered ?? (ctx.paidOnDate(day.date, params.report_column, key, H(params.hours)) ? { value: 'separate' } : null);
+    const a = answered ?? (ctx.paidOnDate(day.date, params.report_column, key, H(params.hours)) ? ctx.assume(id, 'separate', restLabel) : null);
     if (!a) askRest(id, day.date, `סימולטור ב-${ddmm(day.date)} לא היה בתכנון, ובאותה יממה בוצעה ${flights.map(describePairing).join(', ')}. האם הייתה מנוחה ביניהם?`);
     else if (a.value === 'separate') ctx.expect(day.date, key, H(params.hours), rule,
       `סימולטור לא מתוכנן ביממה עם טיסה (${answered ? 'לפי תשובתך, עם מנוחה חוקית ביניהם' : `הרומה מזכה את הפיצוי`})`);
@@ -412,7 +413,8 @@ function base_rest_shortfall(ctx, params, rule) {
   const performed = (link) => !ctx.hasExec || [...link.u1.pairings, ...link.u2.pairings].every((p) => performedAsPlanned(ctx, p));
   const targetOf = (link) => (ctx.hasExec ? performedAsPlanned(ctx, link.p2) : link.p2);
   // הדוח כבר מזכה (מעבר למה שחוקים אחרים מסבירים): לא שואלים, והפיצוי נרשם כוויתור לבקשת החברה.
-  const paidOn = (link) => ctx.hasExec && performed(link) &&
+  // הנחה שהמשתמש ביטל (`ctx.assume`; טיוטה 365) – כאילו הרומה לא זיכתה. ברצף המזהה הוא של המנוחה הראשונה בו.
+  const paidOn = (link) => ctx.hasExec && performed(link) && !ctx.assumeIgnored(`base_rest:${link.p2.id}`) &&
     ctx.reportedOn(targetOf(link), params.report_column) - ctx.expectedOn(targetOf(link), keyFor(params.report_column), own) >= H(params.hours);
   // רצף שאינו רצף: נענה אחרת, או שהרומה זיכתה על כל המנוחות בו.
   // רצף של 3 טיסות יום אינו נשאל (טיוטה 328), ותשובה קודמת עליו אינה נקראת.
@@ -449,7 +451,8 @@ function base_rest_shortfall(ctx, params, rule) {
     // "רצף" על מנוחה שאינה עוד חלק מרצף שעומד בתנאים – נשאל שוב.
     // רצף של 3 טיסות יום בתכנון: בטוח שהוצג בתכנית החודשית, בלי שאלה (בעל המוצר, 13/10/2026; טיוטה 328).
     const a = chain?.assumed ? { value: paid ? 'company_request' : 'sequence' }
-      : (answered?.value === 'sequence' && !chain ? null : answered) ?? (paid ? { value: 'company_request' } : null);
+      : (answered?.value === 'sequence' && !chain ? null : answered) ??
+        (paid ? ctx.assume(id, 'company_request', baseRestOptions(ctx, false).find((o) => o.value === 'company_request').label) : null);
     if (!a) {
       if (chain && !asked.has(chain.id)) {
         asked.add(chain.id);
@@ -914,16 +917,20 @@ function night_landings(ctx, params, rule) {
     return;
   }
   // פיצוי שהרומה זיכתה אינו בהערות, רק בשורה שלו (בעל המוצר, 14/10/2026; טיוטה 333).
-  const paidAll = ctx.hasExec && paying.every((n) => (n.target ? ctx.paidOn(n.target, params.report_column, key, hours)
+  // הנחה שהמשתמש ביטל על אחת הטיסות (`ctx.assume`; טיוטה 365): כאילו הרומה לא זיכתה, והיא נשאלת ראשונה.
+  const nightId = (n) => `night_crew:${n.crewLeg.date}:${n.crewLeg.flight}`;
+  const ignored = open.filter((n) => ctx.assumeIgnored(nightId(n)));
+  const paidAll = ctx.hasExec && !ignored.length && paying.every((n) => (n.target ? ctx.paidOn(n.target, params.report_column, key, hours)
     : ctx.paidOnDate(n.pairing.from, params.report_column, key, hours)));
   // הרומה מזכה את כולן: הרכב הצוות שלא נענה מוסק ממנה ואינו נשאל, וזה כתוב בשורת הפיצוי.
   const assumed = open.length > 0 && paidAll;
+  if (assumed) for (const n of open) ctx.assume(nightId(n), crews[0], `צוות ${crewNames}`);
   if (open.length) {
     if (!paidAll) {
       // שואלים אחת בכל פעם, מהטיסה הארוכה ביותר (בקשת בעל המוצר, 23/09/2026): תשובה שאינה
       // נספרת מורידה את המספר ומייתרת את השאר, והסיכוי לכך גדול יותר בטיסה ארוכה.
       const block = (n) => legBlock(ctx, n.crewLeg) ?? n.crewLeg.skdDur ?? 0;
-      const next = [...open].sort((a, b) => block(b) - block(a) || a.crewLeg.date.localeCompare(b.crewLeg.date))[0];
+      const next = [...(ignored.length ? ignored : open)].sort((a, b) => block(b) - block(a) || a.crewLeg.date.localeCompare(b.crewLeg.date))[0];
       const leg = next.crewLeg;
       const clock = next.bid?.landing?.clock ?? next.clock;
       // השאלה על הרכב הצוות כבר נשאלה בבדיקת מגבלות החוק, על ה-FDP של הטיסה הזאת.
@@ -932,7 +939,7 @@ function night_landings(ctx, params, rule) {
         `${crewNames}, מגיע פיצוי של ${minToHhmm(hours)}.`, rule);
       // בתכנון לבד הרכב הצוות אינו נשאל (בעל המוצר, 03/10/2026): ההערה כבר אומרת תחת איזו הנחה מגיע פיצוי.
       if (!pendingLegal && ctx.hasExec) ctx.ask({
-        id: `night_crew:${leg.date}:${leg.flight}`,
+        id: nightId(next),
         date: leg.date,
         title: `נחיתת לילה: באיזה צוות בוצעה ${leg.flight} ב-${ddmm(leg.date)} (נחיתה ${minToHhmm(clock)} שעון ישראל)?`,
         body: `${planned}. על מנת לחשב אם מגיע פיצוי נדרשת תשובה על הרכב הצוות בכל אחת מהטיסות.`,
@@ -1073,11 +1080,16 @@ function special_date_activity(ctx, params, rule) {
     let date = occ.dates?.[String(ctx.period.year)];
     // תאריך שאינו קבוע משנה לשנה ואינו בקבצים: המשתמש בוחר אותו ביומן. עד הבחירה נבדקת
     // ברירת המחדל, רק כדי לראות אם הרומה כבר מזכה עליה; אם לא – שואלים, ולא בודקים דבר.
+    // הרומה מזכה על פעילות בחלון של ברירת המחדל: התאריך מונח (`ctx.assume`; טיוטה 365), ואחרי ביטול ההנחה – נשאל.
     let askDate = null;
+    let assumeDate = null;
     if (!date && occ.ask_date && (occ.months ?? []).includes(ctx.period.month)) {
       const picked = occasionDate(ctx, occ);
       date = picked.date;
-      if (!picked.chosen) askDate = () => askOccasionDate(ctx, occ, rule, picked.date);
+      if (!picked.chosen) {
+        askDate = () => askOccasionDate(ctx, occ, rule, picked.date);
+        assumeDate = () => ctx.assume(`${occ.ask_date.id}:${ctx.period.year}`, picked.date, ddmm(picked.date));
+      }
     }
     if (!date) {
       if ((occ.months ?? []).includes(ctx.period.month)) {
@@ -1102,7 +1114,7 @@ function special_date_activity(ctx, params, rule) {
       if (start < wTo && end > wFrom) { hit = p; break; }
     }
     if (hit) {
-      if (askDate && !ctx.paidOn(hit, params.report_column, key, H(params.hours))) { askDate(); continue; }
+      if (askDate && (!ctx.paidOn(hit, params.report_column, key, H(params.hours)) || !assumeDate())) { askDate(); continue; }
       // הרומה רושמת לפעמים את הפיצוי ביום אחר בחלון, שאין בו טיסה (21/04/2026: ערב יום העצמאות,
       // והטיסה ב-22/04). לחוקים הציפייה על היום שברומה, ובפירוט על הטיסה, עם איפה זה ברומה (`showOn`).
       const own = ctx.reportDates(hit);
@@ -1122,10 +1134,10 @@ function special_date_activity(ctx, params, rule) {
 
     const days = ctx.timeline.filter((d) => d.date >= dateOf(wFrom) && d.date <= dateOf(wTo - 1));
     const coded = days.find((d) => ctx.activityCodes(d).length);
-    if (!coded || (askDate && !ctx.paidOnDate(coded.date, params.report_column, key, H(params.hours)))) { askDate?.(); continue; }
+    if (!coded || (askDate && (!ctx.paidOnDate(coded.date, params.report_column, key, H(params.hours)) || !assumeDate()))) { askDate?.(); continue; }
     const id = `occasion:${rule.id}:${date}`;
     const answered = ctx.answer(id);
-    const a = answered ?? (ctx.paidOnDate(coded.date, params.report_column, key, H(params.hours)) ? { value: 'yes' } : null);
+    const a = answered ?? (ctx.paidOnDate(coded.date, params.report_column, key, H(params.hours)) ? ctx.assume(id, 'yes', 'הייתי בפעילות מטעם החברה') : null);
     if (!a) {
       ctx.ask({
         id,
@@ -1256,7 +1268,7 @@ function free_days_waived(ctx, params, rule) {
   // הדוח כבר מזכה ביום הראשון בחודש: לא שואלים.
   const paid = ctx.hasExec &&
     ctx.reportedOnDate(ctx.monthFirst, params.report_column) - ctx.expectedOnDate(ctx.monthFirst, key) >= paidDays * H(params.hours);
-  const a = ctx.answer(id) ?? (paid ? { value: 'company' } : null);
+  const a = ctx.answer(id) ?? (paid ? ctx.assume(id, 'company', 'לבקשת החברה') : null);
   // "היום השני" נספר מבין הימים שוויתרת עליהם לבקשת החברה בלבד (2024 ס' 33), ולכן ויתור מרצון
   // על חלק מהימים מוריד את הפיצוי לפי מה שנשאר לבקשת החברה (בעל המוצר, 29/09/2026).
   const paidFor = (companyDays) => Math.max(0, companyDays - (params.paid_from_day - 1));
@@ -1364,10 +1376,10 @@ function consecutive_saturdays(ctx, params, rule) {
       (grounds.length ? ` (פעילות קרקע: ${grounds.join(', ')})` : '');
     // הפיצוי רק לבקשת החברה (ס' 34); ויתור בבקשות (2018 ס' 61.2) אינו מזכה. כשהרומה זיכתה – מניחים
     // לבקשת החברה; אחרת, ובתכנון לבד תמיד, שואלים (בעל המוצר, 16/10/2026).
+    const id = `saturdays:${s1}`;
     const paid = ctx.hasExec && (a2.pairing ? ctx.paidOn(a2.pairing, params.report_column, key, H(params.hours))
-      : ctx.paidOnDate(s2, params.report_column, key, H(params.hours)));
+      : ctx.paidOnDate(s2, params.report_column, key, H(params.hours))) && !!ctx.assume(id, 'company', 'לבקשת החברה');
     if (!paid) {
-      const id = `saturdays:${s1}`;
       const a = ctx.answer(id);
       if (!a) {
         ctx.ask({
@@ -1469,13 +1481,15 @@ function consecutive_night_rounds(ctx, params, rule) {
 
     const payNight = run[params.more_than];
     // כשהדוח כבר מזכה על אחד הלילות ברצף, הצפוי נרשם שם.
-    const paid = ctx.hasExec ? run.map((d) => performed.get(d)).find((p) =>
+    // הנחה שהמשתמש ביטל (`ctx.assume`; טיוטה 365) – כאילו הרומה לא זיכתה.
+    const id = `night_rounds:${run[0]}`;
+    let paid = ctx.hasExec ? run.map((d) => performed.get(d)).find((p) =>
       p && ctx.reportedOn(p, params.report_column) - ctx.expectedOn(p, key) >= H(params.hours)) : null;
+    if (paid && !ctx.answer(id) && !ctx.assume(id, 'company', 'לבקשת החברה')) paid = null;
     const target = paid ?? (ctx.hasExec ? performed.get(payNight) : planned.get(payNight));
     const why = `${what}${statuses.includes('company') ? ' (חלקן בוטלו ביוזמת החברה)' : ''}`;
     if (ctx.hasExec) {
       if (!paid) {
-        const id = `night_rounds:${run[0]}`;
         const a = ctx.answer(id);
         if (!a) {
           ctx.ask({
@@ -1555,7 +1569,7 @@ function white_flight(ctx, params, rule) {
     const what = `${l.flight} ${l.org}→${l.dst} ב-${ddmm(l.date)}, התייצבות ${hhmm(reportAt)}, בלוק ${minToHhmm(block)}`;
     const id = `white:${l.date}:${l.flight}`;
     const answered = ctx.answer(id);
-    const a = answered ?? (ctx.paidOn(p, params.report_column, key, H(params.hours), own) ? { value: 'yes' } : null);
+    const a = answered ?? (ctx.paidOn(p, params.report_column, key, H(params.hours), own) ? ctx.assume(id, 'yes', 'צוות מוגבר או כפול עם חניך') : null);
     // כל רגלי הסבב: אותו צוות.
     for (const x of p.legs) {
       if (x.flight) ctx.whiteLegs.set(`${x.date}|${x.flight}`, a ? { value: whiteCrew(a.value), source: answered ? answered.source ?? 'white' : 'white_paid' } : null);
@@ -1755,7 +1769,7 @@ function legal_crew_composition(ctx, params, rule) {
       if (!paid) {
         ctx.note(fdp.date, `${routeOnly(fdp.what)} ${verb} בצוות ${CREW_LABEL[answered.value]} ${by}, קטן מהצוות החוזי (${CREW_LABEL[need]}).${stale}`, rule, { aside: true });
       }
-    } else if (ctx.paidOn(pairing, params.report_column, key, amount, own)) {
+    } else if (ctx.paidOn(pairing, params.report_column, key, amount, own) && ctx.assume(fdp.id, 'smaller', `צוות קטן מהחוזי (${CREW_LABEL[need]})`)) {
       below++;
       ctx.expectPairingDay(pairing, day, key, amount, rule,
         `${rule.title}: ${fdp.what}. הרומה מזכה את הפיצוי, ולכן הצוות היה קטן מהחוזי (${CREW_LABEL[need]})`,
@@ -1823,7 +1837,8 @@ function stay_extension(ctx, params, rule) {
     const answered = ctx.answer(id);
     // הדוח כבר מזכה את הסכום הגבוה שאפשרי כאן: אין פער, ולא שואלים. לפי יום: על כל יממה לא מתוכננת, ולא
     // הסכום על הסבב (בעל המוצר, 08/10/2026).
-    const a = answered ?? (inMonth.length && inMonth.every((d) => ctx.paidOnDate(d, params.report_column, key, H(params.hours))) ? { value: 'company' } : null);
+    const a = answered ?? (inMonth.length && inMonth.every((d) => ctx.paidOnDate(d, params.report_column, key, H(params.hours)))
+      ? ctx.assume(id, 'company', 'מגיע פיצוי על כל הימים הלא מתוכננים') : null);
     if (!a) {
       ctx.ask({
         id,
@@ -1937,7 +1952,7 @@ function short_rest_miami(ctx, params, rule) {
     }
     const id = `miami_short_rest:${p.id}`;
     const answered = ctx.answer(id);
-    const a = answered ?? (ctx.paidOn(p, params.report_column, key, hours, own) ? { value: 'yes' } : null);
+    const a = answered ?? (ctx.paidOn(p, params.report_column, key, hours, own) ? ctx.assume(id, 'yes', 'כן, לילה אחד בלבד') : null);
     if (a?.value === 'no') {
       ctx.note(p.from, `${rule.title}: ${what}. לפי תשובתך שהית שם יותר מלילה אחד, ולכן אין פיצוי.`, rule);
       continue;
@@ -2002,7 +2017,7 @@ function miami_delay(ctx, params, rule) {
     const id = `miami_delay:${p.id}`;
     const answered = ctx.answer(id);
     const assumed = !ctx.pairingHandledBy(p, 'miami_delay') && ctx.paidOn(p, params.report_column, key, hours, own);
-    const a = answered ?? (assumed ? { value: params.phase } : null);
+    const a = answered ?? (assumed ? ctx.assume(id, params.phase, PHASE_LABEL[params.phase]) : null);
     if (!a) {
       if (ctx.pairingHandledBy(p, 'miami_delay')) continue; // החוק השני כבר קבע
       const opt = (phase) => {
@@ -2069,7 +2084,7 @@ function short_rest_las_vegas(ctx, params, rule) {
     }
     const id = `las_vegas_rest:${p.id}`;
     const answered = ctx.answer(id);
-    const a = answered ?? (ctx.paidOn(p, params.report_column, key, hours, own) ? { value: 'yes' } : null);
+    const a = answered ?? (ctx.paidOn(p, params.report_column, key, hours, own) ? ctx.assume(id, 'yes', 'כן, המנוחה קוצרה') : null);
     if (!a) {
       ctx.ask({
         id,
@@ -2178,9 +2193,10 @@ function sim_extension(ctx, params, rule) {
     const dur = mod(s.sta - s.std, 1440);
     if (dur <= max) continue;
     const what = `${simLabel(s)} נמשך ${minToHhmm(dur)}, יותר מ-${minToHhmm(max)}`;
-    const paid = ctx.reportedOnDate(s.date, params.report_column) - ctx.expectedOnDate(s.date, key) >= H(params.hours);
+    const id = `sim_extension:${s.date}:${s.std}`;
+    const paid = ctx.reportedOnDate(s.date, params.report_column) - ctx.expectedOnDate(s.date, key) >= H(params.hours) &&
+      (!!ctx.answer(id) || !!ctx.assume(id, 'company', 'לבקשת החברה'));
     if (!paid) {
-      const id = `sim_extension:${s.date}:${s.std}`;
       const a = ctx.answer(id);
       if (!a) {
         ctx.ask({

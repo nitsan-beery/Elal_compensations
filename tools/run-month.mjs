@@ -3,6 +3,7 @@
 // החודשים הקודמים (למגבלות החוק) נטענים מאותה תיקייה, לפי שמות הקבצים, כמו ההיסטוריה באפליקציה.
 // --no-history: בלי חודשים קודמים.
 // --calendar <קובץ>: השלמות מהיומן, כפי שהאפליקציה שומרת אותן ({flights, standby}; `parseEvents` ב-js/calendar.js).
+// --ignore-assumed <מזהה,מזהה>: הנחות שהמשתמש ביטל ("שנה" על הנחה ב"תשובות שנשמרו"; `assumedIgnored`).
 // --calendar-history <קובץ>: התמונות של החודש מהיומן לפני הרומה, לפי הסדר (`appendSnapshot` ב-js/rules/journal.js).
 import fs from 'node:fs';
 import path from 'node:path';
@@ -18,6 +19,7 @@ const exec = arg('exec') ? await parseExec(fs.readFileSync(arg('exec'))) : null;
 const answers = arg('answers') ? JSON.parse(fs.readFileSync(arg('answers'), 'utf8')) : {};
 const history = process.argv.includes('--no-history') ? [] : await loadHistory();
 const calendar = arg('calendar') ? JSON.parse(fs.readFileSync(arg('calendar'), 'utf8')) : null;
+const assumedIgnored = arg('ignore-assumed')?.split(',') ?? [];
 const calendarHistory = arg('calendar-history') ? JSON.parse(fs.readFileSync(arg('calendar-history'), 'utf8')) : null;
 
 async function loadHistory() {
@@ -41,7 +43,7 @@ async function loadHistory() {
   return out;
 }
 
-const r = evaluate({ rulesData, plan, exec, answers, history, calendar: calendar ?? calendarHistory?.at(-1) ?? null, calendarHistory });
+const r = evaluate({ rulesData, plan, exec, answers, history, calendar: calendar ?? calendarHistory?.at(-1) ?? null, calendarHistory, assumedIgnored });
 const hm = (v, unit) => (unit === 'count' ? String(v) : minToHhmm(v));
 
 console.log(`חודש ${r.period.month}/${r.period.year} · מצב ${r.mode} · בסיס ${r.domicile} · חוקים ${r.rulesVersion}`);
@@ -98,6 +100,10 @@ if (r.questions.length) {
   console.log('\n== שאלות למשתמש ==');
   const text = (t) => (Array.isArray(t) ? t.map((p) => (typeof p === 'string' ? p : p.text)).join('') : t).replace(/\n/g, ' ');
   for (const q of r.questions) console.log(`? [${q.id}] ${text(q.title)}\n    ${q.options.map((o) => o.value).join(' / ')}`);
+}
+if (r.assumptions?.length) {
+  console.log('\n== הנחות האפליקציה ==');
+  for (const a of r.assumptions) console.log(`~ [${a.id}] ${a.label}`);
 }
 if (r.obsoleteAnswers?.length) console.log(`\nתשובות על שלבים שחזרו: ${r.obsoleteAnswers.join(', ')}`);
 if (r.reviews.length) {

@@ -248,7 +248,8 @@ function absence_day_credit(ctx, params, rule) {
     }
     if (params.requires_assigned_activity) {
       // הדוח כבר מזכה על היום: היית מוצב, ואין פער שמצדיק שאלה (החלטת בעל המוצר, 23/09/2026).
-      const assigned = ctx.wasAssigned(day.date) ?? (ctx.paidOnDate(day.date, 'Credit', 'absence', credit) || null);
+      const assigned = ctx.wasAssigned(day.date) ??
+        ((ctx.paidOnDate(day.date, 'Credit', 'absence', credit) && !!ctx.assume(`assigned:${day.date}`, 'yes', 'כן, הייתי מוצב')) || null);
       if (assigned == null) {
         ctx.ask({
           id: `assigned:${day.date}`,
@@ -635,7 +636,7 @@ function late_landing_home(ctx, params, rule) {
         // שמות השדות מבודדים: בלי זה "RHO (14:30). 6" מוצג כקטע לועזי אחד.
         const via = div.via.map((s) => `⁦${s}⁩`).join(' ו-');
         const answer = ctx.answer(id)?.value;
-        if (answer === 'yes' || (!answer && ctx.paidOnDate(date, 'COM', 'com', divMin))) {
+        if (answer === 'yes' || (!answer && ctx.paidOnDate(date, 'COM', 'com', divMin) && ctx.assume(id, 'yes', `כן, סטתה ל-${via}`))) {
           delay = divDelay;
           diverted = `, מול הנחיתה המתוכננת לפני הסטיה ל-${via} (${minToHhmm(div.sta)})`;
           // כל סטיה מופיעה בשינויים בין התכנון לביצוע, גם בסבב שלא תוכנן (`change`; בעל המוצר, 05/10/2026).
@@ -779,7 +780,11 @@ function special_call(ctx, params, rule) {
     // והוא מוצג כפיצוי שאף חוק אינו מסביר (DME ‏11/03/2026 שהוחלף מרצון ב-FRA ‏10–12/03; בעל המוצר, 08/10/2026).
     const consented = ['voluntary_swap', 'added'].includes(answer?.value);
     const because = answer?.value === 'special_call' || companyLinked || training || bid || cancelledPlan;
-    if ((reported > 0 && !consented) || because) {
+    // טיסה לא מתוכננת שהרומה זיכתה עליה S/C, בלי תשובה: האפליקציה מניחה קריאה מיוחדת (`ctx.assume`), ואחרי ביטול
+    // ההנחה – שואלת (טיוטה 365).
+    const callId = `unplanned:${match.exec.id}`;
+    const assumedCall = match.how === 'unplanned' && !answer && !because;
+    if ((reported > 0 && !consented && !(assumedCall && ctx.assumeIgnored(callId))) || because) {
       const stay = awayFromBase(match.exec, ctx.tz, ctx.timeline.at(-1).date);
       if (stay.error) {
         ctx.markPairing(match.exec, 'special_call');
@@ -799,6 +804,7 @@ function special_call(ctx, params, rule) {
         days.counted = days.counted.filter((d) => !own.has(d) && (!planned.has(d) || ctx.reportedOnDate(d, column) > 0));
         if (!days.counted.length) continue;
       }
+      if (assumedCall) ctx.assume(callId, 'special_call', 'קריאה מיוחדת');
       ctx.markPairing(match.exec, 'special_call');
       // סבב שיצא בחודש הקודם: קריאה מיוחדת רק על יממה שלא תוכנן בה סבב, כמו ברומה (28/02–08/03/2026, BUD:
       // S/C על 01, 06 ו-07/03, ולא על GVA ‏02–03, ‏FCO ‏04–05 ו-VCE ‏08; בעל המוצר, 08/10/2026). יום הנחיתה
@@ -857,8 +863,9 @@ function special_call(ctx, params, rule) {
     const act = second && match.how === 'unplanned' && match.exec.from === match.exec.to ? dayActivity(ctx, match.exec, match.exec.from) : null;
     // גם ביממה שלא תוכננה בה פעילות, כשהייתה לפניה פעילות לא מתוכננת והרומה זיכתה פעילות שנייה: מניחים.
     const secondOnly = !!act?.planned;
-    const secondPaid = !!act?.pairing && ctx.paidOnDate(match.exec.from, second.logic.params.report_column ?? 'COM',
-      keyFor(second.logic.params.report_column ?? 'COM'), H(second.logic.params.hours));
+    const secondPaid = !!act?.pairing && !answer && ctx.paidOnDate(match.exec.from, second.logic.params.report_column ?? 'COM',
+      keyFor(second.logic.params.report_column ?? 'COM'), H(second.logic.params.hours)) && !!ctx.assume(callId, 'special_call', 'פעילות שנייה ביוזמת החברה');
+    const reopened = ctx.assumeIgnored(callId);
     if (match.how === 'unplanned' && params.ask_user_if_no_sc && !answer && !ctx.pairingHandledBy(match.exec, 'vacation_recall') &&
       !ctx.pairingHandledBy(match.exec, 'standby_bid_pending') && !secondPaid && !(secondOnly && !act.pairing && !act.sim)) {
       ctx.ask({
@@ -867,6 +874,7 @@ function special_call(ctx, params, rule) {
         title: secondOnly ? `פעילות שלא תוכננה ביממה עם פעילות מתוכננת: ${describePairing(match.exec)}`
           : `פעילות ביום שלא תוכננה בו פעילות: ${describePairing(match.exec)}`,
         body: ctx.calendarRun ? 'הסיבה אינה בקבצים, והיא תקבע מה מגיע כשתועלה הרומה. מה קרה?'
+          : reopened ? `הרומה מזכה ${secondOnly ? 'פיצוי על פעילות שנייה' : 'קריאה מיוחדת'}, והסיבה אינה בקבצים. מה קרה?`
           : secondOnly ? 'הרומה לא מזכה פיצוי על פעילות שנייה, ולכן לא ניתן לדעת אם הוא מגיע. מה קרה?'
             : 'הרומה לא מזכה קריאה מיוחדת, ולכן לא ניתן לדעת אם היא מגיעה. מה קרה?',
         // הוספת טיסה בהסכמה: רק הקרדיט של הטיסה, בלי קריאה מיוחדת (בעל המוצר, 06/10/2026).
@@ -950,7 +958,7 @@ function extendedPairing(ctx, params, rule, match, answer) {
   // אינם בהסכמה, ועל יום שלא תוכנן בו כלום מגיעה קריאה מיוחדת, כמו ב-`companySwapToFreeDay` (בעל המוצר,
   // 08/10/2026; רון, ספטמבר 2026: WAW ב-10/09 שהוחלף ב-BCN ‏09–11/09).
   const swapped = match.how === 'dates' && ['replaced', 'bid'].includes(answer?.value);
-  const a = ctx.answer(id) ?? (paid || swapped ? { value: 'company' } : null);
+  const a = ctx.answer(id) ?? (swapped ? { value: 'company' } : paid ? ctx.assume(id, 'company', 'הסבב הוארך ביוזמת החברה') : null);
   const list = ext.days.map(dayOf).join(', ');
   if (!a) {
     const due = [days.length ? 'קריאה מיוחדת' : null, ext.second.length ? 'פיצוי על פעילות שנייה באותה יממה' : null].filter(Boolean);
@@ -1225,6 +1233,7 @@ function lost_hours_credit(ctx, params, rule) {
       ...(removed !== match.plan ? { chainFor: match.plan.id } : { forPlan: match.plan.id }) });
     ctx.markPairing(match.plan, 'lost_hours_credit');
     for (const v of assumed?.values ?? []) ctx.assumeAnswer(match.plan, v);
+    if (assumed) ctx.assume(`cancelled:${match.plan.id}`, assumed.values[0], assumed.labels);
   }
 }
 
@@ -1236,6 +1245,8 @@ function lost_hours_credit(ctx, params, rule) {
  * העמודה (ואז אי אפשר להסיק מהדוח), או כשהדוח אינו מזכה – ואז נשאלת השאלה.
  */
 function paidLostHours(ctx, planPairing) {
+  // הנחה שהמשתמש ביטל (`ctx.assume`; טיוטה 365): נשאל, כאילו הרומה לא זיכתה.
+  if (ctx.assumeIgnored(`cancelled:${planPairing.id}`)) return null;
   const rules = ctx.rulesWithLogic('lost_hours_credit').filter((r) => lostHoursApplies(ctx, planPairing, r.logic.params ?? {}));
   if (!rules.length) return null;
   const of = (r) => ({ column: r.logic.params?.credit_column ?? 'Credit', lost: lostHours(ctx, planPairing, r.logic.params ?? {}) });
@@ -1364,6 +1375,7 @@ function cancelled_no_compensation(ctx, params, rule) {
  * את מה שמתאים (השעות שהפסיד על סבב שלא בוצע, או קריאה מיוחדת על סבב באותם ימים).
  */
 function wouldAssumeCancelled(ctx, match) {
+  if (ctx.assumeIgnored(`cancelled:${match.plan.id}`)) return false;
   if (!match.exec) return !!paidLostHours(ctx, match.plan);
   return paidCallOnPlanDays(ctx, match) > 0;
 }
@@ -1496,7 +1508,7 @@ function claimLabel(ctx, entry, planLabel, execLabel, planMatch) {
  */
 function assumeCancelled(ctx, match, rule) {
   if (!match.exec) return !!paidLostHours(ctx, match.plan);
-  if (!paidCallOnPlanDays(ctx, match)) return false;
+  if (!paidCallOnPlanDays(ctx, match) || !ctx.assume(`cancelled:${match.plan.id}`, 'cancelled', 'הטיסה המקורית בוטלה ללא קרדיט')) return false;
   noteCancelled(ctx, match, rule, `הרומה מזכה קריאה מיוחדת על ${describePairing(match.exec)}`);
   ctx.assumeAnswer(match.plan, 'cancelled');
   return true;
@@ -1527,7 +1539,7 @@ function isDiversion(plan, exec) {
  * 26/09/2026 ו-05/10/2026). לחוקים של 2024 ס' 34–37 ו-39 היא ביוזמת החברה (`cancelStatus`).
  */
 function assumeDiversion(ctx, match, rule) {
-  if (!match.exec || !isDiversion(match.plan, match.exec)) return false;
+  if (!match.exec || !isDiversion(match.plan, match.exec) || !ctx.assume(`cancelled:${match.plan.id}`, 'diversion', 'סטיה לשדה משנה')) return false;
   noteDiversion(ctx, match, rule);
   // גם כשהרומה זיכתה קריאה מיוחדת: אותם מספרי טיסה הם אותה טיסה (`explainUnexplained`; בעל המוצר, 06/10/2026).
   ctx.markPairing(match.exec, 'diversion_assumed');
@@ -1848,7 +1860,8 @@ function standby_end_for_bid(ctx, params, rule) {
       // לפי יום: הרומה זיכתה S/C על כל יממה שמגיעה עליה קריאה מיוחדת (בעל המוצר, 08/10/2026).
       const bidDays = scDays(pairing, ctx, sc);
       const answer = ctx.answer(id) ?? (bidDays.length &&
-        bidDays.every((d) => ctx.paidOnDate(d, sc.logic.params?.report_column ?? 'S/C', 'sc', H(sc.logic.params?.hours))) ? { value: 'standby_bid' } : null);
+        bidDays.every((d) => ctx.paidOnDate(d, sc.logic.params?.report_column ?? 'S/C', 'sc', H(sc.logic.params?.hours)))
+        ? ctx.assume(id, 'standby_bid', 'סיום כוננות בגלל זכייה במכרז') : null);
       const range = run.length === 1 ? dayOf(run[0]) : `⁦${dayOf(run[0])}–${dayOf(run.at(-1))}⁩`;
       if (!answer) {
         ctx.markPairing(pairing, 'standby_bid_pending');

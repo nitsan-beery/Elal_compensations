@@ -12,7 +12,7 @@ import * as store from './store.js';
 import * as calendar from './calendar.js';
 
 // מספר הגרסה של הקוד שרץ בדף. עולה יחד עם CACHE ב-sw.js, לאותו מספר (בעל המוצר, 15/10/2026).
-const APP_VERSION = 251;
+const APP_VERSION = 252;
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -372,7 +372,7 @@ async function runAndSave() {
     r.calendar = fresh;
   }
   state.result = evaluate({ rulesData: state.rulesData, plan: r.plan, exec: r.exec, answers: r.answers ?? {}, history: historyFor(r, months), calendar: r.calendar ?? null,
-    reopen: r.calendarIgnored ?? [], calendarHistory: r.calendarHistory ?? null });
+    reopen: r.calendarIgnored ?? [], calendarHistory: r.calendarHistory ?? null, assumedIgnored: r.assumedIgnored ?? [] });
   // שלב שחזר למצב שלפניו יוצא מהשרשרת, יחד עם התשובה עליו (בעל המוצר, 06/10/2026).
   for (const id of state.result.obsoleteAnswers ?? []) delete r.answers?.[id];
   r.rulesVersion = state.result.rulesVersion;
@@ -868,7 +868,7 @@ function renderResults(keepDom = true) {
   parts.push(renderExpectations(res));
   parts.push(renderChanges(res));
   parts.push(renderNotes(res));
-  parts.push(renderAnswered());
+  parts.push(renderAnswered(res));
   root.innerHTML = parts.join('');
   for (const d of root.querySelectorAll('details[data-section]')) {
     if (state.sections.open.has(d.dataset.section)) d.open = state.sections.open.get(d.dataset.section);
@@ -1236,12 +1236,23 @@ function renderCalendarChanges(res) {
 const ISO_DATE = /\d{4}-\d{2}-\d{2}/;
 const answerDate = ([id, a]) => id.match(ISO_DATE)?.[0] ?? String(a?.value ?? '').match(ISO_DATE)?.[0] ?? '9999';
 
-function renderAnswered() {
-  const answers = Object.entries(state.record?.answers ?? {}).sort((a, b) => answerDate(a).localeCompare(answerDate(b)));
+/**
+ * התשובות שנשמרו, ובינן ההנחות של האפליקציה כשהרומה זיכתה (`res.assumptions`; בעל המוצר, 17/10/2026, טיוטה 365):
+ * "שנה" על הנחה מבטל אותה (`assumedIgnored`), והשאלה נשאלת.
+ */
+function renderAnswered(res) {
+  const saved = state.record?.answers ?? {};
+  const assumed = (res.assumptions ?? []).filter((x) => !saved[x.id]).map((x) => [x.id, { value: x.value, label: x.label }, true]);
+  const answers = [...Object.entries(saved), ...assumed].sort((a, b) => answerDate(a).localeCompare(answerDate(b)));
   if (!answers.length) return '';
   return `<details class="card" data-section="answered">
     <summary><h2 style="display:inline">תשובות שנשמרו <span class="count">${answers.length}</span></h2></summary>
-    <ul class="list">${answers.map(([id, a]) => `<li class="row">
+    <ul class="list">${answers.map(([id, a, byApp]) => byApp ? `<li class="row">
+      <span>${esc(describeQuestionId(id))}: <strong>${esc(a.label ?? answerLabel(a.value, id.split(':')[0]))}</strong>
+        <div class="explain">הנחת האפליקציה: הרומה מזכה את הפיצוי</div></span>
+      <span class="spacer"></span>
+      <button class="btn no-print" data-unassume="${esc(id)}">שנה</button>
+    </li>` : `<li class="row">
       <span>${esc(describeQuestionId(id))}: <strong>${esc(a.value === 'partial' && a.count ? `ויתרתי מרצוני על ${a.count === 1 ? 'יום אחד' : `${a.count} ימים`}` : a.label ?? answerLabel(a.value, id.split(':')[0]))}</strong>
         ${a.link !== undefined ? `<span class="small muted">(${a.link === 'none' ? 'מסירת הטיסה ללא חלופה' : a.link ? `עם ${esc(describePairingId(a.link))}` : 'בחודש אחר'})</span>` : ''}
         ${a.text ? `<span class="small muted">– ${esc(a.text)}</span>` : ''}
@@ -1271,7 +1282,7 @@ const QUESTION_KIND = { cancelled: 'סבב שלא בוצע', unplanned: 'פעי�
   crew: 'הרכב הצוות', night_crew: 'הרכב הצוות', white: 'טיסה לבנה', diversion: 'סטיה לשדה משנה', swap_conflict: 'סבב שהוחלף',
   base_rest: 'מנוחה בבסיס', second_activity: 'פעילות נוספת באותו FDP', occasion: 'תאריך מיוחד', night_rounds: 'טיסות סבב לילה עוקבות',
   stay_extension: 'הארכת שהייה', miami_short_rest: 'קיצור מנוחה במיאמי', miami_delay: 'דחייה במיאמי', las_vegas_rest: 'קיצור מנוחה בלאס וגאס',
-  sim_extension: 'הארכת סימולטור', extended: 'סבב שהתארך' };
+  sim_extension: 'הארכת סימולטור', extended: 'סבב שהתארך', saturdays: 'שתי שבתות ברצף' };
 
 /**
  * "diversion:2024-09-23:LY5104" → "סטיה לשדה משנה 23/09 LY5104". בחלק מהמזהים לפני התאריך יש מילה
@@ -1358,6 +1369,14 @@ function bindResults(root) {
       await runAndSave();
     });
   }
+  // "שנה" על הנחה של האפליקציה: ההנחה מתבטלת, והשאלה נשאלת (`assumedIgnored`; טיוטה 365).
+  for (const btn of root.querySelectorAll('[data-unassume]')) {
+    btn.addEventListener('click', async () => {
+      state.record.assumedIgnored = [...new Set([...(state.record.assumedIgnored ?? []), btn.dataset.unassume])];
+      state.notices = [];
+      await runAndSave();
+    });
+  }
   for (const form of root.querySelectorAll('form[data-qid]')) {
     const submit = $('button[type="submit"]', form);
     form.addEventListener('change', (e) => {
@@ -1413,7 +1432,7 @@ function currentSummary(m, months) {
   if (!state.rulesData || !(m.plan || m.exec)) return m.summary ?? {};
   const cal = calendarFor(m);
   try {
-    return summarize(evaluate({ rulesData: state.rulesData, plan: m.plan, exec: m.exec, answers: m.answers ?? {}, history: historyFor(m, months), calendar: cal.saved ?? cal.fresh, reopen: m.calendarIgnored ?? [], calendarHistory: cal.saved ? m.calendarHistory ?? null : null }));
+    return summarize(evaluate({ rulesData: state.rulesData, plan: m.plan, exec: m.exec, answers: m.answers ?? {}, history: historyFor(m, months), calendar: cal.saved ?? cal.fresh, reopen: m.calendarIgnored ?? [], calendarHistory: cal.saved ? m.calendarHistory ?? null : null, assumedIgnored: m.assumedIgnored ?? [] }));
   } catch {
     return m.summary ?? {};
   }
