@@ -645,12 +645,16 @@ function chainNotes(out, journal, answers) {
     const root = ch.root && journal.unplanned.find((n) => n.id === ch.plan.id);
     const view = chainView(ch, root);
     // בצד התכנון כל השרשרת, ובצד הביצוע רק מה שבוצע בסוף (בעל המוצר, 06/10/2026): הסבב האחרון ביומן
-    // נכנס לשרשרת רק כשהוא אינו מה שבוצע.
+    // נכנס לשרשרת רק כשהוא אינו מה שבוצע – מספרי טיסה אחרים. באותם מספרי טיסה ובתאריכים אחרים (נחיתה
+    // באיחור אחרי חצות) – רק בפירוט שבלחיצה (בעל המוצר, 18/10/2026; מרץ 2026: DME ‏11/03 → FRA ‏10–11/03,
+    // ו-LY860 נחתה ב-12/03).
     const path = ch.steps.map((s) => describePairing(s.fromPairing));
     const end = ch.last?.pairing ? describePairing(ch.last.pairing) : null;
-    if (end && end !== c.exec) path.push(end);
+    const flightsOf = (t) => [...(t ?? '').matchAll(/\(([^()]*)\)/g)].map((x) => x[1]).join('+');
+    const sameFlights = end && end !== c.exec && flightsOf(end) && flightsOf(end) === flightsOf(c.exec);
+    if (end && end !== c.exec && !sameFlights) path.push(end);
     if (!moved) c.plan = path.join(' → ');
-    if (view.steps.length > 1 || path.length > 1 || root || moved) c.steps = view.steps;
+    if (view.steps.length > 1 || path.length > 1 || root || moved || sameFlights) c.steps = view.steps;
     // מתחת לשורה רק הסיבה, ומה שמגיע עליה; כשהיא כבר הכותרת של השורה, או בראש ההערה על מה שמגיע
     // ("החלפה מרצוני או בהסכמתי: לא מגיע קרדיט על היום הזה."), – רק מה שמגיע (בעל המוצר, 07/10/2026; 21/07/2026 ATH).
     const norm = (t) => t.replace(/\.$/, '');
