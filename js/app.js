@@ -12,7 +12,7 @@ import * as store from './store.js';
 import * as calendar from './calendar.js';
 
 // מספר הגרסה של הקוד שרץ בדף. עולה יחד עם CACHE ב-sw.js, לאותו מספר (בעל המוצר, 15/10/2026).
-const APP_VERSION = 262;
+const APP_VERSION = 263;
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -759,7 +759,7 @@ const isGap = (c) => c.ok === false || c.marks.length > 0;
  * בלי שורה מתחת לטיסה (בעל המוצר, 07/10/2026). `notes` של השורה: פיצוי שברומה ואף חוק אינו מסביר.
  */
 function explainOf(c) {
-  // בשורת קרדיט – רק פער בקיזוז בגבול החודש (`creditNote`; טיוטה 374).
+  // בשורת קרדיט – רק הקיזוז בגבול החודש (`creditNote`; טיוטות 374, 376).
   if (!COMP_COLUMNS.has(c.column)) return c.items.filter((e) => e.creditNote).map((e) => `<div class="explain">${esc(e.creditNote)}</div>`).join('');
   const share = (e) => (c.items.length > 1 && c.unit !== 'count' ? ` · <span class="num">${minToHhmm(e.min)}</span>` : '');
   const text = (e) => e.explain || e.shortTitle || e.ruleTitle || '';

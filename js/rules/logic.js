@@ -99,6 +99,7 @@ function credit_from_scheduled(ctx, params, rule) {
       continue;
     }
     // רגל בגבול החודש: מה שהרומה נתנה עליה בפועל – הקרדיט ביום, פחות מה שצפוי בו על שאר הרגליים.
+    // ההסבר גם מתחת לשורת הקרדיט בטבלת הפירוט (`creditNote`; טיוטה 376).
     const extras = new Map();
     for (const e of edges) {
       const actual = ctx.reportedOnDate(e.date, 'Credit') - (days.get(e.date).min - e.part);
@@ -106,6 +107,7 @@ function credit_from_scheduled(ctx, params, rule) {
       else if (actual > e.dur) {
         ctx.note(e.date, `${e.leg.flight} זוכתה בקרדיט של ${minToHhmm(actual)} לעומת בלוק מקובע של ${minToHhmm(e.dur)}. ` +
           `צפי לקיזוז של ${offsetText(actual - e.dur)} ב-${dayOf(e.next)}.`, rule, { aside: true });
+        extras.set(e.date, { creditNote: `ניתן קרדיט עודף של ${offsetText(actual - e.dur)} (${minToHhmm(actual)} לעומת בלוק מקובע של ${minToHhmm(e.dur)}).` });
       }
     }
     for (const [date, d] of days) {
@@ -129,13 +131,15 @@ const offsetText = (min) => (min === 1 ? 'דקה אחת' : min < 60 ? `${min} ד
  * רגל שיצאה ביום האחרון של החודש הקודם וזוכתה שם עד חצות יותר מהבלוק המקובע: הקיזוז ב-1 לחודש
  * (01/06/2026 LY387: ‏04:22 לעומת 04:15; בעל המוצר, 18/10/2026, טיוטות 373–374). בלי הרומה של
  * החודש הקודם – הערה לוודא; איתה – הקיזוז הצפוי הוא העודף שניתן בה, ו-`actual` (מה שהרומה הזאת
- * נתנה על הרגל) שונה ממנו הוא פער בשורת הקרדיט, עם ההסבר (`creditNote`).
+ * נתנה על הרגל) שונה ממנו הוא פער בשורת הקרדיט. בכל המקרים ההסבר גם מתחת לשורת הקרדיט (`creditNote`; טיוטה 376).
  */
 function carryOffset(ctx, { leg, part, dur, prev, given }, actual, rule, extras) {
   const depDate = addDays(leg.date, -1);
   if (given == null) {
     ctx.note(leg.date, `${leg.flight}: קוזזו ${offsetText(prev - dur)}. יש לוודא שב-${dayOf(depDate)} ניתן קרדיט של ${minToHhmm(prev)} ` +
       `(לעומת בלוק מקובע של ${minToHhmm(dur)}).`, rule, { aside: true, severity: 'warn' }); // יש מה לבדוק (טיוטה 375)
+    extras.set(leg.date, { creditNote: `קוזזו ${offsetText(prev - dur)}, יש לוודא שב-${dayOf(depDate)} ניתן קרדיט של ${minToHhmm(prev)} ` +
+      `לעומת בלוק מקובע של ${minToHhmm(dur)}.` });
     return;
   }
   const excess = given - dur;
@@ -143,13 +147,16 @@ function carryOffset(ctx, { leg, part, dur, prev, given }, actual, rule, extras)
     if (excess > 0) {
       ctx.note(leg.date, `${leg.flight}: קוזזו ${offsetText(excess)}. תואם לקרדיט עודף של ${offsetText(excess)} שניתן ב-${dayOf(depDate)} ` +
         `(${minToHhmm(given)} לעומת בלוק מקובע של ${minToHhmm(dur)}).`, rule, { aside: true });
+      extras.set(leg.date, { creditNote: `קוזזו ${offsetText(excess)} בהתאם לקרדיט עודף שניתן ב-${dayOf(depDate)}.` });
     }
     return;
   }
   const before = MONTH_NAMES[Number(depDate.slice(5, 7)) - 1];
-  const now = MONTH_NAMES[Number(leg.date.slice(5, 7)) - 1];
-  extras.set(leg.date, { creditNote: `פער לא מוסבר: ${excess > 0 ? `ב${before} היה זיכוי עודף של ${offsetText(excess)}` : `ב${before} לא היה זיכוי עודף`}, ` +
-    `${actual < 0 ? `וב${now} קיזוז של ${offsetText(-actual)}` : `וב${now} לא היה קיזוז`}.` });
+  const creditNote = actual >= 0 ? (excess > 0 ? `לא קוזז קרדיט, לעומת קרדיט עודף של ${offsetText(excess)} שניתן ב${before}.`
+    : `לא קוזז קרדיט, וב${before} לא ניתן קרדיט עודף.`)
+    : excess > 0 ? `קוזזו ${offsetText(-actual)} לעומת קרדיט עודף של ${offsetText(excess)} שניתן ב${before}.`
+      : `קוזזו ${offsetText(-actual)}, וב${before} לא ניתן קרדיט עודף.`;
+  extras.set(leg.date, { creditNote });
 }
 
 
