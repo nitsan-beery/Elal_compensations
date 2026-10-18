@@ -12,7 +12,7 @@ import * as store from './store.js';
 import * as calendar from './calendar.js';
 
 // מספר הגרסה של הקוד שרץ בדף. עולה יחד עם CACHE ב-sw.js, לאותו מספר (בעל המוצר, 15/10/2026).
-const APP_VERSION = 255;
+const APP_VERSION = 256;
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -818,12 +818,19 @@ function setupRuleTips() {
 function summarize(res) {
   // פער בסיכום נספר רק כשהפערים בשורות של אותה עמודה אינם מסבירים אותו, כדי לא לספור פער אחד פעמיים
   // (נובמבר ודצמבר 2025: Rig של 00:04 בשורה ובסיכום; בעל המוצר, 29/09/2026).
+  // הכיוון כמו בטבלת הפירוט (`gapClass`): `gains` – הרומה זיכתה יותר מהצפוי, `losses` – פחות (בעל המוצר,
+  // 18/10/2026). בסיכום החודשי – לפי מה שהשורות אינן מסבירות.
   const rowsDiff = (column) => res.comparison.filter((c) => c.column === column && c.ok === false).reduce((s, c) => s + c.diff, 0);
+  const rows = shownComparison(res).filter(isGap).map((c) => (c.ok === false ? c.diff : -1));
+  const totals = res.questions.length ? [] : res.totals.filter((t) => t.ok === false && t.reported - t.expected !== rowsDiff(t.column))
+    .map((t) => t.reported - t.expected - rowsDiff(t.column));
+  const diffs = [...rows, ...totals];
   return {
     mode: res.mode,
     questions: res.questions.length,
-    gaps: shownComparison(res).filter(isGap).length
-      + (res.questions.length ? 0 : res.totals.filter((t) => t.ok === false && t.reported - t.expected !== rowsDiff(t.column)).length),
+    gaps: diffs.length,
+    gains: diffs.filter((d) => d > 0).length,
+    losses: diffs.filter((d) => d <= 0).length,
     reviews: res.reviews.length,
     unknownCodes: res.unknownCodes.length,
     legal: res.legal?.violations.length ?? 0,
@@ -1471,13 +1478,17 @@ async function renderHistory() {
       <h2>חודשים שמורים על המכשיר</h2>
       ${months.length ? `<ul class="list">${months.map((m) => {
         const s = currentSummary(m, months);
+        // סיכום שנשמר לפני טיוטה 369 אינו מבחין בכיוון: כל הפערים בו – לרעתך, כמו קודם.
+        const gains = s.gains ?? 0;
+        const losses = s.losses ?? s.gaps ?? 0;
         const tags = [
           m.plan ? '<span class="tag">תכנון</span>' : '',
           m.exec ? '<span class="tag">ביצוע</span>' : '',
           s.legal ? `<span class="tag bad">${s.legal === 1 ? 'חריגה ממגבלות החוק' : `${s.legal} חריגות ממגבלות החוק`}</span>` : '',
           s.questions ? `<span class="tag info">${s.questions === 1 ? 'שאלה פתוחה אחת' : `${s.questions} שאלות פתוחות`}</span>` : '',
-          s.gaps ? `<span class="tag bad">${s.gaps === 1 ? 'פער אחד' : `${s.gaps} פערים`}</span>` : '',
-          m.exec && !s.gaps && !s.questions ? '<span class="tag ok">תואם לרומה</span>' : '',
+          gains ? `<span class="tag ok">${gains === 1 ? 'פער לטובתך' : `${gains} פערים לטובתך`}</span>` : '',
+          losses ? `<span class="tag bad">${losses === 1 ? 'פער לרעתך' : `${losses} פערים לרעתך`}</span>` : '',
+          m.exec && !s.gaps && !s.questions ? '<span class="small muted">תואם לרומה</span>' : '',
         ].join(' ');
         return `<li class="month-item">
           <span class="name">${esc(monthName(m.period))}</span>${m.person ? ` <span class="muted">${esc(m.person)}</span>` : ''} ${tags}
