@@ -665,8 +665,18 @@ function chainNotes(out, journal, answers) {
     const keyOf = (t) => [...(t ?? '').matchAll(/([A-Z]{3}(?:-[A-Z]{3})+) \(([^()/]*)/g)].map((x) => `${x[1]} ${x[2]}`).join('+');
     const sameFlights = end && end !== c.exec && keyOf(end) && keyOf(end) === keyOf(c.exec);
     if (end && end !== c.exec && !sameFlights) path.push(end);
-    if (!moved) c.plan = path.join(' → ');
-    if (view.steps.length > 1 || path.length > 1 || root || moved || sameFlights) c.steps = view.steps;
+    if (!moved) c.plan = path.join(' ← '); // בטקסט עברי החץ שמאלה (טיוטה 381)
+    // בפירוט שבלחיצה כל השרשרת: בשלב האחרון גם מה שבוצע, כשמספרי הטיסה בו שונים מהסבב האחרון ביומן
+    // (22/03/2026: CDG ‏LY519/LY520 ← LY519/430), ובלי סיבה שהיא כבר הכותרת (בעל המוצר, 18/10/2026, טיוטה 381).
+    const flightsOf = (t) => [...(t ?? '').matchAll(/\(([^()]*)\)/g)].map((x) => x[1]).join('+');
+    const tail = sameFlights && flightsOf(end) !== flightsOf(c.exec) ? ` ← ${c.exec}` : '';
+    const steps = view.steps.map((s, i) => {
+      const [, head, why] = s.message.match(/^(⁦[^⁩]*⁩(?: (?:← |ו-)⁦[^⁩]*⁩)*)(?:: (.*))?$/) ?? [];
+      if (head == null) return s;
+      const own = why && why.replace(/\.$/, '') !== c.label ? `: ${why}` : '';
+      return { ...s, message: `${head}${i === view.steps.length - 1 ? tail : ''}${own}` };
+    });
+    if (steps.length > 1 || path.length > 1 || root || moved || sameFlights) c.steps = steps;
     // מתחת לשורה רק הסיבה, ומה שמגיע עליה; כשהיא כבר הכותרת של השורה, או בראש ההערה על מה שמגיע
     // ("החלפה מרצוני או בהסכמתי: לא מגיע קרדיט על היום הזה."), – רק מה שמגיע (בעל המוצר, 07/10/2026; 21/07/2026 ATH).
     const norm = (t) => t.replace(/\.$/, '');
@@ -683,7 +693,7 @@ function chainNotes(out, journal, answers) {
   for (const c of out.changes) {
     const root = c.planId && journal.unplanned.find((n) => n.root && n.id === c.planId);
     if (!root || !c.plan) continue;
-    c.plan = `— → ${c.plan}`;
+    c.plan = `— ← ${c.plan}`;
     if (!chained.has(c) && root.note) c.notes = [{ message: `${root.note}.`, byUser: true }, ...(c.notes ?? [])];
   }
 }
@@ -1577,7 +1587,7 @@ function explainCompensations(out) {
   for (const e of out.expectations) {
     if (!EXPLAINED_KEYS.has(e.key) || e.explain != null) continue;
     // תיאור הסבב (או שני הסבבים) שבראש ההסבר מיותר: הוא כבר בשורה.
-    const why = String(e.note ?? '').replace(/^\u2066[^\u2069]*\u2069(?: (?:→ |ו-)\u2066[^\u2069]*\u2069)*: /, '').replace(/\.$/, '');
+    const why = String(e.note ?? '').replace(/^\u2066[^\u2069]*\u2069(?: (?:[←→] |ו-)\u2066[^\u2069]*\u2069)*: /, '').replace(/\.$/, '');
     e.explain = why ? `${why}.` : '';
   }
 }

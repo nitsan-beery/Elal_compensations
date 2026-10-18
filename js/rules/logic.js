@@ -731,7 +731,7 @@ function late_landing_home(ctx, params, rule) {
     const part = ctx.execPairings.flatMap((p) => fdpParts(p, ctx.fdp)).find((x) => x.legs.some((l) => l.flight === leg.flight && l.date === date));
     const who = part?.legs.length === 1 ? '' : `${leg.flight} `;
     // `flight`: לאיזה סבב שייך הפיצוי, כשהיום משותף לשני סבבים (טבלת הפירוט).
-    ctx.expect(date, 'com', steps * perStep, rule, `${leg.flight}: איחור ${delay} דק' → ${steps} מדרגות`, { flight: leg.flight,
+    ctx.expect(date, 'com', steps * perStep, rule, `${leg.flight}: איחור ${delay} דק' ← ${steps} מדרגות`, { flight: leg.flight,
       explain: `${who}נחתה באיחור של ${delayText(delay)}${diverted}. ${stepsWord} (כל ${step} דק' או חלק מהן).` });
   }
 }
@@ -1789,7 +1789,7 @@ function stepNote(ctx, st) {
   const label = a.value === 'other' ? `סיבה אחרת${a.text ? `: ${a.text}` : ''}` : opt?.label ?? a.value;
   const where = to ? describePairing(to) : opt?.needsLink && 'link' in a ? (a.link === 'none' ? 'מסירת הטיסה ללא חלופה' : 'טיסה בחודש אחר') : null;
   st.reason = !to && where ? `${label}: ${where}` : label;
-  return `${from}${where ? ` → ${where}` : ''}: ${label}`;
+  return `${from}${where ? ` ← ${where}` : ''}: ${label}`; // בטקסט עברי החץ שמאלה (טיוטה 381)
 }
 
 /** התשובה על סבב ביומן שאינו בתכנון, לטבלת השינויים. */

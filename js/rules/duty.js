@@ -447,7 +447,7 @@ function base_rest_shortfall(ctx, params, rule) {
     const seq = sequences.get(link);
     const failed = seq && !seq.ok ? seq : null;
     const chain = seq?.ok ? seq.chain : null;
-    const what = `${u1.pairings.map(describePairing).join(' + ')} → ${u2.pairings.map(describePairing).join(' + ')}: מנוחה בבסיס ${minToHhmm(Math.max(rest, 0))}, ` +
+    const what = `${u1.pairings.map(describePairing).join(' + ')} ← ${u2.pairings.map(describePairing).join(' + ')}: מנוחה בבסיס ${minToHhmm(Math.max(rest, 0))}, ` +
       `והמנוחה החוזית היא ${minToHhmm(required)} (${basis})${failed ? `. ${failed.why}` : ''}`;
     if (capUnknown && rest >= H(params.long_stay_min_hours)) {
       status.set(link, 'skip');
@@ -541,7 +541,7 @@ function baseRestOptions(ctx, sequence) {
  */
 function askSequence(ctx, chain, rule) {
   const pairings = [chain.links[0].p1, ...chain.links.map((l) => l.p2)];
-  const rests = chain.links.map((l) => `${chain.links.length > 1 ? `${ddmm(l.p1.from)} → ${ddmm(l.p2.from)}: ` : ''}` +
+  const rests = chain.links.map((l) => `${chain.links.length > 1 ? `${ddmm(l.p1.from)} ← ${ddmm(l.p2.from)}: ` : ''}` +
     `מנוחה ${minToHhmm(Math.max(l.rest, 0))}, והמנוחה החוזית ${minToHhmm(l.required)} (${l.basis})`);
   ctx.ask({
     id: chain.id,
