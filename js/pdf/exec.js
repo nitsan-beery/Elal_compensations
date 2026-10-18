@@ -244,9 +244,11 @@ const isSimRow = (row, cols) => {
 
 function readLegRow(row, cols) {
   const c = cellsOf(row, cols);
+  // DHO בלי ATD ובלי ATA הוא DH בחברה אחרת, ומספר הטיסה שלו אינו של אל על (430 CDG→TLV, 23/03/2026).
+  const foreign = c.Details === 'DHO' && !c.ATD && !c.ATA;
   return {
     type: c.Details ?? null,
-    flight: c.Flt && c.Flt !== '0' ? 'LY' + c.Flt : null,
+    flight: c.Flt && c.Flt !== '0' ? (foreign ? '' : 'LY') + c.Flt : null,
     seq: c.Seq ?? null,
     dhd: c.DHD ?? null,
     dd: c.DD ?? null, // MAZ ו-RCR מסמנים סליפ הדרכה של בוחן (examiner_training_boost); השאר חסר משמעות
