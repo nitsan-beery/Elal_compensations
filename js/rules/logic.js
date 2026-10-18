@@ -135,7 +135,7 @@ function carryOffset(ctx, { leg, part, dur, prev, given }, actual, rule, extras)
   const depDate = addDays(leg.date, -1);
   if (given == null) {
     ctx.note(leg.date, `${leg.flight}: קוזזו ${offsetText(prev - dur)}. יש לוודא שב-${dayOf(depDate)} ניתן קרדיט של ${minToHhmm(prev)} ` +
-      `(לעומת בלוק מקובע של ${minToHhmm(dur)}).`, rule, { aside: true });
+      `(לעומת בלוק מקובע של ${minToHhmm(dur)}).`, rule, { aside: true, severity: 'warn' }); // יש מה לבדוק (טיוטה 375)
     return;
   }
   const excess = given - dur;
