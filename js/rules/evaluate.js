@@ -165,6 +165,10 @@ function evaluateFiles({ rulesData, plan = null, exec = null, answers = {}, hist
   ctx.legalRest = legalRest;
   ctx.duty = duty;
   ctx.tz = tz;
+  // הרומה של החודש הקודם, אם היא בחודשים השמורים: לקיזוז בגבול החודש (`credit_from_scheduled`; טיוטה 373).
+  const prev = history[0];
+  ctx.prevExec = prev?.exec && (period.month === 1 ? prev.period.year === period.year - 1 && prev.period.month === 12
+    : prev.period.year === period.year && prev.period.month === period.month - 1) ? prev.exec : null;
   // טיסות שהרכב הצוות שלהן משנה את בדיקת מגבלות החוק או את הזכאות לפיצוי, "date|flight": רק עליהן
   // ההודעה על הרכב צוות שחסר ביומן (`calendarMissing`; בעל המוצר, 04/10/2026).
   const crewMatters = new Set();
