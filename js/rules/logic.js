@@ -775,7 +775,8 @@ function special_call(ctx, params, rule) {
     // מיוחדת, בנוסף לגבוה מבין השתיים (`companySwapToFreeDay`; בעל המוצר, 06/10/2026). רק הוספה בהסכמה
     // והחלפה מרצוני אינן מזכות בקריאה מיוחדת.
     const companyLinked = companySwapToFreeDay(match, answer);
-    if (match.plan && !cancelledPlan && !training && !bid && extendedPairing(ctx, params, rule, match, answer)) continue;
+    // החלפה מרצוני: ההארכה מול לוח הזמנים של הסבב שהחלפת אליו, גם כשהוא בימים אחרים (`extensionMatch`).
+    if ((match.plan || answer?.value === 'voluntary_swap') && !cancelledPlan && !training && !bid && extendedPairing(ctx, params, rule, match, answer)) continue;
     // החלפה מרצוני והוספה בהסכמה (לפי תשובת המשתמש): S/C שהרומה רשמה על הסבב אינו הופך אותו לקריאה מיוחדת,
     // והוא מוצג כפיצוי שאף חוק אינו מסביר (DME ‏11/03/2026 שהוחלף מרצון ב-FRA ‏10–12/03; בעל המוצר, 08/10/2026).
     const consented = ['voluntary_swap', 'added'].includes(answer?.value);
@@ -944,7 +945,9 @@ function extendedPairing(ctx, params, rule, match, answer) {
   if (!ext) return false;
   const { plan, exec } = match;
   if (match.how === 'exact') ctx.markPairing(exec, 'extended');
-  if (['voluntary_swap', 'added'].includes(answer?.value)) return false;
+  // החלפה מרצוני – מול לוח הזמנים של הסבב שהחלפת אליו (`extensionMatch`; בעל המוצר, 18/10/2026).
+  const own = answer?.value === 'voluntary_swap';
+  if (answer?.value === 'added') return false;
   if (match.how === 'dates' && !answer) return false;
   const days = ext.free;
   if (!days.length && !ext.second.length) return false;
@@ -969,6 +972,8 @@ function extendedPairing(ctx, params, rule, match, answer) {
       body: ctx.calendarRun
         ? `הסבב תוכנן ${describePairing(plan)}, וביומן התארך ל-${list}. ${due.join(' ו')} ` +
           `${due.length > 1 ? 'מגיעים' : days.length ? 'מגיעה' : 'מגיע'} רק כשההארכה לא הייתה בהסכמתך. מה קרה?`
+        : own ? `הסבב ${describePairing(exec)}, שהחלפת אליו, התארך מעבר ללוח הזמנים שלו ל-${list}. הרומה לא מזכה ${due.join(' ו')}, ` +
+          `${due.length > 1 ? 'והם מגיעים' : days.length ? 'והיא מגיעה' : 'והוא מגיע'} רק כשההארכה לא הייתה בהסכמתך. מה קרה?`
         : `הסבב תוכנן ${describePairing(plan)}, והתארך ל-${list}. הרומה לא מזכה ${due.join(' ו')}, ` +
           `${due.length > 1 ? 'והם מגיעים' : days.length ? 'והיא מגיעה' : 'והוא מגיע'} רק כשההארכה לא הייתה בהסכמתך. מה קרה?`,
       options: [
@@ -986,6 +991,10 @@ function extendedPairing(ctx, params, rule, match, answer) {
   for (const d of days) {
     ctx.expectPairing(exec, 'sc', H(params.hours), rule, `${flightsOf(exec)}: יממה ${dayOf(d)}.`,
       { date: d, dates: [d], perDay: true, explain: swapped ? '' : 'הסבב התארך ליום שלא תוכנן בו כלום.' });
+  }
+  // מתחת להחלפה מרצוני: גם הקריאה המיוחדת על ההארכה (`voluntary_swap` רץ קודם).
+  if (own && days.length) {
+    ctx.amendNote(exec.id, 'החלפה מרצוני או בהסכמתי: קרדיט על הטיסה שבוצעה', (m) => m.replace(/\.$/, ` וקריאה מיוחדת על ${days.map(dayOf).join(' ועל ')}.`));
   }
   return true;
 }

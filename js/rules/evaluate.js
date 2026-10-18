@@ -12,8 +12,8 @@ import { buildTimeline, buildPairings, markCarryIn, matchPairings, describePairi
 import { hoursToMin, minToHhmm } from '../time.js';
 import { OPTIONAL_COLUMNS } from '../pdf/exec.js';
 import { checkLegalLimits, restDefinition, delayFitsFdp, baseReportMinutes, dutyTimes } from './legal.js';
-import { whiteFlightLegs, whiteCrew, contractCrewOf } from './duty.js';
-import { timeZones, legTimes, pairingTimes, crossesMidnight, dateOf } from '../flight-times.js';
+import { whiteFlightLegs, whiteCrew, contractCrewOf, execFdpGroups } from './duty.js';
+import { timeZones, legTimes, pairingTimes, crossesMidnight, dateOf, at } from '../flight-times.js';
 import { calendarView, buildJournal, reduceChain, sameAssignment, firstFdpLegs, overlapDays, samePairing, legOrder } from './journal.js';
 import { baseTime } from '../airports.js';
 
@@ -268,6 +268,8 @@ function evaluateFiles({ rulesData, plan = null, exec = null, answers = {}, hist
       out.reviews.push({ ruleId: rule.id, message: `הלוגיקה "${rule.logic.id}" אינה בסדר ההרצה. החוק לא הורץ.` });
     }
   }
+  // יום שאף חוק לא קבע מה מגיע עליו אינו נעלם בשקט (`auditDays`; בעל המוצר, 18/10/2026).
+  if (mode === 'full' && !calendarRun) auditDays(ctx, out, matches, execPairings, timeline);
 
   // אותו סבב, ביום שהסבב המתוכנן לא נגע בו (`extendedPairing` ב-js/rules/logic.js): שינוי, ולא "בוצע כמתוכנן".
   for (const c of out.changes) {
@@ -1025,6 +1027,11 @@ function makeContext({ out, timeline, domicile, codes, holidays, answers, plan, 
       if (noteKeys.has(k)) return;
       noteKeys.add(k);
       out.notes.push({ date, message, ...ruleRef(rule), ...extra });
+    },
+    /** הערה שכבר נרשמה על סבב ומשתנה אחרי חוק מאוחר יותר (קריאה מיוחדת על הארכה אחרי החלפה מרצוני, `extendedPairing`). */
+    amendNote(pairingId, prefix, change) {
+      const n = out.notes.find((x) => x.pairingId === pairingId && x.message.startsWith(prefix));
+      if (n) n.message = change(n.message);
     },
     ask(question) {
       if (askedIds.has(question.id) || answers[question.id]) return;
@@ -2265,6 +2272,68 @@ function checkSameMonthAndEmployee(plan, exec, warnings) {
     warnings.push(`שם העובד שונה בין הקבצים: "${plan.employee.last} ${plan.employee.first ?? ''}" בתכנון, "${exec.employee.name}" בביצוע.`);
   }
 }
+
+/**
+ * בדיקת ביטחון לפי ימים (בעל המוצר, 18/10/2026; טיוטה 371). החוקים עוברים סבב אחרי סבב, וכל מקרה הוא מסלול
+ * משלו: מקרה שאף מסלול אינו מכסה נפל בשקט (FRA ‏10–11/03/2026, שנחת באיחור ב-12/03, יום שתוכנן פנוי).
+ * כאן, אחרי כל החוקים, נבדקים הימים עצמם:
+ * - יום שתוכנן פנוי (`planFreeDay`) ונגעה בו טיסה שבוצעה, מההמראה מהבסיס ועד הנחיתה בבסיס בפועל;
+ * - יממה שנגעו בה שני FDP נפרדים (`execFdpGroups`), שאחד מהם לא תוכנן. החלפה מרצוני והוספה בהסכמה – מתוכננים;
+ *   סבב שבוטל ללא קרדיט – לא. נגיעה ביממה כמו ב-`dayActivity`: מימי הסבב, או נחיתה בה.
+ * כל אחד צריך ציפייה ביום (קריאה מיוחדת או פעילות שנייה), שאלה פתוחה על הסבב או על היום, או סיבה מפורשת
+ * שאין כלום. אחרת – לבדיקה ידנית. סימולטור אינו בבדיקה השנייה: אין לו שעות, וסימון SIM מופיע גם באמצע סבב.
+ */
+function auditDays(ctx, out, matches, execPairings, timeline) {
+  const sc = ctx.rulesWithLogic('special_call')[0];
+  const second = ctx.rulesWithLogic('second_unplanned_activity')[0];
+  const inMonth = new Set(timeline.map((d) => d.date));
+  const matchOf = (o) => matches.find((m) => m.exec === o) ?? null;
+  const answerOf = (o) => { const m = matchOf(o); return m ? ctx.answerFor(m) : null; };
+  // סיבות מפורשות שאין פיצוי על כל ימי הסבב. `special_call` בלי ציפייה ביום פנוי – יממה שנייה מתחת לסף (`countSpecialCallDays`).
+  const quiet = (o) => ['standby_activated', 'diversion_assumed', 'stay_extension', 'swap_conflict_void'].some((t) => ctx.pairingHandledBy(o, t)) ||
+    answerOf(o)?.value === 'other' || ctx.answer(`extended:${o.id}`)?.value === 'agreed';
+  const expected = (d, test) => out.expectations.some((e) => (e.date === d || e.dates?.includes(d)) && test(e));
+  const asked = (o, d) => { const m = matchOf(o); return out.questions.some((q) => q.date === d || q.id.includes(o.id) || (m?.plan && q.id.includes(m.plan.id))); };
+  const consented = (o) => ['voluntary_swap', 'added'].includes(answerOf(o)?.value);
+  const span = (o) => ctx.duty.span(o, { away: true });
+  // בתוך לוח הזמנים של הסבב עצמו (STD עד STA), בלי ההארכה.
+  const scheduled = (o, d) => { const s = pairingTimes(o, ctx.tz); return s.start != null && s.end != null && s.start < at(d, 1440) && s.end > at(d, 0); };
+  const flightsOn = (o, d) => {
+    const own = o.legs.filter((l) => l.date === d).map((l) => l.flight).filter(Boolean);
+    return [...new Set(own.length ? own : [o.legs.findLast((l) => l.dst === ctx.domicile)?.flight ?? o.legs.at(-1)?.flight].filter(Boolean))].join('/');
+  };
+
+  if (sc) {
+    for (const o of execPairings) {
+      const s = span(o);
+      const first = s.start != null && !o.cutAtStart ? dateOf(s.start) : o.from;
+      const last = s.end != null && !o.cutAtEnd ? dateOf(s.end - 1) : timeline.at(-1).date;
+      for (let d = first; d <= last; d = addDay(d)) {
+        if (!inMonth.has(d) || !ctx.planFreeDay(d)) continue;
+        if (expected(d, (e) => e.key === 'sc' || e.ruleId === second?.id) || asked(o, d) || quiet(o)) continue;
+        if (ctx.pairingHandledBy(o, 'special_call') || (consented(o) && scheduled(o, d))) continue;
+        ctx.review(`${ddmm(d)}: נגעה בו טיסה שבוצעה (${flightsOn(o, d)}), והיום תוכנן פנוי, ואף חוק לא קבע מה מגיע עליו. דורש בדיקה ידנית.`, sc);
+      }
+    }
+  }
+
+  if (second) {
+    const planned = (o) => consented(o) || (!!matchOf(o)?.plan && !ctx.pairingHandledBy(matchOf(o).plan, 'cancelled_no_compensation'));
+    const groups = execFdpGroups(ctx, execPairings, hoursToMin(second.logic.params.legal_rest_hours));
+    const touches = (o, d) => o.dates.includes(d) || (span(o).end != null && dateOf(span(o).end) === d);
+    for (const d of inMonth) {
+      const here = groups.filter((g) => g.some((o) => touches(o, d)));
+      if (here.length < 2) continue;
+      const unplanned = here.filter((g) => !g.some(planned)).flat();
+      if (!unplanned.length) continue;
+      if (expected(d, (e) => e.ruleId === second.id) || here.flat().some((o) => asked(o, d)) || unplanned.some(quiet)) continue;
+      const what = here.map((g) => g.filter((o) => touches(o, d)).map((o) => flightsOn(o, d)).join('/')).join(', ');
+      ctx.review(`${ddmm(d)}: שתי פעילויות ב-FDP נפרדים (${what}), אחת מהן לא בתכנון, ואף חוק לא קבע מה מגיע עליה. דורש בדיקה ידנית.`, second);
+    }
+  }
+}
+
+const addDay = (iso) => new Date(Date.parse(iso) + 864e5).toISOString().slice(0, 10);
 
 const ddmm = (iso) => `${iso.slice(8, 10)}/${iso.slice(5, 7)}`;
 const fmt = (min) => `${String(Math.floor(min / 60)).padStart(2, '0')}:${String(min % 60).padStart(2, '0')}`;

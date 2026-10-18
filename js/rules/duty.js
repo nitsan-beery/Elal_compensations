@@ -126,6 +126,8 @@ function same_fdp_rounds(ctx, params, rule) {
  * מתוכננת (`second_unplanned_activity`, 2024 ס' 42.6; פעילות קרקע אינה נספרת). null כשאין יום כזה.
  */
 export function extensionDays(ctx, match) {
+  match = extensionMatch(ctx, match);
+  if (!match) return null;
   if (!match.plan || !match.exec || match.exec.cutAtStart || match.exec.cutAtEnd || match.plan.cutAtStart || match.plan.cutAtEnd) return null;
   const e = pairingTimes(match.exec, ctx.tz, { away: true });
   const p = pairingTimes(match.plan, ctx.tz);
@@ -141,6 +143,20 @@ export function extensionDays(ctx, match) {
   const second = !sims ? [] : days.filter((d) => !free.includes(d) &&
     (ctx.execPairings.some((x) => x !== match.exec && x.dates.includes(d)) || ctx.execCodes(ctx.timeline.find((x) => x.date === d)).some((c) => sims.includes(c))));
   return { days, free, second };
+}
+
+/**
+ * מול מה נבדקת הארכה של סבב שבוצע (`extensionDays`). רגיל – מול הסבב המתוכנן. החלפה מרצוני – מול לוח הזמנים
+ * של הסבב שהחלפת אליו, כאילו היה בתכנון (בעל המוצר, 18/10/2026; מרץ 2026: DME ‏11/03 → FRA ‏10–11/03, ו-LY860
+ * נחתה ב-12/03, יום שתוכנן פנוי). הוספה בהסכמה – אין. null – אין מה לבדוק.
+ */
+export function extensionMatch(ctx, match) {
+  if (!match?.exec) return null;
+  if (match.ownSchedule) return match;
+  const value = ctx.answerFor(match)?.value;
+  if (value === 'voluntary_swap') return { ...match, plan: match.exec, ownSchedule: true };
+  if (value === 'added' || !match.plan) return null;
+  return match;
 }
 
 /**
@@ -268,7 +284,8 @@ function second_unplanned_activity(ctx, params, rule) {
   // היא הפעילות השנייה ביום הזה. הסיבה נשאלת ב-`special_call` (`extended:`), והסכמה – אין פיצוי.
   for (const m of ctx.matches) {
     const ans = ctx.answerFor(m);
-    if (['voluntary_swap', 'added'].includes(ans?.value) || (m.how === 'dates' && !ans)) continue;
+    // החלפה מרצוני – מול לוח הזמנים של הסבב שהחלפת אליו (`extensionMatch`).
+    if (ans?.value === 'added' || (m.how === 'dates' && !ans)) continue;
     if (m.plan && ctx.pairingHandledBy(m.plan, 'cancelled_no_compensation')) continue;
     const ext = extensionDays(ctx, m);
     if (!ext?.second.length) continue;
