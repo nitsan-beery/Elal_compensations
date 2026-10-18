@@ -658,11 +658,12 @@ function chainNotes(out, journal, answers) {
     // בצד התכנון כל השרשרת, ובצד הביצוע רק מה שבוצע בסוף (בעל המוצר, 06/10/2026): הסבב האחרון ביומן
     // נכנס לשרשרת רק כשהוא אינו מה שבוצע – מספרי טיסה אחרים. באותם מספרי טיסה ובתאריכים אחרים (נחיתה
     // באיחור אחרי חצות) – רק בפירוט שבלחיצה (בעל המוצר, 18/10/2026; מרץ 2026: DME ‏11/03 → FRA ‏10–11/03,
-    // ו-LY860 נחתה ב-12/03).
+    // ו-LY860 נחתה ב-12/03). אותו סבב: אותו מסלול ואותה טיסה ראשונה, גם כשהחזרה בוצעה בטיסה אחרת
+    // (טיוטה 380; 22/03/2026 CDG: ביומן LY519/LY520, ברומה LY519/430 – DH בחברה אחרת).
     const path = ch.steps.map((s) => describePairing(s.fromPairing));
     const end = ch.last?.pairing ? describePairing(ch.last.pairing) : null;
-    const flightsOf = (t) => [...(t ?? '').matchAll(/\(([^()]*)\)/g)].map((x) => x[1]).join('+');
-    const sameFlights = end && end !== c.exec && flightsOf(end) && flightsOf(end) === flightsOf(c.exec);
+    const keyOf = (t) => [...(t ?? '').matchAll(/([A-Z]{3}(?:-[A-Z]{3})+) \(([^()/]*)/g)].map((x) => `${x[1]} ${x[2]}`).join('+');
+    const sameFlights = end && end !== c.exec && keyOf(end) && keyOf(end) === keyOf(c.exec);
     if (end && end !== c.exec && !sameFlights) path.push(end);
     if (!moved) c.plan = path.join(' → ');
     if (view.steps.length > 1 || path.length > 1 || root || moved || sameFlights) c.steps = view.steps;
