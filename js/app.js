@@ -12,7 +12,7 @@ import * as store from './store.js';
 import * as calendar from './calendar.js';
 
 // מספר הגרסה של הקוד שרץ בדף. עולה יחד עם CACHE ב-sw.js, לאותו מספר (בעל המוצר, 15/10/2026).
-const APP_VERSION = 263;
+const APP_VERSION = 264;
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -219,7 +219,7 @@ const PARSERS = { plan: parsePlan, exec: parseExec };
 // 08/10/2026: HHM ב-COM של היום, ספטמבר 2026 של רון).
 // 2: מספר העובד בתכנון (בעל המוצר, 08/10/2026). 5: Pay Queries ברומה מדולגת (15/10/2026).
 // 6: העמודה MIL ברומה נקראת, ו-MILUP מדולגת (16/10/2026).
-const PARSE_VERSION = 7;
+const PARSE_VERSION = 8;
 
 async function reparseStale(record) {
   if (record.parseVersion === PARSE_VERSION) return;
@@ -1073,7 +1073,9 @@ function perDiemLine(pd) {
   const num = (v) => `<span class="num">${v}</span>`;
   const parts = [`${num(usd(pd.flightHours))} שעות טיסה`, `${num(usd(pd.stayHours))} שעות שהייה`];
   if (pd.hotelDays) parts.push(pd.hotelDays === 1 ? 'יום ויתור מלון אחד' : `${num(pd.hotelDays)} ימי ויתור מלון`);
-  return `<p class="small">אש"ל צפוי: ${parts.join(' · ')} · סה"כ לתשלום ${num(`${usd(pd.usd)}$`)}</p>`;
+  // תפקיד לא ידוע: לפי תעריף קברניט (בעל המוצר, 18/10/2026).
+  const assumed = pd.positionAssumed ? ' · תפקיד לא ידוע – לפי תעריף קברניט' : '';
+  return `<p class="small">אש"ל צפוי: ${parts.join(' · ')} · סה"כ לתשלום ${num(`${usd(pd.usd)}$`)}${assumed}</p>`;
 }
 
 /** בתכנון לבד: הקרדיט, ה-Rig וה-COM הצפויים לפי התכנון, בלי השוואה (בעל המוצר, 10/10/2026). S/C נספר עם COM. */

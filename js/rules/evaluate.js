@@ -99,6 +99,11 @@ function evaluateFiles({ rulesData, plan = null, exec = null, answers = {}, hist
   const domicile = exec?.domicile ?? guessDomicile(plan);
   if (!domicile) warnings.push('לא ניתן לקבוע את בסיס הבית מהקבצים. חוקים שתלויים בבסיס לא ייבדקו.');
   const fleet = fleetOf(plan) ?? rulesData.crew?.fleet ?? null;
+  // התפקיד (CP, ‏FO), לתעריף האש"ל: מהרומה, ובלעדיה מהתכנון (בעל המוצר, 18/10/2026).
+  const position = exec?.position ?? plan?.position ?? null;
+  if (exec?.position && plan?.position && exec.position !== plan.position) {
+    infos.push(`בתכנון רשום ${plan.position} וברומה ${exec.position}. האש"ל לפי הרומה.`);
+  }
   const cal = calendarFacts(calendar, domicile);
 
   const planPairings = plan ? buildPairings(timeline, domicile, planLegsWithCredit).map(ftOnLastDay) : [];
@@ -158,7 +163,7 @@ function evaluateFiles({ rulesData, plan = null, exec = null, answers = {}, hist
 
   const assumed = new Map(); // planId → ערכי התשובה שהאפליקציה הניחה בלי לשאול
   const ctx = makeContext({ out, timeline, domicile, codes, holidays: rulesData.holidays ?? {}, answers, plan, exec, supported, matches, planPairings,
-    period, fleet, fdp, tz, assumed, assumedIgnored, reportDays, calendarAnswer: (id) => (reopen.includes(id) ? null : cal.answer(id)), calendarFirstDay: cal.firstDay,
+    period, fleet, position, fdp, tz, assumed, assumedIgnored, reportDays, calendarAnswer: (id) => (reopen.includes(id) ? null : cal.answer(id)), calendarFirstDay: cal.firstDay,
     calendarRun: !!calendarRun,
     // בלי דוח ביצוע, הסבבים המתוכננים משמשים לחישוב הקרדיט והרי"ג הצפויים.
     execPairings: exec ? execPairings : planPairings });
@@ -853,7 +858,7 @@ function calendarFacts(calendar, domicile) {
 
 // ---------- ctx: מה שהלוגיקות רואות ----------
 
-function makeContext({ out, timeline, domicile, codes, holidays, answers, plan, exec, supported, matches, planPairings, period, fleet, execPairings, fdp, tz, assumed, assumedIgnored = [], reportDays = [], calendarAnswer, calendarFirstDay, calendarRun = false }) {
+function makeContext({ out, timeline, domicile, codes, holidays, answers, plan, exec, supported, matches, planPairings, period, fleet, position = null, execPairings, fdp, tz, assumed, assumedIgnored = [], reportDays = [], calendarAnswer, calendarFirstDay, calendarRun = false }) {
   const absenceBy = new Map(); // date → Set(ruleId)
   const pairingTags = new Map(); // pairing.id → Set(tag)
   const askedIds = new Set();
@@ -882,6 +887,8 @@ function makeContext({ out, timeline, domicile, codes, holidays, answers, plan, 
     domicile,
     period,
     fleet,
+    /** התפקיד בקבצים (CP, ‏FO), null כשאינו בהם. */
+    position,
     /** הגדרת ה-FDP של הסליפ הקצר (מנוחה חוקית, זמן התייצבות), null בלי הפרמטרים שלה. */
     fdp,
     monthFirst: timeline[0].date,

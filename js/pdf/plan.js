@@ -68,6 +68,10 @@ function parseHeader(page, warnings) {
   // מספר העובד, בכותרת העמוד: "TLVELY/CREW/052616/0162" (כמו "(052616)" ברומה).
   const staff = text.match(/\/CREW\/(\d+)\//);
   const printed = text.match(/printed by\s+(\S+)\s+(\d{2}[A-Za-z]{3}\d{2}\s+\d{2}:\d{2})/);
+  // התפקיד (CP, ‏FO) מתחת ל-CRM, באותה עמודה ולפני הבסיס (בעל המוצר, 18/10/2026).
+  const crm = page.items.find((i) => i.s === 'CRM');
+  const position = crm ? page.items.filter((i) => Math.abs(i.x - crm.x) < 3 && i.y > crm.y && i.y < crm.y + 20 && /^[A-Z]{2,3}$/.test(i.s))
+    .sort((a, b) => a.y - b.y)[0]?.s ?? null : null;
 
   if (!period) {
     throw new Error('לא נמצאה שורת Period בקובץ התכנון.');
@@ -80,6 +84,7 @@ function parseHeader(page, warnings) {
     employee: employee ? { last: employee[1].trim(), first: employee[2].trim(), id: staff?.[1] ?? null } : null,
     period: { year, month, from: Number(period[1]), to: Number(period[4]) },
     printed: printed ? { by: printed[1], at: printed[2] } : null,
+    position,
   };
 }
 
