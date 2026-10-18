@@ -676,7 +676,9 @@ function chainNotes(out, journal, answers) {
       const own = why && why.replace(/\.$/, '') !== c.label ? `: ${why}` : '';
       return { ...s, message: `${head}${i === view.steps.length - 1 ? tail : ''}${own}` };
     });
-    if (steps.length > 1 || path.length > 1 || root || moved || sameFlights) c.steps = steps;
+    // הפירוט רק כשהוא מוסיף על השורה: כמה שלבים, או מה שבוצע במספרי טיסה אחרים. תאריכים אחרים באותן
+    // טיסות אינם פותחים אותו (11/03/2026 DME ← FRA; בעל המוצר, 18/10/2026, טיוטה 382).
+    if (steps.length > 1 || tail || root || moved) c.steps = steps;
     // מתחת לשורה רק הסיבה, ומה שמגיע עליה; כשהיא כבר הכותרת של השורה, או בראש ההערה על מה שמגיע
     // ("החלפה מרצוני או בהסכמתי: לא מגיע קרדיט על היום הזה."), – רק מה שמגיע (בעל המוצר, 07/10/2026; 21/07/2026 ATH).
     const norm = (t) => t.replace(/\.$/, '');
