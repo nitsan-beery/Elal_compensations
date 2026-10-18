@@ -125,6 +125,9 @@ main { max-width: 1100px; margin: 0 auto; padding: 1rem 16px 3rem; }
 
 /* ---------- העלאה ---------- */
 .uploads { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+/* תלוש האש"ל של אפריל: משבצת שלישית, רק בחודש מאי ולבעל המוצר (בעל המוצר, 18/10/2026). */
+.uploads.three { grid-template-columns: 1fr 1fr 1fr; }
+.drop[hidden] { display: none; }
 
 /* יומן (רשות): שורת מצב מתחת לאזור ההעלאה, וחלון החיבור. */
 .calendar-bar { margin: 0 0 1rem; font-size: .95rem; }
@@ -303,7 +306,7 @@ tr.detail td { background: var(--surface-2); font-size: .85rem; color: var(--mut
 .rule code { font-size: .8rem; direction: ltr; unicode-bidi: isolate; }
 
 @media (max-width: 600px) {
-  .uploads { grid-template-columns: 1fr; }
+  .uploads, .uploads.three { grid-template-columns: 1fr; }
   .drop { min-height: 96px; }
   .rule dl { grid-template-columns: 1fr; }
   .rule dt { margin-top: .3rem; }

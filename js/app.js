@@ -3,6 +3,7 @@
 
 import { parsePlan } from './pdf/plan.js';
 import { parseExec } from './pdf/exec.js';
+import { parsePerDiem, rateFromSlip } from './pdf/perdiem.js';
 import { xlsxBlob } from './xlsx.js';
 import { evaluate, monthCalendar, calendarGaps, crewAnswersInCalendar, relatedCrewIds } from './rules/evaluate.js';
 import { loadRules, partitionRules } from './rules/catalog.js';
@@ -12,7 +13,7 @@ import * as store from './store.js';
 import * as calendar from './calendar.js';
 
 // מספר הגרסה של הקוד שרץ בדף. עולה יחד עם CACHE ב-sw.js, לאותו מספר (בעל המוצר, 15/10/2026).
-const APP_VERSION = 264;
+const APP_VERSION = 265;
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -213,6 +214,116 @@ function setupUploads() {
 }
 
 const PARSERS = { plan: parsePlan, exec: parseExec };
+// כל סוגי הקבצים באזור ההעלאה, כולל תלוש האש"ל של אפריל (`handleSlip`).
+const FILE_KINDS = [...Object.keys(PARSERS), 'perdiem'];
+
+// ---------- תלוש האש"ל של אפריל (בעל המוצר, 18/10/2026) ----------
+//
+// התעריף מתעדכן באפריל, והאש"ל של אפריל משולם ב-15 במאי. בחודש מאי, רק לבעל המוצר, האפליקציה מבקשת את
+// התלוש, ומחילה את התעריף ממנו במכשיר עד ש-rules.json מתעדכן (דרך Claude, "העתק לעדכון אצל כולם").
+
+const POSITION_LABEL = { CP: 'קברניט', FO: 'קצין ראשון' };
+const perDiemParams = () => state.rulesData?.rules.find((r) => r.logic?.id === 'per_diem_estimate')?.logic.params ?? null;
+const slipFrom = (year, p) => `${year}-${String(p.slip_month).padStart(2, '0')}-01`;
+const ratePeriod = (from) => `${from.slice(5, 7)}/${from.slice(0, 4)}`;
+const slipPosition = (r, p) => r.exec?.position ?? r.plan?.position ?? p.default_position;
+
+/**
+ * משבצת התלוש: בחודש שאחרי חודש העדכון (`slip_month`), רק כשהמשתמש הוא בעל המוצר – בעל היומן המחובר,
+ * ובלי יומן מספר העובד בקבצים (`slip_owner_staff`) – וכל עוד ב-rules.json אין תעריף מחודש העדכון.
+ */
+function slipSlotOpen(r) {
+  const p = perDiemParams();
+  if (!r?.period || !p?.slip_month || r.period.month !== p.slip_month + 1) return false;
+  const user = calendarFacts()?.owner ?? r.staff;
+  return String(user ?? '') === String(p.slip_owner_staff) && !p.rates.some((x) => x.from === slipFrom(r.period.year, p));
+}
+
+/**
+ * החוקים עם התעריפים מתלושי האש"ל שבחודשים השמורים במכשיר (`perdiem.rate`), לתקופות ש-rules.json אינו
+ * מכיר: rules.json גובר.
+ */
+function rulesFor(months) {
+  const data = state.rulesData;
+  const rule = data?.rules.find((r) => r.logic?.id === 'per_diem_estimate');
+  const p = rule?.logic.params;
+  if (!p) return data;
+  const extra = new Map();
+  for (const m of months) {
+    const x = m?.perdiem?.rate;
+    if (x && !p.rates.some((r) => r.from === x.from) && !extra.has(x.from)) {
+      extra.set(x.from, { from: x.from, stay_usd: x.stay_usd, flight_usd: x.flight_usd, source: 'slip' });
+    }
+  }
+  if (!extra.size) return data;
+  const params = { ...p, rates: [...p.rates, ...extra.values()] };
+  return { ...data, rules: data.rules.map((r) => (r === rule ? { ...r, logic: { ...r.logic, params } } : r)) };
+}
+
+async function handleSlip(file) {
+  const r = state.record;
+  if (!r || !slipSlotOpen(r)) return;
+  const zone = $('.drop[data-kind="perdiem"]');
+  zone.classList.add('busy');
+  $('.drop-state', zone).textContent = 'קורא את הקובץ…';
+  state.notices = [];
+  const exact = (message) => Object.assign(new Error(message), { exact: true });
+  try {
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    const slip = await parsePerDiem(bytes.slice());
+    const p = perDiemParams();
+    if (slip.period.year !== r.period.year || slip.period.month !== p.slip_month) {
+      throw exact(`זה תלוש של ${String(slip.period.month).padStart(2, '0')}/${slip.period.year}. נדרש תלוש האש"ל של ${MONTH_NAMES[p.slip_month - 1]} ${r.period.year}.`);
+    }
+    if (slip.staff !== String(p.slip_owner_staff)) throw exact('התלוש שייך לעובד אחר.');
+    const position = slipPosition(r, p);
+    const rate = rateFromSlip(slip, p.rates, position);
+    if (!rate) throw exact('אין ב-rules.json תעריף קודם להשוואה.');
+    r.perdiem = { ...slip, position, rate };
+    r.perdiemFile = file.name;
+    await safe(() => store.putFile(r.key, 'perdiem', file.name, bytes));
+    dropFileLink('perdiem');
+    await runAndSave();
+  } catch (err) {
+    console.error(err);
+    state.notices.push({ kind: 'warn', text: err.exact ? err.message : `לא ניתן לקרוא את "${file.name}": ${err.message}` });
+    renderResults();
+  } finally {
+    zone.classList.remove('busy');
+    renderUploadState();
+  }
+}
+
+const usd2 = (v) => `${v.toFixed(2)}$`;
+
+/** ההודעה אחרי העלאת התלוש, עם "העתק לעדכון אצל כולם" (הטקסט עצמו אינו מוצג; בעל המוצר, 18/10/2026). */
+function slipNotice() {
+  const r = state.record;
+  const x = r?.perdiem?.rate;
+  if (!x || !slipSlotOpen(r)) return '';
+  const pos = r.perdiem.position;
+  const label = POSITION_LABEL[pos] ?? pos;
+  const month = MONTH_NAMES[r.perdiem.period.month - 1];
+  const head = x.unchanged
+    ? `בתלוש ${month} אותם תעריפים כמו בתקופה הקודמת (שהייה ל${label} ${usd2(x.stay_usd[pos])}, טיסה ${usd2(x.flight_usd)}): התעריף לא השתנה.`
+    : `תעריף האש"ל עודכן מ-01/${ratePeriod(x.from)}, לפי תלוש ${month}: `
+      + `שהייה ל${label} ${usd2(x.stay_usd[pos])} (היה ${usd2(x.prev.stay_usd[pos])}), טיסה ${usd2(x.flight_usd)} (היה ${usd2(x.prev.flight_usd)}), עלייה של ${x.pct}%.`
+      + Object.entries(x.derived).map(([k, d]) => ` שהייה ל${POSITION_LABEL[k] ?? k} ${usd2(d.high)} – נגזר באותו אחוז${d.low !== d.high
+        ? `, ויצא בין ${usd2(d.low)} ל-${usd2(d.high)}. נלקח הגבוה. יש לאמת מול תלוש של ${POSITION_LABEL[k] ?? k}.` : '.'}`).join('')
+      + ' העדכון חל עכשיו רק במכשיר הזה. כדי שיחול אצל כולם:';
+  return `<div class="notice info no-print">${esc(head)}
+    <div class="row"><button class="btn" data-action="copy-perdiem">העתק לעדכון אצל כולם</button></div></div>`;
+}
+
+/** הטקסט שמועבר לClaude לעדכון `rates` ב-rules.json. */
+function slipText(r) {
+  const x = r.perdiem.rate;
+  const pos = r.perdiem.position;
+  return [`עדכון תעריף אש"ל מ-${x.from} (תלוש ${MONTH_NAMES[r.perdiem.period.month - 1]} ${r.perdiem.period.year}, ${r.perdiemFile ?? ''}):`,
+    `${pos} שהייה ${x.stay_usd[pos].toFixed(2)}, טיסה ${x.flight_usd.toFixed(2)} (קודם ${x.prev.stay_usd[pos].toFixed(2)} / ${x.prev.flight_usd.toFixed(2)})${x.unchanged ? ' – לא השתנה' : ''}`,
+    ...Object.entries(x.derived).map(([k, d]) => `${k} שהייה ${d.high.toFixed(2)} – נגזר באותו אחוז${d.low !== d.high ? ` (בין ${d.low.toFixed(2)} ל-${d.high.toFixed(2)}, לאימות)` : ''}`),
+  ].join('\n');
+}
 
 // גרסת הקריאה של קובצי ה-PDF. הנתונים שחולצו נשמרים בחודש, ולכן שינוי בקריאה (עמודה שנוספה, קוד שמתווסף
 // לעמודה אחרת) מעלה אותה, וחודש שנשמר בגרסה קודמת נקרא מחדש מהקבצים השמורים כשהוא נפתח (בעל המוצר,
@@ -246,6 +357,7 @@ async function reparseStale(record) {
 /** `calToken`: ההרשאה ליומן שהתבקשה בבחירת הקובץ (`calendarToken`); היומן מתעדכן אחרי הקריאה. */
 async function handleFile(file, expected, calToken = null) {
   if (!state.rulesData) return;
+  if (expected === 'perdiem') return handleSlip(file);
   const zone = $(`.drop[data-kind="${expected}"]`);
   zone.classList.add('busy');
   $('.drop-state', zone).textContent = 'קורא את הקובץ…';
@@ -309,14 +421,18 @@ async function handleFile(file, expected, calToken = null) {
 }
 
 function renderUploadState() {
+  const slot = slipSlotOpen(state.record);
+  $('.uploads').classList.toggle('three', slot);
   for (const zone of document.querySelectorAll('.drop')) {
     const kind = zone.dataset.kind;
     const r = state.record;
+    if (kind === 'perdiem') zone.hidden = !slot;
     const loaded = !!r?.[kind];
+    const period = kind === 'perdiem' ? r?.perdiem?.period : r?.period;
     zone.classList.toggle('loaded', loaded);
     $('.drop-state', zone).textContent = 'לא נבחר קובץ. לחץ או גרור לכאן';
     // רק החודש והשנה בשתי ספרות, "אוקטובר 26": הכותרת של האזור כבר אומרת איזה קובץ (בעל המוצר, 29/09/2026).
-    $('.drop-month', zone).textContent = loaded ? `${MONTH_NAMES[r.period.month - 1]} ${String(r.period.year).slice(-2)}` : '';
+    $('.drop-month', zone).textContent = loaded ? `${MONTH_NAMES[period.month - 1]} ${String(period.year).slice(-2)}` : '';
     $('.drop-name', zone).textContent = loaded ? r[`${kind}File`] ?? 'נטען מהחודשים השמורים' : '';
     refreshFileLink(zone, kind);
   }
@@ -370,7 +486,7 @@ async function runAndSave() {
     if (!r.exec) r.calendarHistory = appendSnapshot(r.calendarHistory ?? (r.calendar ? [r.calendar] : []), fresh);
     r.calendar = fresh;
   }
-  state.result = evaluate({ rulesData: state.rulesData, plan: r.plan, exec: r.exec, answers: r.answers ?? {}, history: historyFor(r, months), calendar: r.calendar ?? null,
+  state.result = evaluate({ rulesData: rulesFor([r, ...months]), plan: r.plan, exec: r.exec, answers: r.answers ?? {}, history: historyFor(r, months), calendar: r.calendar ?? null,
     reopen: r.calendarIgnored ?? [], calendarHistory: r.calendarHistory ?? null, assumedIgnored: r.assumedIgnored ?? [] });
   // שלב שחזר למצב שלפניו יוצא מהשרשרת, יחד עם התשובה עליו (בעל המוצר, 06/10/2026).
   for (const id of state.result.obsoleteAnswers ?? []) delete r.answers?.[id];
@@ -863,7 +979,7 @@ function renderResults(keepDom = true) {
   if (state.sections.key !== key) state.sections = { key, open: new Map() };
   else if (keepDom) for (const d of root.querySelectorAll('details[data-section]')) state.sections.open.set(d.dataset.section, d.open);
   renderCalendarBar();
-  const parts = [state.notices.map((n) => `<div class="notice ${n.kind}">${esc(n.text)}</div>`).join('')];
+  const parts = [state.notices.map((n) => `<div class="notice ${n.kind}">${esc(n.text)}</div>`).join(''), slipNotice()];
   if (!res) { root.innerHTML = parts.join(''); return; }
 
   parts.push(renderHead(res));
@@ -1075,7 +1191,11 @@ function perDiemLine(pd) {
   if (pd.hotelDays) parts.push(pd.hotelDays === 1 ? 'יום ויתור מלון אחד' : `${num(pd.hotelDays)} ימי ויתור מלון`);
   // תפקיד לא ידוע: לפי תעריף קברניט (בעל המוצר, 18/10/2026).
   const assumed = pd.positionAssumed ? ' · תפקיד לא ידוע – לפי תעריף קברניט' : '';
-  return `<p class="small">אש"ל צפוי: ${parts.join(' · ')} · סה"כ לתשלום ${num(`${usd(pd.usd)}$`)}${assumed}</p>`;
+  // מקור התעריף, רק כשמשבצת תלוש האש"ל מוצגת (בעל המוצר, 18/10/2026).
+  const source = !slipSlotOpen(state.record) || !pd.rateFrom ? ''
+    : pd.rateSource === 'slip' ? ` · תעריף ${ratePeriod(pd.rateFrom)}, מתלוש האש"ל של ${MONTH_NAMES[Number(pd.rateFrom.slice(5, 7)) - 1]}`
+      : ` · לפי התעריף האחרון הידוע (${ratePeriod(pd.rateFrom)})`;
+  return `<p class="small">אש"ל צפוי: ${parts.join(' · ')} · סה"כ לתשלום ${num(`${usd(pd.usd)}$`)}${assumed}${source}</p>`;
 }
 
 /** בתכנון לבד: הקרדיט, ה-Rig וה-COM הצפויים לפי התכנון, בלי השוואה (בעל המוצר, 10/10/2026). S/C נספר עם COM. */
@@ -1370,6 +1490,24 @@ function bindResults(root) {
     window.addEventListener('afterprint', restore);
     window.print();
   });
+  const copySlip = $('[data-action="copy-perdiem"]', root);
+  copySlip?.addEventListener('click', async () => {
+    try {
+      await navigator.clipboard.writeText(slipText(state.record));
+      copySlip.textContent = 'הועתק';
+      setTimeout(() => { copySlip.textContent = 'העתק לעדכון אצל כולם'; }, 2000);
+    } catch {
+      // דפדפן שאינו מרשה העתקה: הטקסט מוצג מסומן, להעתקה ידנית.
+      const box = document.createElement('textarea');
+      box.className = 'copy-text';
+      box.readOnly = true;
+      box.value = slipText(state.record);
+      box.rows = 4;
+      copySlip.replaceWith(box);
+      box.focus();
+      box.select();
+    }
+  });
   const copy = $('[data-action="copy-codes"]', root);
   copy?.addEventListener('click', async () => {
     const text = unknownCodesText(state.result);
@@ -1466,7 +1604,7 @@ function currentSummary(m, months) {
   if (!state.rulesData || !(m.plan || m.exec)) return m.summary ?? {};
   const cal = calendarFor(m);
   try {
-    return summarize(evaluate({ rulesData: state.rulesData, plan: m.plan, exec: m.exec, answers: m.answers ?? {}, history: historyFor(m, months), calendar: cal.saved ?? cal.fresh, reopen: m.calendarIgnored ?? [], calendarHistory: cal.saved ? m.calendarHistory ?? null : null, assumedIgnored: m.assumedIgnored ?? [] }));
+    return summarize(evaluate({ rulesData: rulesFor(months), plan: m.plan, exec: m.exec, answers: m.answers ?? {}, history: historyFor(m, months), calendar: cal.saved ?? cal.fresh, reopen: m.calendarIgnored ?? [], calendarHistory: cal.saved ? m.calendarHistory ?? null : null, assumedIgnored: m.assumedIgnored ?? [] }));
   } catch {
     return m.summary ?? {};
   }
@@ -1538,7 +1676,7 @@ async function renderHistory() {
       'ניתן יהיה לשחזר אותם רק מקובץ גיבוי. מומלץ לשמור את הנתונים לפני מחיקה.', 'מחק')) return;
     await store.clearMonths();
     if (state.record) { state.record = null; state.result = null; state.notices = []; }
-    for (const kind of Object.keys(PARSERS)) dropFileLink(kind);
+    for (const kind of FILE_KINDS) dropFileLink(kind);
     renderUploadState();
     renderResults();
     renderHistory();
@@ -1551,7 +1689,7 @@ async function renderHistory() {
       alert(`שוחזרו ${c.added} חודשים חדשים, ${c.replaced} עודכנו, ${c.skipped} דולגו (הגרסה במכשיר חדשה יותר).` +
         (c.files ? ` שוחזרו ${c.files === 1 ? 'קובץ PDF אחד' : `${c.files} קובצי PDF`}.` : ''));
       // ייתכן ששוחזר קובץ לחודש הפתוח: לטעון אותו מחדש, כדי שאפשר יהיה לפתוח אותו.
-      for (const kind of Object.keys(PARSERS)) dropFileLink(kind);
+      for (const kind of FILE_KINDS) dropFileLink(kind);
       renderUploadState();
     } catch (err) {
       alert(`השחזור נכשל: ${err.message}`);

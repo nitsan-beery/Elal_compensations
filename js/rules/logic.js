@@ -587,7 +587,9 @@ function per_diem_estimate(ctx, params, rule) {
   const hotelUsd = hotel.as_stay_hours ? cents(waivedH * stayRate) : waivedDays.length * (hotel.usd_per_day ?? 0);
   const total = cents(stayH * stayRate) + cents(flightH * rate.flight_usd) + hotelUsd
     - cents((stayH + waivedH) * params.stay_deduction_usd);
+  // `rateFrom`/`rateSource`: התקופה של התעריף, ו-'slip' כשהוא מתלוש האש"ל במכשיר הזה ולא מ-rules.json (בעל המוצר, 18/10/2026).
   ctx.setPerDiem({ flightHours: flightH, stayHours: stayH, hotelDays: waivedDays.length, usd: cents(total), position,
+    rateFrom: rate.from, ...(rate.source && { rateSource: rate.source }),
     ...(position !== ctx.position && { positionAssumed: true }) });
 }
 
@@ -2169,7 +2171,7 @@ export const KNOWN_PARAMS = {
   absence_day_credit: ['plan_codes', 'report_codes', 'plan_code_prefixes', 'report_code_prefixes', 'report_flag_column', 'credit_hours', 'tab_hours', 'requires_assigned_activity', 'flight_day_takes_higher', 'away_flag_on_pairing_start', 'confirm_code_prefixes', 'confirm_label', 'confirm_answer', 'exclude_codes', 'ask_when_missing', 'missing_label', 'assume_unknown_codes'],
   unpaid_leave_days: ['plan_codes', 'report_codes', 'plan_code_prefixes', 'report_code_prefixes'],
   hotel_waiver_days: ['report_column'],
-  per_diem_estimate: ['rates', 'default_position', 'stay_column', 'flight_column', 'stay_deduction_usd', 'hotel_waiver_column', 'hotel_waiver'],
+  per_diem_estimate: ['rates', 'default_position', 'slip_month', 'slip_owner_staff', 'stay_column', 'flight_column', 'stay_deduction_usd', 'hotel_waiver_column', 'hotel_waiver'],
   vacation_credit_balance: ['per_day_hours', 'days_full_rate', 'monthly_max_hours', 'yearly_cap_days', 'taper_table', 'taper_table_complete', 'taper_monthly_totals'],
   absence_month_cap: ['cap_hours'],
   late_landing_home: ['grace_minutes', 'step_minutes', 'hours_per_step', 'note_from_minutes'],

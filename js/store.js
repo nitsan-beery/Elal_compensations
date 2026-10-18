@@ -10,7 +10,7 @@ const DB_VERSION = 5;
 const STORE = 'months';
 const FILES = 'files'; // {key: "2026-07|52616:plan", name, bytes: ArrayBuffer}
 const SETTINGS = 'settings'; // {key, value}
-const KINDS = ['plan', 'exec'];
+const KINDS = ['plan', 'exec', 'perdiem']; // perdiem: תלוש האש"ל של אפריל, בחודש מאי (בעל המוצר, 18/10/2026)
 const BACKUP_FORMAT = 'elal-compensations-backup';
 
 let dbPromise = null;
