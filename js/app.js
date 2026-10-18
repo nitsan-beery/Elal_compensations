@@ -7,18 +7,17 @@ import { xlsxBlob } from './xlsx.js';
 import { evaluate, monthCalendar, calendarGaps, crewAnswersInCalendar, relatedCrewIds } from './rules/evaluate.js';
 import { loadRules, partitionRules } from './rules/catalog.js';
 import { appendSnapshot } from './rules/journal.js';
-import { minToHhmm } from './time.js';
+import { minToHhmm, MONTH_NAMES } from './time.js';
 import * as store from './store.js';
 import * as calendar from './calendar.js';
 
 // מספר הגרסה של הקוד שרץ בדף. עולה יחד עם CACHE ב-sw.js, לאותו מספר (בעל המוצר, 15/10/2026).
-const APP_VERSION = 260;
+const APP_VERSION = 261;
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 const ddmm = (iso) => `${iso.slice(8, 10)}/${iso.slice(5, 7)}`;
 const hm = (v, unit) => (v == null ? '—' : unit === 'count' ? String(v) : minToHhmm(v));
-const MONTH_NAMES = ['ינואר', 'פברואר', 'מרץ', 'אפריל', 'מאי', 'יוני', 'יולי', 'אוגוסט', 'ספטמבר', 'אוקטובר', 'נובמבר', 'דצמבר'];
 const monthName = (p) => `${MONTH_NAMES[p.month - 1]} ${p.year}`;
 const KIND_LABEL = { plan: 'קובץ תכנון', exec: 'קובץ ביצוע' };
 const THE_KIND = { plan: 'קובץ התכנון', exec: 'קובץ הביצוע' };
@@ -760,7 +759,8 @@ const isGap = (c) => c.ok === false || c.marks.length > 0;
  * בלי שורה מתחת לטיסה (בעל המוצר, 07/10/2026). `notes` של השורה: פיצוי שברומה ואף חוק אינו מסביר.
  */
 function explainOf(c) {
-  if (!COMP_COLUMNS.has(c.column)) return '';
+  // בשורת קרדיט – רק פער בקיזוז בגבול החודש (`creditNote`; טיוטה 374).
+  if (!COMP_COLUMNS.has(c.column)) return c.items.filter((e) => e.creditNote).map((e) => `<div class="explain">${esc(e.creditNote)}</div>`).join('');
   const share = (e) => (c.items.length > 1 && c.unit !== 'count' ? ` · <span class="num">${minToHhmm(e.min)}</span>` : '');
   const text = (e) => e.explain || e.shortTitle || e.ruleTitle || '';
   const lines = [

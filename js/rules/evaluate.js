@@ -932,7 +932,7 @@ function makeContext({ out, timeline, domicile, codes, holidays, answers, plan, 
     },
     /** ציפייה של סבב שנרשמת ביום מסוים (הקרדיט של כל יממה בסבב). */
     expectPairingDay(pairing, date, key, min, rule, note, extra) {
-      if (!min) return;
+      if (!min && !extra?.creditNote) return;
       out.expectations.push({ date, dates: [date], pairingId: pairing.id,
         pairing: describePairing(pairing), key, min, note, ...ruleRef(rule), ...extra });
     },

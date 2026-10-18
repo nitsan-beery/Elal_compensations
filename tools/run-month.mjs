@@ -82,6 +82,7 @@ console.log('\n== השוואה מול הדוח ==');
 for (const row of r.comparison) {
   const mark = row.pending ? '…' : row.ok ? '✓' : '✗';
   console.log(`${mark} ${row.label.padEnd(40)} ${row.column.padEnd(7)} צפוי ${hm(row.expected, row.unit).padStart(6)}  בדוח ${hm(row.reported, row.unit).padStart(6)}${row.ok ? '' : `  פער ${hm(row.diff, row.unit)}`}`);
+  for (const e of row.items) if (e.creditNote) console.log(`      > ${e.creditNote}`);
   if (['Rig', 'COM', 'S/C'].includes(row.column)) for (const x of [...row.items.map((e) => `${e.explain ?? ''} [${e.ruleTitle}]`.trim()), ...(row.notes ?? [])]) console.log(`      > ${x}`);
   if (row.ok === false) for (const e of row.items) console.log(`      · ${e.ruleTitle ?? ''}: ${e.note ?? ''} ${e.min != null ? minToHhmm(e.min) : ''}`);
 }

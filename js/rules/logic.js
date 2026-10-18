@@ -4,7 +4,7 @@
 // הערכים המספריים מגיעים כולם מ-`params` של החוק ב-`rules.json`, ולא מהקוד.
 // מזהה לוגיקה שאינו מופיע כאן נחשב "לא נתמך" ומוצג למשתמש.
 
-import { hoursToMin, minToHhmm } from '../time.js';
+import { hoursToMin, minToHhmm, MONTH_NAMES } from '../time.js';
 import { describePairing, describeRoute, fdpParts } from '../model.js';
 import { at, dateOf, legTimes, pairingTimes } from '../flight-times.js';
 import { DUTY_LOGIC, DUTY_PARAMS, execFdpGroups, amountWord, otherOption, applyOtherReason, extensionDays, dayActivity, keyFor } from './duty.js';
@@ -53,6 +53,7 @@ function credit_from_scheduled(ctx, params, rule) {
       days.set(date, d);
     };
     let error = null;
+    const edges = []; // רגליים שנחתכות בגבול החודש, להערה על הקיזוז (טיוטות 373–374)
     for (const leg of pairing.legs) {
       // בתכנון בלבד הקרדיט הוא ה-FT של כל יום, שכבר רשום ביום שלו. אין מה לפצל.
       if (!ctx.hasExec) { add(leg.date, leg.skdDur); continue; }
@@ -68,8 +69,11 @@ function credit_from_scheduled(ctx, params, rule) {
         // הרגל רשומה ביום 1 אבל יצאה ביום האחרון של החודש הקודם.
         if (split.error) { error = split.error; break; }
         const prev = split.before ?? dur; // נחתה לפני חצות: כולה זוכתה בחודש הקודם
-        add(leg.date, dur - prev, note(`${leg.flight} יצאה בחודש הקודם, ושם זוכו ${minToHhmm(prev)}. בחודש הזה ${minToHhmm(dur - prev)} מתוך ${minToHhmm(dur)}`));
-        if (prev > dur) carryOffsetNote(ctx, leg, addDays(leg.date, -1), prev, dur, rule);
+        // הרומה של החודש הקודם שמורה וזוכה בה עודף: הקיזוז הצפוי הוא העודף שניתן בה בפועל (טיוטה 374).
+        const given = ctx.prevExec ? ctx.prevExec.days?.[addDays(leg.date, -1)]?.values?.Credit?.min ?? 0 : null;
+        const base = given != null && (prev > dur || given > dur) ? given : prev;
+        add(leg.date, dur - base, note(`${leg.flight} יצאה בחודש הקודם, ושם זוכו ${minToHhmm(base)}. בחודש הזה ${minToHhmm(dur - base)} מתוך ${minToHhmm(dur)}`));
+        if (base > dur || prev > dur) edges.push({ kind: 'carry', leg, date: leg.date, part: dur - base, dur, prev, given });
         continue;
       }
       if (split.error) {
@@ -84,10 +88,7 @@ function credit_from_scheduled(ctx, params, rule) {
       const next = addDays(date, 1);
       if (next > monthEnd) {
         add(date, split.before, note(`${leg.flight} חוצה את סוף החודש: בחודש הזה ${minToHhmm(split.before)} מההמראה בפועל עד חצות, והשאר בחודש הבא`));
-        if (split.before > dur) {
-          ctx.note(date, `${leg.flight} זוכתה בקרדיט של ${minToHhmm(split.before)} לעומת בלוק מקובע של ${minToHhmm(dur)}. ` +
-            `צפי לקיזוז של ${offsetText(split.before - dur)} ב-${dayOf(next)}.`, rule, { aside: true });
-        }
+        edges.push({ kind: 'end', leg, date, part: split.before, dur, next });
         continue;
       }
       add(date, split.before, note(`${leg.flight} חוצה חצות: ${minToHhmm(split.before)} מההמראה בפועל עד חצות`));
@@ -97,8 +98,18 @@ function credit_from_scheduled(ctx, params, rule) {
       ctx.review(`${describePairing(pairing)}: ${error} דורש בדיקה ידנית.`, rule);
       continue;
     }
+    // רגל בגבול החודש: מה שהרומה נתנה עליה בפועל – הקרדיט ביום, פחות מה שצפוי בו על שאר הרגליים.
+    const extras = new Map();
+    for (const e of edges) {
+      const actual = ctx.reportedOnDate(e.date, 'Credit') - (days.get(e.date).min - e.part);
+      if (e.kind === 'carry') carryOffset(ctx, e, actual, rule, extras);
+      else if (actual > e.dur) {
+        ctx.note(e.date, `${e.leg.flight} זוכתה בקרדיט של ${minToHhmm(actual)} לעומת בלוק מקובע של ${minToHhmm(e.dur)}. ` +
+          `צפי לקיזוז של ${offsetText(actual - e.dur)} ב-${dayOf(e.next)}.`, rule, { aside: true });
+      }
+    }
     for (const [date, d] of days) {
-      ctx.expectPairingDay(pairing, date, 'flight', d.min, rule, ['קרדיט לפי STA − STD', ...d.why].join('. '));
+      ctx.expectPairingDay(pairing, date, 'flight', d.min, rule, ['קרדיט לפי STA − STD', ...d.why].join('. '), extras.get(date));
     }
   }
 }
@@ -115,18 +126,30 @@ const legCreditDur = (leg, pairing, domicile) =>
 const offsetText = (min) => (min === 1 ? 'דקה אחת' : min < 60 ? `${min} דקות` : minToHhmm(min));
 
 /**
- * רגל שיצאה ביום האחרון של החודש הקודם וזוכתה שם עד חצות יותר מהבלוק המקובע: הקיזוז ב-1 לחודש,
- * מול מה שהרומה של החודש הקודם זיכתה ביום ההמראה, אם היא בחודשים השמורים (01/06/2026 LY387: ‏04:22
- * לעומת 04:15; בעל המוצר, 18/10/2026, טיוטה 373).
+ * רגל שיצאה ביום האחרון של החודש הקודם וזוכתה שם עד חצות יותר מהבלוק המקובע: הקיזוז ב-1 לחודש
+ * (01/06/2026 LY387: ‏04:22 לעומת 04:15; בעל המוצר, 18/10/2026, טיוטות 373–374). בלי הרומה של
+ * החודש הקודם – הערה לוודא; איתה – הקיזוז הצפוי הוא העודף שניתן בה, ו-`actual` (מה שהרומה הזאת
+ * נתנה על הרגל) שונה ממנו הוא פער בשורת הקרדיט, עם ההסבר (`creditNote`).
  */
-function carryOffsetNote(ctx, leg, depDate, prev, dur, rule) {
-  const head = `${leg.flight}: קוזזו ${offsetText(prev - dur)}.`;
-  const blocks = `${minToHhmm(prev)} לעומת בלוק מקובע של ${minToHhmm(dur)}`;
-  const given = ctx.prevExec ? ctx.prevExec.days?.[depDate]?.values?.Credit?.min ?? 0 : null;
-  const message = given == null ? `${head} יש לוודא שב-${dayOf(depDate)} ניתן קרדיט של ${minToHhmm(prev)} (לעומת בלוק מקובע של ${minToHhmm(dur)}).`
-    : given === prev ? `${head} תואם לקרדיט עודף של ${offsetText(prev - dur)} שניתן ב-${dayOf(depDate)} (${blocks}).`
-      : `${head} ב-${dayOf(depDate)} ניתן קרדיט של ${minToHhmm(given)} ולא ${minToHhmm(prev)} (לעומת בלוק מקובע של ${minToHhmm(dur)}). יש לבדוק את הזיכוי של ${dayOf(depDate)}.`;
-  ctx.note(leg.date, message, rule, { aside: true, ...(given != null && given !== prev && { severity: 'warn' }) });
+function carryOffset(ctx, { leg, part, dur, prev, given }, actual, rule, extras) {
+  const depDate = addDays(leg.date, -1);
+  if (given == null) {
+    ctx.note(leg.date, `${leg.flight}: קוזזו ${offsetText(prev - dur)}. יש לוודא שב-${dayOf(depDate)} ניתן קרדיט של ${minToHhmm(prev)} ` +
+      `(לעומת בלוק מקובע של ${minToHhmm(dur)}).`, rule, { aside: true });
+    return;
+  }
+  const excess = given - dur;
+  if (actual === part) {
+    if (excess > 0) {
+      ctx.note(leg.date, `${leg.flight}: קוזזו ${offsetText(excess)}. תואם לקרדיט עודף של ${offsetText(excess)} שניתן ב-${dayOf(depDate)} ` +
+        `(${minToHhmm(given)} לעומת בלוק מקובע של ${minToHhmm(dur)}).`, rule, { aside: true });
+    }
+    return;
+  }
+  const before = MONTH_NAMES[Number(depDate.slice(5, 7)) - 1];
+  const now = MONTH_NAMES[Number(leg.date.slice(5, 7)) - 1];
+  extras.set(leg.date, { creditNote: `פער לא מוסבר: ${excess > 0 ? `ב${before} היה זיכוי עודף של ${offsetText(excess)}` : `ב${before} לא היה זיכוי עודף`}, ` +
+    `${actual < 0 ? `וב${now} קיזוז של ${offsetText(-actual)}` : `וב${now} לא היה קיזוז`}.` });
 }
 
 
