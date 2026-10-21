@@ -1959,11 +1959,12 @@ function standby_end_for_bid(ctx, params, rule) {
           title: `טיסה ביומיים האחרונים של כוננות: ${describePairing(pairing)}`,
           body: `בתכנון כוננות ב-${range}, והטיסה ${ctx.calendarRun ? 'ביומן' : 'יצאה'} ב-${dayOf(pairing.from)}. ` +
             (run.at(-1) === monthEnd ? 'הכוננות מגיעה לסוף החודש, וייתכן שהיא נמשכת בחודש הבא. ' : '') +
-            (ctx.calendarRun ? '' : 'הרומה לא מזכה קריאה מיוחדת. ') + 'אם החברה אישרה לך לסיים את הכוננות בגלל זכייה במכרז, מגיעה קריאה מיוחדת על ימי הטיסה. אם הכוננות הופעלה, מגיע רק קרדיט הטיסה. מה קרה?',
+            (ctx.calendarRun ? '' : 'הרומה לא מזכה קריאה מיוחדת. ') + 'אם הכוננות הופעלה, מגיע רק קרדיט הטיסה. אם החברה אישרה לך לסיים את הכוננות בגלל זכייה במכרז, מגיעה קריאה מיוחדת על ימי הטיסה. מה קרה?',
+          // הפעלת הכוננות ראשונה (בעל המוצר, 21/10/2026; טיוטה 390).
           options: [
-            { value: 'standby_bid', label: 'סיום כוננות בגלל זכייה במכרז', hint: bidHint(pairing, ctx, sc) },
             { value: 'standby_activated', label: 'הפעלת הכוננות',
               hint: daysAfterStandby(ctx, pairing, run).length ? 'קרדיט הטיסה, וקריאה מיוחדת רק על הימים שאחרי הכוננות' : 'קרדיט הטיסה, בלי קריאה מיוחדת' },
+            { value: 'standby_bid', label: 'סיום כוננות בגלל זכייה במכרז', hint: bidHint(pairing, ctx, sc) },
             otherOption(),
           ],
           ruleId: rule.id,
