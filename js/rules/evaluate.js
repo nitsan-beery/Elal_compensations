@@ -301,9 +301,12 @@ function evaluateFiles({ rulesData, plan = null, exec = null, answers = {}, hist
   showSwaps(out, answers, assumed);
   splitChangesByFdp(out, matches, ctx, fdp);
   // טיסה לא מתוכננת בימים שתוכננה בהם פעילות שאינה סבב: הקודים בצד התכנון, ולא "—" (בעל המוצר, 21/10/2026; טיוטה 392).
+  // קוד VAC שחוקי החופשה אינם כוללים (VAC_NOC, חופשה ללא תשלום) נשאר מלא (טיוטה 394).
+  const unpaidLeave = new Set(supported.filter((r) => (r.logic.params?.plan_code_prefixes ?? []).includes('VAC'))
+    .flatMap((r) => r.logic.params.exclude_codes ?? []));
   for (const c of out.changes) {
     if (c.how !== 'unplanned' || c.plan) continue;
-    c.plan = plannedCodes(timeline, codes, c.date, c.lastDay ?? c.date);
+    c.plan = plannedCodes(timeline, codes, c.date, c.lastDay ?? c.date, unpaidLeave);
     if (ctx.pairingHandledBy({ id: c.execId }, 'standby_activated')) c.label = 'הפעלה מכוננות';
     else if (c.plan && !c.label.startsWith('המשך סבב')) c.label = 'פעילות לא מתוכננת';
   }
@@ -537,7 +540,7 @@ function mergeCalendarRun(out, cal, answers) {
   const kind = (q) => q.id.split(':')[0];
   out.questions = [...out.questions.filter((q) => !CALENDAR_QUESTIONS.includes(kind(q))), ...cal.questions.filter((q) => CALENDAR_QUESTIONS.includes(kind(q)))];
   out.calendarChanges = cal.changes.filter((c) => c.how !== 'exact' && c.how !== 'noplan').map((c) => ({
-    date: c.date, ...(c.dates && { dates: c.dates }), how: c.how,
+    date: c.date, to: c.to, ...(c.dates && { dates: c.dates }), how: c.how,
     label: CALENDAR_LABEL.reduce((s, [re, to]) => s.replace(re, to), c.label),
     // סבב שאינו ביומן: בצד היומן רק הסבב שהוחלף בו (או "טיסה בחודש אחר"), ולא מה שמגיע לפי התשובה.
     plan: c.plan, planId: c.planId ?? null, calendar: c.how === 'cancelled' && !LINKED_VALUES.includes(answers[`cancelled:${c.planId}`]?.value) ? null
@@ -1368,6 +1371,8 @@ function describeMatch(m) {
     label: added ?? (m.how === 'unplanned' ? unplannedLabel(m.exec) : labels[m.how] ?? m.how),
     lastDay: m.exec ? m.exec.shownTo ?? m.exec.to : null,
     date: (m.plan ?? m.exec).from,
+    // סוף הטווח בכותרת: יום הנחיתה בבסיס, המאוחר מבין המתוכנן ומה שבוצע (בעל המוצר, 21/10/2026; טיוטה 394).
+    to: [m.plan, m.exec].filter(Boolean).map((p) => p.shownTo ?? p.to).sort().at(-1),
     planId: m.plan?.id ?? null,
     execId: m.exec?.id ?? null,
     plan: m.plan ? describePairing(m.plan) : null,
@@ -1456,20 +1461,21 @@ function splitChangesByFdp(out, matches, ctx, fdp) {
     const parts = fdpParts(m.exec, fdp);
     if (parts.length < 2) return [c];
     return parts.map((p, i) => ({ ...c, date: p.from, until: parts[i + 1]?.from ?? null, exec: describePairing(p),
-      label: unplannedLabel(p), lastDay: p.shownTo ?? p.to }));
+      label: unplannedLabel(p), lastDay: p.shownTo ?? p.to, to: p.shownTo ?? p.to }));
   });
 }
 
 /**
  * הקודים שתוכננו בימים from–to (לא סבבים, ובלי קודים שמושמטים מהתכנון), ורצף ימים באותם קודים בטווח אחד:
- * "HOME_RGT 01/09 · VAC 02/09", "SBY_LCR 27/09–30/09". בלי קודים – null.
+ * "HOME_RGT 01/09 · VAC 02/09", "SBY 27/09–30/09". בלי קודים – null.
  */
-function plannedCodes(timeline, codes, from, to) {
+function plannedCodes(timeline, codes, from, to, unpaidLeave = new Set()) {
+  // כוננות – SBY, וחופשה – VAC, בלי הסיומת; חופשה ללא תשלום – הקוד המלא (בעל המוצר, 21/10/2026; טיוטות 393–394).
+  const short = (c) => (isStandbyCode(c) ? 'SBY' : c.startsWith('VAC') && !unpaidLeave.has(c) ? 'VAC' : c);
   const runs = [];
   for (const day of timeline) {
     if (day.date < from || day.date > to) continue;
-    // כוננות – SBY, בלי הסיומת (בעל המוצר, 21/10/2026; טיוטה 393).
-    const cs = [...new Set((day.plan?.codes ?? []).filter((c) => !isIgnoredPlanCode(c, codes)).map((c) => (c.startsWith('SBY') ? 'SBY' : c)))].join(' ');
+    const cs = [...new Set((day.plan?.codes ?? []).filter((c) => !isIgnoredPlanCode(c, codes)).map(short))].join(' ');
     const last = runs.at(-1);
     if (cs && last?.cs === cs && last.next === day.date) Object.assign(last, { to: day.date, next: addDay(day.date) });
     else runs.push({ cs, from: day.date, to: day.date, next: addDay(day.date) });

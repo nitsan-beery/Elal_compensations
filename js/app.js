@@ -13,7 +13,7 @@ import * as store from './store.js';
 import * as calendar from './calendar.js';
 
 // מספר הגרסה של הקוד שרץ בדף. עולה יחד עם CACHE ב-sw.js, לאותו מספר (בעל המוצר, 15/10/2026).
-const APP_VERSION = 280;
+const APP_VERSION = 281;
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -1341,6 +1341,9 @@ function chainSides(c, sides) {
   </details>`;
 }
 
+/** התאריך בכותרת השינוי: בכמה ימים – עד יום הנחיתה (`to`; טיוטה 394); החלפה עם שני תאריכים – "08/09 · 09/09". */
+const changeDates = (c) => (c.dates ? c.dates.map(ddmm).join(' · ') : c.to > c.date ? `${ddmm(c.date)}–${ddmm(c.to)}` : ddmm(c.date));
+
 function renderChanges(res) {
   if (res.mode === 'plan') return renderCalendarChanges(res);
   const changes = res.changes.filter((c) => c.how !== 'exact' && c.how !== 'noplan');
@@ -1348,7 +1351,7 @@ function renderChanges(res) {
   return `<details class="card" data-section="changes" ${changes.length ? 'open' : ''}>
     <summary><h2 style="display:inline">שינויים בין תכנון לביצוע <span class="count">${changes.length}</span></h2></summary>
     ${changes.length ? `<ul class="list">${changes.map((c) => `<li${ruleAttr((c.notes ?? []).map((n) => n.ruleTitle))}>
-      <strong class="num">${(c.dates ?? [c.date]).map(ddmm).join(' · ')}</strong> ${esc(c.label)}
+      <strong class="num">${changeDates(c)}</strong> ${esc(c.label)}
       ${chainSides(c, `<span class="side-plan">תכנון: ${esc(datesFirst(c.plan ?? '—'))}</span> · <span class="side-exec">ביצוע: ${esc(datesFirst(c.exec ?? (c.replacedBy?.join(', ') || '—')))}</span>`)}
       ${(c.notes ?? []).map((n) => `<div class="explain">${esc(n.message)}</div>`).join('')}
     </li>`).join('')}</ul>` : '<p class="muted">כל הסבבים בוצעו כמתוכנן.</p>'}
@@ -1367,7 +1370,7 @@ function renderCalendarChanges(res) {
     <summary><h2 style="display:inline">שינויים בין תכנון לביצוע <span class="count">${changes.length}</span></h2></summary>
     <p class="small muted">הקרדיט והפיצויים על השינויים ייבדקו כשתועלה הרומה.</p>
     ${changes.length ? `<ul class="list">${changes.map((c) => `<li>
-      <strong class="num">${(c.dates ?? [c.date]).map(ddmm).join(' · ')}</strong> ${esc(c.label)}
+      <strong class="num">${changeDates(c)}</strong> ${esc(c.label)}
       ${chainSides(c, `<span class="side-plan">תכנון: ${esc(datesFirst(c.plan ?? '—'))}</span> · <span class="side-exec">יומן: ${esc(datesFirst(c.calendar ?? '—'))}</span>`)}
       ${(c.notes ?? []).map((n) => `<div class="explain">${esc(datesFirst(n.message))}</div>`).join('')}
     </li>`).join('')}</ul>` : '<p class="muted">היומן תואם את התכנון.</p>'}
