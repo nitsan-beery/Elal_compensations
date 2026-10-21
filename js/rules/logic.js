@@ -1848,8 +1848,10 @@ function vacation_recall(ctx, params, rule) {
     ctx.markPairing(pairing, 'vacation_recall');
     // כל יום חופשה בנפרד: הוא אינו קריאה מיוחדת (`special_call`; טיוטה 387).
     for (const d of dates) ctx.markPairing(pairing, `vacation_recall:${d}`);
+    // שורה משלה בפירוט, רק בימי החופשה (`ownDays`; בעל המוצר, 21/10/2026; טיוטה 392).
     ctx.expectPairing(pairing, key, dates.length * hours, rule,
-      `${rule.title}: ${dates.length === 1 ? 'יממה אחת' : `${dates.length} יממות`} של טיסה בימי חופשה מתוכננים (${dates.map(dayOf).join(', ')}).`);
+      `${rule.title}: ${dates.length === 1 ? 'יממה אחת' : `${dates.length} יממות`} של טיסה בימי חופשה מתוכננים (${dates.map(dayOf).join(', ')}).`,
+      { date: dates[0], dates, ownDays: true, explain: dates.length > 1 ? `${rule.title} על כל אחד מהימים` : '' });
   }
 }
 
@@ -2029,7 +2031,8 @@ function standby_activation(ctx, params, rule) {
       const due = ['קרדיט הטיסה', ...(ctx.pairingHandledBy(pairing, 'standby_rig') ? ['תוספת עד ערך ימי הכוננות'] : []),
         ...(after.length ? [`קריאה מיוחדת על ${after.length === 1 ? 'היום' : 'הימים'} שאחרי הכוננות`] : [])];
       const without = [...(ctx.pairingHandledBy(pairing, 'standby_flight_higher') ? ['תוספת על הכוננות'] : []), ...(after.length ? [] : ['קריאה מיוחדת'])];
-      ctx.note(pairing.from, `הפעלה מהכוננות (${range}): ${due.length > 1 ? `${due.slice(0, -1).join(', ')} ו${due.at(-1)}` : due[0]}` +
+      // הכותרת בשינויים "הפעלה מכוננות", וימי הכוננות בצד התכנון: מתחת לשינוי רק מה שמגיע (טיוטה 392).
+      ctx.note(pairing.from, `הפעלה מכוננות: ${due.length > 1 ? `${due.slice(0, -1).join(', ')} ו${due.at(-1)}` : due[0]}` +
         `${without.length ? `, בלי ${without.join(' ובלי ')}` : ''}.`, rule, { pairingId: pairing.id });
       // החזרה אחרי סוף הכוננות: הימים שאחריה בהסכמה, וכל יום שלא תוכנן בו כלום הוא קריאה מיוחדת (2018 ס' 88;
       // בעל המוצר, 10/10/2026). חוק הקריאה המיוחדת מדלג על סבב שהופעל מכוננות, ולכן הציפייה כאן.

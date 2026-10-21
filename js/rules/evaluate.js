@@ -300,6 +300,13 @@ function evaluateFiles({ rulesData, plan = null, exec = null, answers = {}, hist
   out.vacationRecall = execPairings.filter((p) => ctx.pairingHandledBy(p, 'vacation_recall')).map((p) => `unplanned:${p.id}`);
   showSwaps(out, answers, assumed);
   splitChangesByFdp(out, matches, ctx, fdp);
+  // טיסה לא מתוכננת בימים שתוכננה בהם פעילות שאינה סבב: הקודים בצד התכנון, ולא "—" (בעל המוצר, 21/10/2026; טיוטה 392).
+  for (const c of out.changes) {
+    if (c.how !== 'unplanned' || c.plan) continue;
+    c.plan = plannedCodes(timeline, codes, c.date, c.lastDay ?? c.date);
+    if (ctx.pairingHandledBy({ id: c.execId }, 'standby_activated')) c.label = 'הפעלה מכוננות';
+    else if (c.plan && !c.label.startsWith('המשך סבב')) c.label = 'פעילות לא מתוכננת';
+  }
   explainChanges(out, supported, movedActivityDays(timeline, codes, supported));
   for (const c of out.changes.filter((x) => x.carriedOver)) {
     c.notes.push({ message: c.carriedOver.length > 1 ? 'הסבבים שתוכננו בימי השהייה לא בוצעו: לא מגיע עליהם קרדיט.'
@@ -1453,6 +1460,23 @@ function splitChangesByFdp(out, matches, ctx, fdp) {
   });
 }
 
+/**
+ * הקודים שתוכננו בימים from–to (לא סבבים, ובלי קודים שמושמטים מהתכנון), ורצף ימים באותם קודים בטווח אחד:
+ * "HOME_RGT 01/09 · VAC 02/09", "SBY_LCR 27/09–30/09". בלי קודים – null.
+ */
+function plannedCodes(timeline, codes, from, to) {
+  const runs = [];
+  for (const day of timeline) {
+    if (day.date < from || day.date > to) continue;
+    const cs = (day.plan?.codes ?? []).filter((c) => !isIgnoredPlanCode(c, codes)).join(' ');
+    const last = runs.at(-1);
+    if (cs && last?.cs === cs && last.next === day.date) Object.assign(last, { to: day.date, next: addDay(day.date) });
+    else runs.push({ cs, from: day.date, to: day.date, next: addDay(day.date) });
+  }
+  const shown = runs.filter((r) => r.cs).map((r) => `${r.cs} ${r.from === r.to ? ddmm(r.from) : `${ddmm(r.from)}–${ddmm(r.to)}`}`);
+  return shown.length ? shown.join(' · ') : null;
+}
+
 /** לוגיקות שהערה שלהן מסבירה שינוי בין התכנון לביצוע. */
 const CHANGE_LOGIC = new Set(['credit_from_scheduled', 'cancelled_no_compensation', 'voluntary_swap', 'higher_of_planned_performed',
   'lost_hours_credit', 'special_call', 'training_cancelled_flight', 'standby_end_for_bid', 'standby_activation', 'vacation_recall', 'dh_activated']);
@@ -2200,7 +2224,11 @@ function compare({ out, timeline, execPairings, tz, codes: catalog, fdp, hideCod
         const expected = items.reduce((s, e) => s + e.min, 0);
         const reported = reportedFor(column);
         if (!expected && !reported) continue;
-        push({ dates, at: dates.at(-1), label: labelOf(dates, column, only, codes), column, expected, reported, items });
+        // פיצוי על ימים מסוימים של הסבב (`ownDays`: קריאה מחופשה) – בראש השורה רק הימים שלו; ההשוואה על הסבב כולו
+        // (בעל המוצר, 21/10/2026; טיוטה 392).
+        const days = items.length && items.every((e) => e.ownDays) ? dates.filter((d) => items.some((e) => e.dates.includes(d))) : [];
+        const own = days.length ? days : dates;
+        push({ dates: own, at: own.at(-1), label: labelOf(own, column, only, codes), column, expected, reported, items });
       }
     }
   }
