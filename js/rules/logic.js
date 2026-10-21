@@ -936,7 +936,11 @@ function special_call(ctx, params, rule) {
     const secondPaid = !!act?.pairing && !answer && ctx.paidOnDate(match.exec.from, second.logic.params.report_column ?? 'COM',
       keyFor(second.logic.params.report_column ?? 'COM'), H(second.logic.params.hours)) && !!ctx.assume(callId, 'special_call', 'פעילות שנייה ביוזמת החברה');
     const reopened = ctx.assumeIgnored(callId);
-    if (match.how === 'unplanned' && params.ask_user_if_no_sc && !answer && !ctx.pairingHandledBy(match.exec, 'vacation_recall') &&
+    // קריאה מחופשה: הסיבה ידועה רק כשכל ימי הטיסה ימי חופשה; יום אחר בה נשאל כרגיל (בעל המוצר, 21/10/2026, טיוטה 388;
+    // טל: ZRH יצאה ב-01/09, יום HOME_RGT, ונחתה ב-02/09, יום חופשה).
+    const flightDays = match.exec.shownTo ? [...match.exec.dates, match.exec.shownTo] : match.exec.dates;
+    const allRecalled = flightDays.every((d) => ctx.pairingHandledBy(match.exec, `vacation_recall:${d}`));
+    if (match.how === 'unplanned' && params.ask_user_if_no_sc && !answer && !allRecalled &&
       !ctx.pairingHandledBy(match.exec, 'standby_bid_pending') && !secondPaid && !(secondOnly && !act.pairing && !act.sim)) {
       ctx.ask({
         id: `unplanned:${match.exec.id}`,

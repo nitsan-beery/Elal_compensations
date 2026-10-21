@@ -56,6 +56,17 @@ const CREDIT_LABEL_COLUMNS = ['Credit', 'FLT+DH', 'Rig'];
  * (`mergeCalendarRun`).
  */
 export function evaluate(input) {
+  const out = evaluateOnce(input);
+  // הנחה ניתנת לשינוי רק כשבלעדיה נשאלת השאלה; אחרת היא אינה מוצגת ב"תשובות שנשמרו", ו-`run-month` מסמן אותה
+  // (בעל המוצר, 21/10/2026, טיוטה 388; טל: ZRH ‏01–02/09 – קריאה מחופשה ביטלה את השאלה).
+  for (const a of out.assumptions ?? []) {
+    const probe = evaluateOnce({ ...input, assumedIgnored: [...(input.assumedIgnored ?? []), a.id] });
+    a.changeable = probe.questions.some((q) => q.id === a.id);
+  }
+  return out;
+}
+
+function evaluateOnce(input) {
   const run = input.plan && !input.exec ? calendarExec(input) : null;
   if (!run) return evaluateFiles(input);
   const out = evaluateFiles(input, { journal: false });

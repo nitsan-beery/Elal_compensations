@@ -13,7 +13,7 @@ import * as store from './store.js';
 import * as calendar from './calendar.js';
 
 // מספר הגרסה של הקוד שרץ בדף. עולה יחד עם CACHE ב-sw.js, לאותו מספר (בעל המוצר, 15/10/2026).
-const APP_VERSION = 274;
+const APP_VERSION = 275;
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -1387,7 +1387,8 @@ const answerDate = ([id, a]) => id.match(ISO_DATE)?.[0] ?? (/:\d{4}-\d{2}$/.test
  */
 function renderAnswered(res) {
   const saved = state.record?.answers ?? {};
-  const assumed = (res.assumptions ?? []).filter((x) => !saved[x.id]).map((x) => [x.id, { value: x.value, label: x.label }, true]);
+  // הנחה שאין בה מה לשנות – בלי שאלה כשמבטלים אותה – אינה מוצגת (`changeable`; טיוטה 388).
+  const assumed = (res.assumptions ?? []).filter((x) => !saved[x.id] && x.changeable !== false).map((x) => [x.id, { value: x.value, label: x.label }, true]);
   const answers = [...Object.entries(saved), ...assumed].sort((a, b) => answerDate(a).localeCompare(answerDate(b)));
   if (!answers.length) return '';
   return `<details class="card" data-section="answered">

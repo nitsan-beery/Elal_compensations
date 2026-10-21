@@ -104,7 +104,8 @@ if (r.questions.length) {
 }
 if (r.assumptions?.length) {
   console.log('\n== הנחות האפליקציה ==');
-  for (const a of r.assumptions) console.log(`~ [${a.id}] ${a.label}`);
+  // הנחה שבלעדיה אין שאלה: אינה מוצגת באפליקציה, וכנראה באג (טיוטה 388).
+  for (const a of r.assumptions) console.log(`~ [${a.id}] ${a.label}${a.changeable === false ? '  !! אין שאלה בלי ההנחה' : ''}`);
 }
 if (r.obsoleteAnswers?.length) console.log(`\nתשובות על שלבים שחזרו: ${r.obsoleteAnswers.join(', ')}`);
 if (r.reviews.length) {
