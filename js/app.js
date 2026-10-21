@@ -13,7 +13,7 @@ import * as store from './store.js';
 import * as calendar from './calendar.js';
 
 // מספר הגרסה של הקוד שרץ בדף. עולה יחד עם CACHE ב-sw.js, לאותו מספר (בעל המוצר, 15/10/2026).
-const APP_VERSION = 277;
+const APP_VERSION = 278;
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -1395,15 +1395,16 @@ function renderAnswered(res) {
   const assumed = (res.assumptions ?? []).filter((x) => !saved[x.id] && x.changeable !== false).map((x) => [x.id, { value: x.value, label: x.label }, true]);
   const answers = [...Object.entries(saved), ...assumed].sort(answerOrder);
   if (!answers.length) return '';
+  const recall = (id) => (res.vacationRecall?.includes(id) ? ' וביטול חופשה' : '');
   return `<details class="card" data-section="answered">
     <summary><h2 style="display:inline">תשובות שנשמרו <span class="count">${answers.length}</span></h2></summary>
     <ul class="list">${answers.map(([id, a, byApp]) => byApp ? `<li class="row">
-      <span>${answeredHead(id)}: <strong>${esc(a.label ?? answerLabel(a.value, id.split(':')[0]))}</strong>
+      <span>${answeredHead(id)}: <strong>${esc(a.label ?? answerLabel(a.value, id.split(':')[0]))}${recall(id)}</strong>
         <div class="explain">הנחת האפליקציה: הרומה מזכה את הפיצוי</div></span>
       <span class="spacer"></span>
       <button class="btn no-print" data-unassume="${esc(id)}">שנה</button>
     </li>` : `<li class="row">
-      <span>${answeredHead(id)}: <strong>${esc(a.value === 'partial' && a.count ? `ויתרתי מרצוני על ${a.count === 1 ? 'יום אחד' : `${a.count} ימים`}` : a.label ?? answerLabel(a.value, id.split(':')[0]))}</strong>
+      <span>${answeredHead(id)}: <strong>${esc(a.value === 'partial' && a.count ? `ויתרתי מרצוני על ${a.count === 1 ? 'יום אחד' : `${a.count} ימים`}` : a.label ?? answerLabel(a.value, id.split(':')[0]))}${recall(id)}</strong>
         ${a.link !== undefined ? `<span class="small muted">(${a.link === 'none' ? 'מסירת הטיסה ללא חלופה' : a.link ? `עם ${esc(describePairingId(a.link))}` : 'בחודש אחר'})</span>` : ''}
         ${a.text ? `<span class="small muted">– ${esc(a.text)}</span>` : ''}
         ${typeof a.creditMin === 'number' ? `<span class="small muted">(${a.creditMin ? `מגיע קרדיט ${minToHhmm(a.creditMin)}` : 'לא מגיע קרדיט'})</span>` : ''}</span>

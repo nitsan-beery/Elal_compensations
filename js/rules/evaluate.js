@@ -296,6 +296,8 @@ function evaluateFiles({ rulesData, plan = null, exec = null, answers = {}, hist
     if (c.how === 'exact' && ctx.pairingHandledBy({ id: c.execId }, 'extended')) Object.assign(c, { how: 'extended', label: 'הסבב התארך' });
   }
   attachLinkCandidates(out.questions, matches, ctx, out.assumptions);
+  // טיסה עם יום חופשה שנקראת ממנו: "וביטול חופשה" בשורה שלה ב"תשובות שנשמרו" (טיוטה 391).
+  out.vacationRecall = execPairings.filter((p) => ctx.pairingHandledBy(p, 'vacation_recall')).map((p) => `unplanned:${p.id}`);
   showSwaps(out, answers, assumed);
   splitChangesByFdp(out, matches, ctx, fdp);
   explainChanges(out, supported, movedActivityDays(timeline, codes, supported));
