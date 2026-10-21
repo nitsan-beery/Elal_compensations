@@ -867,14 +867,22 @@ function special_call(ctx, params, rule) {
       // (בעל המוצר, 09/10/2026; סינתטי: ATH ‏02/08/2026 שבוצע כמתוכנן, ולפניו טיסה לא מתוכננת).
       // כך גם בהחלפה ביוזמת החברה או בזכייה במכרז ליום פנוי: ימי הסבב שהוחלף מכוסים בגבוה מבין השתיים, והקריאה
       // המיוחדת רק על היממות שלא תוכנן בהן סבב (בעל המוצר, 21/10/2026; טל: OPO ‏09–10/09 במקום TBS ‏10/09 – S/C רק על 09/09).
+      // סבב מתוכנן שהתשובה עליו מעבירה אותו לטיסה אחרת (בימים אחרים, בחודש אחר, או מסירה ללא חלופה) אינו מתוכנן
+      // בימיו (בעל המוצר, 21/10/2026; טיוטה 397; טל: TBS ‏10/09 שהוחלפה עם ZRH – OPO מקבלת גם על 10/09).
+      const daysOf = (p) => (p.shownTo ? [...p.dates, p.shownTo] : p.dates);
+      const movedAway = (p) => {
+        const a = ctx.answer(`cancelled:${p.id}`);
+        return ['voluntary_swap', 'replaced', 'bid'].includes(a?.value) && a.link !== match.exec.id;
+      };
+      const planned = new Set(ctx.planPairings.filter((p) => !ctx.pairingHandledBy(p, 'cancelled_no_compensation') && !movedAway(p)).flatMap(daysOf));
       if (!because || companyLinked) {
-        const daysOf = (p) => (p.shownTo ? [...p.dates, p.shownTo] : p.dates);
         const replaced = companyLinked ? ctx.planPairings.find((p) => `cancelled:${p.id}` === answer.via) : null;
         const own = new Set([match.plan, replaced].filter(Boolean).flatMap(daysOf));
-        const planned = new Set(ctx.planPairings.filter((p) => !ctx.pairingHandledBy(p, 'cancelled_no_compensation')).flatMap(daysOf));
         days.counted = days.counted.filter((d) => !own.has(d) && (!planned.has(d) || ctx.reportedOnDate(d, column) > 0));
         if (!days.counted.length) continue;
       }
+      // יממה שלא עמדה בסף: ההערה רק כשהיום פנוי – ביום שתוכננה בו פעילות הקריאה המיוחדת אינה מגיעה בגללה (טיוטה 397).
+      if (days.skipped && planned.has(days.skipped.date)) delete days.skipped;
       if (assumedCall) ctx.assume(callId, 'special_call', 'קריאה מיוחדת');
       ctx.markPairing(match.exec, 'special_call');
       // סבב שיצא בחודש הקודם: קריאה מיוחדת רק על יממה שלא תוכנן בה סבב, כמו ברומה (28/02–08/03/2026, BUD:
