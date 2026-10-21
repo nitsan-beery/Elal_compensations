@@ -858,9 +858,12 @@ function special_call(ctx, params, rule) {
       // מיוחדת, וה-S/C מוצג כפיצוי שאף חוק אינו מסביר (FRA ‏10–12/03/2026: S/C רק על 12/03).
       // ימי הסבב המתוכנן של הטיסה עצמה אינם קריאה מיוחדת גם כשהרומה רשמה בהם S/C: הוא שייך לפעילות אחרת ביממה
       // (בעל המוצר, 09/10/2026; סינתטי: ATH ‏02/08/2026 שבוצע כמתוכנן, ולפניו טיסה לא מתוכננת).
-      if (!because) {
+      // כך גם בהחלפה ביוזמת החברה או בזכייה במכרז ליום פנוי: ימי הסבב שהוחלף מכוסים בגבוה מבין השתיים, והקריאה
+      // המיוחדת רק על היממות שלא תוכנן בהן סבב (בעל המוצר, 21/10/2026; טל: OPO ‏09–10/09 במקום TBS ‏10/09 – S/C רק על 09/09).
+      if (!because || companyLinked) {
         const daysOf = (p) => (p.shownTo ? [...p.dates, p.shownTo] : p.dates);
-        const own = new Set(match.plan ? daysOf(match.plan) : []);
+        const replaced = companyLinked ? ctx.planPairings.find((p) => `cancelled:${p.id}` === answer.via) : null;
+        const own = new Set([match.plan, replaced].filter(Boolean).flatMap(daysOf));
         const planned = new Set(ctx.planPairings.filter((p) => !ctx.pairingHandledBy(p, 'cancelled_no_compensation')).flatMap(daysOf));
         days.counted = days.counted.filter((d) => !own.has(d) && (!planned.has(d) || ctx.reportedOnDate(d, column) > 0));
         if (!days.counted.length) continue;

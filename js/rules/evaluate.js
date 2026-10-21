@@ -284,7 +284,7 @@ function evaluateFiles({ rulesData, plan = null, exec = null, answers = {}, hist
   for (const c of out.changes) {
     if (c.how === 'exact' && ctx.pairingHandledBy({ id: c.execId }, 'extended')) Object.assign(c, { how: 'extended', label: 'הסבב התארך' });
   }
-  attachLinkCandidates(out.questions, matches, ctx);
+  attachLinkCandidates(out.questions, matches, ctx, out.assumptions);
   showSwaps(out, answers, assumed);
   splitChangesByFdp(out, matches, ctx, fdp);
   explainChanges(out, supported, movedActivityDays(timeline, codes, supported));
@@ -1737,11 +1737,14 @@ const CANCELLED_OUTCOME = {
  * כלל: החלפה ביוזמת החברה בלי טיסה אחרת מכוסה באפשרות "הורדתי מהטיסה המקורית"
  * (בעל המוצר, 23/09/2026).
  */
-function attachLinkCandidates(questions, matches, ctx) {
+function attachLinkCandidates(questions, matches, ctx, assumptions = []) {
   const cancelled = matches.filter((m) => m.how === 'cancelled').map((m) => ({ id: m.plan.id, label: describePairing(m.plan) }));
-  // פעילות שזוהתה כקריאה מיוחדת (S/C בדוח), או טיסה בסוף כוננות, אינה החלפה.
+  // פעילות שזוהתה כקריאה מיוחדת (S/C בדוח), או טיסה בסוף כוננות, אינה החלפה. חוץ מקריאה מיוחדת שהאפליקציה הניחה
+  // (S/C ברומה, בלי תשובה): בדרך כלל היא זכייה במכרז או שינוי ביוזמת החברה במקום סבב שבוטל, והקישור מחליף את
+  // ההנחה (בעל המוצר, 21/10/2026, טיוטה 384; טל: OPO ‏09–10/09 במקום TBS ‏10/09).
   const notSwap = ['special_call', 'standby_bid_pending', 'standby_bid', 'standby_activated'];
-  const unplanned = matches.filter((m) => m.how === 'unplanned' && !notSwap.some((t) => ctx.pairingHandledBy(m.exec, t)))
+  const assumedCall = (m) => assumptions.some((a) => a.id === `unplanned:${m.exec.id}` && a.value === 'special_call');
+  const unplanned = matches.filter((m) => m.how === 'unplanned' && (assumedCall(m) || !notSwap.some((t) => ctx.pairingHandledBy(m.exec, t))))
     .map((m) => ({ id: m.exec.id, label: describePairing(m.exec) }));
   const otherMonth = { id: null, label: 'טיסה בחודש אחר' };
   const gaveAway = { id: GAVE_AWAY, label: GAVE_AWAY_LABEL };
