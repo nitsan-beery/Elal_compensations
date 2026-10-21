@@ -8,14 +8,14 @@ import { extractPages, toRows, centerX, pageText } from './extract.js';
 import { hhmmToMin, minToHhmm, toNumber, isoDate, daysInMonth } from '../time.js';
 
 /** עמודות שהאפליקציה יודעת להשתמש בהן. חסרה אחת – מדווחים, לא מנחשים. */
-const KNOWN_DAY_COLUMNS = ['Day', 'Src', 'Details', 'Credit', 'Rig', 'FLT', 'TAB', 'DH', 'SIMD', 'SIM', 'CORS', 'VAC', 'SICK', 'SCKFM', 'SBY', 'MEAL', 'COM', 'HHM', 'S/C', 'PDFT', 'ABR', 'NHTL', 'MIL'];
+const KNOWN_DAY_COLUMNS = ['Day', 'Src', 'Details', 'Credit', 'Rig', 'FLT', 'TAB', 'DH', 'SIMD', 'SIM', 'CORS', 'VAC', 'SICK', 'SCKFM', 'SBY', 'MEAL', 'COM', 'HHM', 'S/C', 'PDFT', 'ABR', 'NHTL', 'MIL', 'MILUP'];
 /**
  * עמודות שאינן נוגעות לקרדיט ולפיצויים: לא נקראות ולא מוצגות (בעל המוצר, 08/10/2026).
  * Pay Queries – מספר בירורי השכר על היום. בדרך כלל הכותרת נשברת לשתי שורות ("Pay" מעל שורת הכותרות,
- * "Queries" מתחתיה) ואינה נקראת; ברומה צרה היא בשורה אחת (15/10/2026). MILUP – ‏1.00 ביום שלפני יום
- * מילואים וביום שאחריו, בלי קרדיט (16/10/2026). MIL, הסימון של יום המילואים, נקראת.
+ * "Queries" מתחתיה) ואינה נקראת; ברומה צרה היא בשורה אחת (15/10/2026). MIL, הסימון של יום המילואים,
+ * נקראת, וגם MILUP – ימי מילואים לא מתוכננים, בלי קרדיט, לשורת הימים בסיכום (21/10/2026).
  */
-const IGNORED_DAY_COLUMNS = ['PICK', 'PICKUP', 'IPP', 'SLS', 'SLSAVE', 'MPPD', 'MILUP', 'Pay Queries', 'Pay', 'Queries'];
+const IGNORED_DAY_COLUMNS = ['PICK', 'PICKUP', 'IPP', 'SLS', 'SLSAVE', 'MPPD', 'Pay Queries', 'Pay', 'Queries'];
 /**
  * עמודות פיצוי שהסיכום של הרומה סופר בתוך COM: HHM הוא הפיצוי על נחיתה מאוחרת בארץ (בעל המוצר,
  * 08/10/2026; ספטמבר 2026: HHM 00:30 ב-24/09, ובסיכום COM 00:30 ו-HHM 00:30, בלי COM באף יום).

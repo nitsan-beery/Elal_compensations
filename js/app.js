@@ -13,7 +13,7 @@ import * as store from './store.js';
 import * as calendar from './calendar.js';
 
 // מספר הגרסה של הקוד שרץ בדף. עולה יחד עם CACHE ב-sw.js, לאותו מספר (בעל המוצר, 15/10/2026).
-const APP_VERSION = 269;
+const APP_VERSION = 270;
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -32,17 +32,24 @@ const isHomeRgt = (e) => e.code?.startsWith('HOME_');
 const DAY_KINDS = [
   { one: 'יום חופשה אחד', many: 'ימי חופשה', test: (e) => e.ruleId === 'vacation_base_credit' },
   { one: 'יום מחלה אחד', many: 'ימי מחלה', test: (e) => e.ruleId === 'planned_sick_credit' || e.ruleId === 'sick_credit' },
-  { one: 'יום מילואים אחד', many: 'ימי מילואים', test: (e) => e.ruleId === 'reserve_day_credit' },
+  { one: 'יום מילואים אחד', many: 'ימי מילואים', reserve: true, test: (e) => e.ruleId === 'reserve_day_credit' },
   { one: 'יום סימולטור אחד', many: 'ימי סימולטור', test: (e) => e.ruleId === 'sim_day_credit' },
   { one: 'יום פעילות קרקעית אחד', many: 'ימי פעילות קרקעית', test: (e) => e.ruleId === 'ground_training_credit' && !isHomeRgt(e) },
   { one: 'יום HOME RGT אחד', many: 'ימי HOME RGT', test: (e) => e.ruleId === 'ground_training_credit' && isHomeRgt(e) },
   { one: 'יום כוננות אחד', many: 'ימי כוננות', test: (e) => e.ruleId === 'short_call_standby_credit' },
 ];
-/** כמה ימים זוכו על פעילות שאינה טיסה, לפי סוג ("<span>3</span> ימי חופשה"). */
-const dayCounts = (expectations) => DAY_KINDS.map((k) => {
-  const n = new Set(expectations.filter((e) => e.key === 'absence' && k.test(e)).map((e) => e.date)).size;
-  return n ? (n === 1 ? k.one : `<span class="num">${n}</span> ${k.many}`) : null;
-}).filter(Boolean);
+const countText = (n, one, many) => (n === 1 ? one : `<span class="num">${n}</span> ${many}`);
+/**
+ * כמה ימים זוכו על פעילות שאינה טיסה, לפי סוג ("<span>3</span> ימי חופשה"). כשיש רומה, ימי המילואים שזוכו הם
+ * המתוכננים, ואחריהם הלא מתוכננים – סכום MILUP ברומה, בלי קרדיט (בעל המוצר, 21/10/2026).
+ */
+const dayCounts = (res) => DAY_KINDS.flatMap((k) => {
+  const n = new Set(res.expectations.filter((e) => e.key === 'absence' && k.test(e)).map((e) => e.date)).size;
+  const exec = k.reserve && res.unplannedReserveDays != null;
+  const out = n ? [countText(n, exec ? 'יום מילואים מתוכנן אחד' : k.one, exec ? 'ימי מילואים מתוכננים' : k.many)] : [];
+  if (exec && res.unplannedReserveDays) out.push(countText(res.unplannedReserveDays, 'יום מילואים לא מתוכנן אחד', 'ימי מילואים לא מתוכננים'));
+  return out;
+});
 // תוויות לתשובות שנשמרו לפני שהתווית של האפשרות נשמרה איתן (`answer.label`). ערך שאינו כאן מוצג כמות שהוא.
 const ANSWER_LABEL = {
   special_call: 'קריאה מיוחדת', voluntary_swap: 'החלפה מרצוני או בהסכמתי', replaced: 'שינוי ביוזמת החברה', bid: 'זכייה במכרז', diversion: 'סטיה לשדה משנה',
@@ -329,8 +336,8 @@ function slipText(r) {
 // לעמודה אחרת) מעלה אותה, וחודש שנשמר בגרסה קודמת נקרא מחדש מהקבצים השמורים כשהוא נפתח (בעל המוצר,
 // 08/10/2026: HHM ב-COM של היום, ספטמבר 2026 של רון).
 // 2: מספר העובד בתכנון (בעל המוצר, 08/10/2026). 5: Pay Queries ברומה מדולגת (15/10/2026).
-// 6: העמודה MIL ברומה נקראת, ו-MILUP מדולגת (16/10/2026).
-const PARSE_VERSION = 8;
+// 6: העמודה MIL ברומה נקראת, ו-MILUP מדולגת (16/10/2026). 9: MILUP נקראת (21/10/2026).
+const PARSE_VERSION = 9;
 
 async function reparseStale(record) {
   if (record.parseVersion === PARSE_VERSION) return;
@@ -1215,7 +1222,7 @@ function renderTotals(res) {
   // כל עוד יש שאלות פתוחות, פער בסיכום אינו ממצא: הצפוי תלוי בתשובות.
   const pending = res.questions.length > 0;
   const plan = planTotals(res);
-  const days = res.totals.length || plan.length ? dayCounts(res.expectations) : [];
+  const days = res.totals.length || plan.length ? dayCounts(res) : [];
   return `<div class="card">
     <h2>${res.totals.length || plan.length ? 'סיכום' : 'סיכום חודשי'}<span class="spacer"></span>${PRINT_BUTTON}</h2>
     <div class="totals">${res.totals.map((t) => {

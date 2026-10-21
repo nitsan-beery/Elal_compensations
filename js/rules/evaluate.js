@@ -301,6 +301,8 @@ function evaluateFiles({ rulesData, plan = null, exec = null, answers = {}, hist
     if (assignFloating(out)) out.comparison = runCompare();
     explainUnexplained(out, timeline, cal, execPairings.filter((p) => ctx.pairingHandledBy(p, 'diversion_assumed')));
     out.totals = compareTotals(out, exec);
+    // ימי מילואים לא מתוכננים: MILUP ברומה, בלי קרדיט – לשורת הימים בסיכום בלבד (בעל המוצר, 21/10/2026).
+    out.unplannedReserveDays = Object.values(exec.days ?? {}).reduce((n, d) => n + (d.values?.MILUP?.count ?? 0), 0);
     warnMissingColumns(out, exec);
   }
   // מה שמוסבר בטבלת השינויים אינו חוזר בהערות (בעל המוצר, 01/10/2026).
