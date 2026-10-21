@@ -853,6 +853,12 @@ function special_call(ctx, params, rule) {
         continue;
       }
       const days = countSpecialCallDays(stay, params, match.exec, ctx.fdp);
+      // יום חופשה שנקראת ממנו (`vacation_recall`): הפיצוי עליו הוא על ביטול החופשה, ולא קריאה מיוחדת – גם מעל הסף
+      // של היממה השנייה – ואין עליו הערה שאין קריאה מיוחדת (בעל המוצר, 21/10/2026, טיוטה 387; טל: ZRH נחתה ב-02/09).
+      const recalled = (d) => ctx.pairingHandledBy(match.exec, `vacation_recall:${d}`);
+      days.counted = days.counted.filter((d) => !recalled(d));
+      if (days.skipped && recalled(days.skipped.date)) delete days.skipped;
+      if (!days.counted.length) continue;
       // S/C ברומה שייך ליום שבו נרשם, ולא לסבב כולו (בעל המוצר, 08/10/2026): כשרק הוא הסיבה לקריאה המיוחדת,
       // יממה שתוכנן בה סבב (שלא בוטל ללא קרדיט) נספרת רק כשהרומה רשמה S/C עליה. בלי יממה כזאת – אין קריאה
       // מיוחדת, וה-S/C מוצג כפיצוי שאף חוק אינו מסביר (FRA ‏10–12/03/2026: S/C רק על 12/03).
@@ -1836,6 +1842,8 @@ function vacation_recall(ctx, params, rule) {
   }
   for (const [pairing, dates] of byPairing) {
     ctx.markPairing(pairing, 'vacation_recall');
+    // כל יום חופשה בנפרד: הוא אינו קריאה מיוחדת (`special_call`; טיוטה 387).
+    for (const d of dates) ctx.markPairing(pairing, `vacation_recall:${d}`);
     ctx.expectPairing(pairing, key, dates.length * hours, rule,
       `${rule.title}: ${dates.length === 1 ? 'יממה אחת' : `${dates.length} יממות`} של טיסה בימי חופשה מתוכננים (${dates.map(dayOf).join(', ')}).`);
   }
