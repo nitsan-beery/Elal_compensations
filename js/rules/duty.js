@@ -865,8 +865,6 @@ function night_landings(ctx, params, rule) {
   const known = crews && night.every((n) => crewOf(n) != null);
   const base = known ? pool : night;
   const planned = `תוכננו ${base.length} ${known ? nightWord : 'טיסות לילה'} ${landing}`;
-  // ליד כל טיסה שהרכב הצוות שלה אינו ידוע – למה: בדרך כלל היא אינה ביומן, כי הוחלפה או בוטלה.
-  const listCrew = (items) => items.map((n) => `${list([n])}${crewOf(n) != null ? '' : ctx.inCalendar(n.leg.date, n.leg.flight) === false ? ' – אינה ביומן והרכב הצוות שלה אינו ידוע' : ' – הרכב הצוות אינו ידוע'}`).join(', ');
   // פחות מהמינימום גם כשכל טיסה שהרכב הצוות שלה אינו ידוע נספרת: בטוח שאין פיצוי. ההערה אומרת
   // אילו טיסות אינן נספרות בגלל הרכב הצוות שלהן (בעל המוצר, 04/10/2026).
   if (crews && pool.length < min) {
@@ -925,14 +923,9 @@ function night_landings(ctx, params, rule) {
   const paying = counted.slice(threshold - 1);
   // טיסה שלא בוצעה ואין לה צוות חוזי (FDP שאינו עומד באף הרכב) אינה נשאלת, ונשארת בהנחה שהיא נספרת.
   const open = crews ? pool.filter((n) => crewOf(n) == null && n.crewLeg) : [];
-  // בתכנון לבד הרכב הצוות אינו נשאל (בעל המוצר, 03/10/2026): ייתכן שמגיע פיצוי, וזה ייבדק אחרי
-  // שתועלה הרומה (בעל המוצר, 04/10/2026).
-  if (open.length && !ctx.hasExec) {
-    const what = open.length === pool.length ? ` (${names(pool)}), והרכב הצוות ${pool.length === 1 ? 'שלה' : 'שלהן'} אינו ידוע` : ` (${listCrew(pool)})`;
-    ctx.note(null, `תוכננו ${pool.length} טיסות לילה ${landing}${what}. ` +
-      `המינימום הוא ${min}, כך שייתכן שמגיע פיצוי, וזה ייבדק אחרי הביצוע.`, rule);
-    return;
-  }
+  // בתכנון לבד הרכב הצוות אינו נשאל (בעל המוצר, 03/10/2026), וכשהוא אינו ידוע – בלי הערה: בתכנון לבד
+  // הערה רק על נתונים ידועים (בעל המוצר, 21/10/2026; טיוטה 399). זה ייבדק אחרי שתועלה הרומה.
+  if (open.length && !ctx.hasExec) return;
   // פיצוי שהרומה זיכתה אינו בהערות, רק בשורה שלו (בעל המוצר, 14/10/2026; טיוטה 333).
   // הנחה שהמשתמש ביטל על אחת הטיסות (`ctx.assume`; טיוטה 365): כאילו הרומה לא זיכתה, והיא נשאלת ראשונה.
   const nightId = (n) => `night_crew:${n.crewLeg.date}:${n.crewLeg.flight}`;
@@ -1718,7 +1711,7 @@ export function contractCrewOf(ctx, leg) {
  * כשהרומה זיכתה את הפיצוי, מניחים צוות קטן מהחוזי; כשלא – שואלים, רק כשיש רומה (בעל המוצר, 04/10/2026).
  * הערות (בעל המוצר, 04/10/2026): כל טיסה בצוות קטן מהחוזי מקבלת הערה ביום שלה, וכשאין כזאת ואין טיסה
  * שהרכב הצוות שלה עוד לא ידוע – "כל הטיסות עומדות בהרכב צוות חוזי" בסוף ההערות. טיסה שהצוות החוזי שלה
- * מוגבר או כפול והרכב הצוות שלה אינו ידוע (בתכנון לבד, בלי היומן) נמנית בהערה בסוף. ההערות נבנות מחדש
+ * מוגבר או כפול והרכב הצוות שלה אינו ידוע (בתכנון לבד, בלי היומן) – בלי הערה (טיוטה 399). ההערות נבנות מחדש
  * בכל הרצה, ולכן מתעדכנות עם היומן ועם התשובות. כשהיומן מראה צוות קטן מהחוזי והרומה אינה מזכה, ייתכן
  * שהיומן אינו מעודכן, וההסבר מבקש לוודא סנכרון מהאורגנייזר.
  */
@@ -1745,7 +1738,7 @@ function legal_crew_composition(ctx, params, rule) {
   const amount = H(params.hours);
   let checked = 0;
   let below = 0;
-  const unknown = [];
+  let unknown = false;
   const pending = [];
   for (const fdp of ctx.legalFdps ?? []) {
     const lim = contractLimits(fdp, params, ctx.domicile);
@@ -1767,7 +1760,7 @@ function legal_crew_composition(ctx, params, rule) {
       fdp.flights.map((f) => ctx.answer(`night_crew:${f.date}:${f.flight}`)).find(Boolean) ?? white ?? null;
     if (!answered && white === null) {
       if (ctx.hasExec) pending.push(fdp);
-      else unknown.push(`${fdp.what} (${contract})`);
+      else unknown = true;
       continue;
     }
     if (answered) {
@@ -1813,12 +1806,11 @@ function legal_crew_composition(ctx, params, rule) {
         ruleId: rule.id,
       });
     } else {
-      unknown.push(`${fdp.what} (${contract})`);
+      unknown = true;
     }
   }
-  if (unknown.length) {
-    ctx.note(null, `הרכב הצוות אינו ידוע ב${unknown.length === 1 ? 'טיסה שהצוות החוזי בה מוגבר או כפול' : `-${unknown.length} טיסות שהצוות החוזי בהן מוגבר או כפול`}, ולכן לא נבדק אם הוא חוזי: ${unknown.join('; ')}.`, rule, { order: 'last' });
-  } else if (checked && !below && !pending.length) {
+  // הרכב לא ידוע בתכנון לבד: בלי הערה, כי בתכנון לבד הערה רק על נתונים ידועים (בעל המוצר, 21/10/2026; טיוטה 399).
+  if (!unknown && checked && !below && !pending.length) {
     ctx.note(null, 'כל הטיסות עומדות בהרכב צוות חוזי.', rule, { order: 'last', kind: 'crew_ok' });
   }
 }
