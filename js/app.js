@@ -13,7 +13,7 @@ import * as store from './store.js';
 import * as calendar from './calendar.js';
 
 // מספר הגרסה של הקוד שרץ בדף. עולה יחד עם CACHE ב-sw.js, לאותו מספר (בעל המוצר, 15/10/2026).
-const APP_VERSION = 275;
+const APP_VERSION = 276;
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -1380,6 +1380,10 @@ const ISO_DATE = /\d{4}-\d{2}-\d{2}/;
 // שאלה על החודש כולו (ימים ללא פעילות) – בראש הרשימה (טיוטה 367).
 const answerDate = ([id, a]) => id.match(ISO_DATE)?.[0] ?? (/:\d{4}-\d{2}$/.test(id) ? '0000' : null) ??
   String(a?.value ?? '').match(ISO_DATE)?.[0] ?? '9999';
+// סדר קבוע, שאינו תלוי בכך שהשורה תשובה או הנחה, כדי ש"שנה" לא יזיז אותה (טיוטה 389): באותו תאריך שאלה
+// שהתאריך שלה מהתשובה לפני הטיסות של אותו יום, ובשוויון – לפי המזהה.
+const answerOrder = (a, b) => answerDate(a).localeCompare(answerDate(b)) ||
+  Number(ISO_DATE.test(a[0])) - Number(ISO_DATE.test(b[0])) || (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0);
 
 /**
  * התשובות שנשמרו, ובינן ההנחות של האפליקציה כשהרומה זיכתה (`res.assumptions`; בעל המוצר, 17/10/2026, טיוטה 365):
@@ -1389,7 +1393,7 @@ function renderAnswered(res) {
   const saved = state.record?.answers ?? {};
   // הנחה שאין בה מה לשנות – בלי שאלה כשמבטלים אותה – אינה מוצגת (`changeable`; טיוטה 388).
   const assumed = (res.assumptions ?? []).filter((x) => !saved[x.id] && x.changeable !== false).map((x) => [x.id, { value: x.value, label: x.label }, true]);
-  const answers = [...Object.entries(saved), ...assumed].sort((a, b) => answerDate(a).localeCompare(answerDate(b)));
+  const answers = [...Object.entries(saved), ...assumed].sort(answerOrder);
   if (!answers.length) return '';
   return `<details class="card" data-section="answered">
     <summary><h2 style="display:inline">תשובות שנשמרו <span class="count">${answers.length}</span></h2></summary>
