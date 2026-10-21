@@ -1812,10 +1812,16 @@ function attachLinkCandidates(questions, matches, ctx, assumptions = []) {
   const otherMonth = { id: null, label: 'טיסה בחודש אחר' };
   const gaveAway = { id: GAVE_AWAY, label: GAVE_AWAY_LABEL };
   const execLabel = new Map(matches.filter((m) => m.exec).map((m) => [m.exec.id, describePairing(m.exec)]));
+  // מה שחופף לימי הסבב שבשאלה, גם חלקית – ראשון, ואחריו השאר לפי תאריך (בעל המוצר, 21/10/2026; טיוטה 396).
+  const span = new Map(matches.flatMap((m) => [m.plan, m.exec]).filter(Boolean).map((p) => [p.id, [p.from, p.shownTo ?? p.to]]));
+  const overlaps = (a, b) => !!a && !!b && a[0] <= b[1] && b[0] <= a[1];
+  const overlapFirst = (list, subject) => [...list.filter((c) => overlaps(span.get(c.id), subject)),
+    ...list.filter((c) => !overlaps(span.get(c.id), subject))];
   for (const q of questions) {
     const onCancelled = q.id.startsWith('cancelled:');
     const own = onCancelled && q.execId ? [{ id: q.execId, label: execLabel.get(q.execId) ?? q.execId }] : [];
-    const pool = q.id.startsWith('unplanned:') ? cancelled : onCancelled ? [...own, ...unplanned] : [];
+    const subject = span.get(q.id.slice(q.id.indexOf(':') + 1));
+    const pool = q.id.startsWith('unplanned:') ? overlapFirst(cancelled, subject) : onCancelled ? [...own, ...overlapFirst(unplanned, subject)] : [];
     for (const o of q.options ?? []) {
       if (o.needsLink) o.linkCandidates = [...pool, otherMonth, ...(onCancelled && !own.length && o.value === 'voluntary_swap' ? [gaveAway] : [])];
     }
