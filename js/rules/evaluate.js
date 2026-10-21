@@ -1468,7 +1468,8 @@ function plannedCodes(timeline, codes, from, to) {
   const runs = [];
   for (const day of timeline) {
     if (day.date < from || day.date > to) continue;
-    const cs = (day.plan?.codes ?? []).filter((c) => !isIgnoredPlanCode(c, codes)).join(' ');
+    // כוננות – SBY, בלי הסיומת (בעל המוצר, 21/10/2026; טיוטה 393).
+    const cs = [...new Set((day.plan?.codes ?? []).filter((c) => !isIgnoredPlanCode(c, codes)).map((c) => (c.startsWith('SBY') ? 'SBY' : c)))].join(' ');
     const last = runs.at(-1);
     if (cs && last?.cs === cs && last.next === day.date) Object.assign(last, { to: day.date, next: addDay(day.date) });
     else runs.push({ cs, from: day.date, to: day.date, next: addDay(day.date) });

@@ -372,7 +372,8 @@ function standbyMissing(ctx, params, rule, credit) {
     const answer = ctx.answer(id);
     const row = (label, message, byUser = false) => ctx.addChange({
       how: 'standby_missing', label, date: from, lastDay: to, planId: null, execId: null,
-      plan: many ? `${codes} ${when}` : codes, exec: null, notes: [{ message, byUser, ruleTitle: rule.title }],
+      // בצד התכנון SBY, בלי הסיומת (בעל המוצר, 21/10/2026; טיוטה 393).
+      plan: many ? `SBY ${when}` : 'SBY', exec: null, notes: [{ message, byUser, ruleTitle: rule.title }],
     });
     if (!answer) {
       ctx.ask({
