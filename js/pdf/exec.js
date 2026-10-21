@@ -8,7 +8,7 @@ import { extractPages, toRows, centerX, pageText } from './extract.js';
 import { hhmmToMin, minToHhmm, toNumber, isoDate, daysInMonth } from '../time.js';
 
 /** עמודות שהאפליקציה יודעת להשתמש בהן. חסרה אחת – מדווחים, לא מנחשים. */
-const KNOWN_DAY_COLUMNS = ['Day', 'Src', 'Details', 'Credit', 'Rig', 'FLT', 'TAB', 'DH', 'SIMD', 'SIM', 'CORS', 'VAC', 'SICK', 'SCKFM', 'SBY', 'MEAL', 'COM', 'HHM', 'S/C', 'PDFT', 'ABR', 'NHTL', 'MIL', 'MILUP'];
+const KNOWN_DAY_COLUMNS = ['Day', 'Src', 'Details', 'Credit', 'Rig', 'FLT', 'TAB', 'DH', 'SIMD', 'SIM', 'CORS', 'VAC', 'SICK', 'SCKFM', 'SBY', 'MEAL', 'COM', 'HHM', 'HBH', 'S/C', 'PDFT', 'ABR', 'NHTL', 'MIL', 'MILUP'];
 /**
  * עמודות שאינן נוגעות לקרדיט ולפיצויים: לא נקראות ולא מוצגות (בעל המוצר, 08/10/2026).
  * Pay Queries – מספר בירורי השכר על היום. בדרך כלל הכותרת נשברת לשתי שורות ("Pay" מעל שורת הכותרות,
@@ -19,9 +19,10 @@ const IGNORED_DAY_COLUMNS = ['PICK', 'PICKUP', 'IPP', 'SLS', 'SLSAVE', 'MPPD', '
 /**
  * עמודות פיצוי שהסיכום של הרומה סופר בתוך COM: HHM הוא הפיצוי על נחיתה מאוחרת בארץ (בעל המוצר,
  * 08/10/2026; ספטמבר 2026: HHM 00:30 ב-24/09, ובסיכום COM 00:30 ו-HHM 00:30, בלי COM באף יום).
- * הערך שלהן מתווסף ל-COM של היום.
+ * הערך שלהן מתווסף ל-COM של היום. HBH הוא הזיכוי על קריאה מחופשה (בעל המוצר, 21/10/2026; טל, ספטמבר 2026: HBH
+ * 02:30 ב-02/09, ובסיכום COM 03:00 = HBH 02:30 + HHM 00:30).
  */
-const COM_PARTS = ['HHM'];
+const COM_PARTS = ['HHM', 'HBH'];
 const LEG_COLUMNS = ['Details', 'Flt', 'Seq', 'DHD', 'DD', 'ORG', 'DST', 'POS', 'STD', 'STA', 'ATD', 'ATA', 'SkdFlt', 'ActFlt', 'SkdDur', 'ActDur', 'Time', 'Occ'];
 
 /** עמודות שהחוקים נשענים עליהן. היעדרן מדווח למשתמש. */

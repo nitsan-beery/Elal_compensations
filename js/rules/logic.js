@@ -1824,7 +1824,8 @@ function vacation_recall(ctx, params, rule) {
   for (const day of ctx.timeline) {
     if (!(day.plan?.codes ?? []).some((c) => ok(c) && codeIn(c, params.plan_codes, params.plan_code_prefixes))) continue;
     if (ctx.execCodes(day).some((c) => codeIn(c, params.report_codes, params.report_code_prefixes))) continue;
-    const pairing = ctx.execPairings.find((p) => p.from <= day.date && day.date <= p.to);
+    // גם יום הנחיתה אחרי חצות (`shownTo`; בעל המוצר, 21/10/2026; טל: ZRH ‏01/09 נחתה ב-02:47 ב-02/09, יום חופשה).
+    const pairing = ctx.execPairings.find((p) => p.from <= day.date && day.date <= (p.shownTo ?? p.to));
     if (pairing) {
       if (!byPairing.has(pairing)) byPairing.set(pairing, []);
       byPairing.get(pairing).push(day.date);
