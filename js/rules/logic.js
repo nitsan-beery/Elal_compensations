@@ -1074,10 +1074,7 @@ function extendedPairing(ctx, params, rule, match, answer) {
     ctx.expectPairing(exec, 'sc', H(params.hours), rule, `${flightsOf(exec)}: יממה ${dayOf(d)}.`,
       { date: d, dates: [d], perDay: true, explain: swapped ? '' : 'הסבב התארך ליום שלא תוכנן בו כלום.' });
   }
-  // מתחת להחלפה מרצוני: גם הקריאה המיוחדת על ההארכה (`voluntary_swap` רץ קודם).
-  if (own && days.length) {
-    ctx.amendNote(exec.id, 'החלפה מרצוני או בהסכמתי: קרדיט על הטיסה שבוצעה', (m) => m.replace(/\.$/, ` וקריאה מיוחדת על ${days.map(dayOf).join(' ועל ')}.`));
-  }
+  // מתחת להחלפה מרצוני גם הקריאה המיוחדת על ההארכה: `DAY_DUES` בהערה של `voluntary_swap`.
   return true;
 }
 
@@ -1233,16 +1230,13 @@ function higher_of_planned_performed(ctx, params, rule) {
     const paidOn = extra <= 0 ? null
       : findShortfallPaid(ctx, m, extra, column, reportColumn) ?? findShortfallPaid(ctx, m, extra, column, reportColumn, true);
     const moved = paidOn && paidOn !== exec ? paidOn : null;
-    // הטיסה שבוצעה באותם ימים נמשכה גם לימים שלא תוכנן בהם כלום: קריאה מיוחדת עליהם (`extendedPairing`).
-    const freeDays = !alsoSc && ['replaced', 'bid'].includes(answer?.value) && match.exec === exec ? extensionDays(ctx, match)?.free ?? [] : [];
-    // הקריאה המיוחדת – על הימים שהיא מגיעה עליהם, לא "על הטיסה שבוצעה" (`CALL_DAYS`; בעל המוצר, 21/10/2026; טיוטה 395).
-    const sc = alsoSc ? CALL_DAYS
-      : freeDays.length ? `${which ? ',' : ''} וקריאה מיוחדת על ${freeDays.map(dayOf).join(' ועל ')}` : '';
+    // הפיצויים היומיים על הטיסה שבוצעה – קריאה מיוחדת (גם על הארכה ליום פנוי, `extendedPairing`), קריאה מחופשה, פעילות
+    // שנייה – על הימים שהם מגיעים עליהם, לא "על הטיסה שבוצעה" (`DAY_DUES`; בעל המוצר, 21/10/2026; טיוטות 395, 398).
     // `pairingId`: רק בשורה של הסבב, ולא מתחת לטיסה אחרת שבוצעה באותם ימים.
-    ctx.note(match.plan.from, `${swapWord(answer)}: קרדיט של הטיסה הארוכה מבין השתיים${which}${sc}.`, rule, { pairingId: match.plan.id, callOf: exec.id });
+    ctx.note(match.plan.from, `${swapWord(answer)}: קרדיט של הטיסה הארוכה מבין השתיים${which}${DAY_DUES}.`, rule, { pairingId: match.plan.id, callOf: exec.id });
     // ביום של הטיסה שבוצעה, כשהוא אחר ובשורה משלו.
     if (exec.from !== match.plan.from && match.exec !== exec) {
-      ctx.note(exec.from, `${swapWord(answer)}: קרדיט על הטיסה שבוצעה${alsoSc ? CALL_DAYS : sc ? ' וקריאה מיוחדת' : ''}.`, rule, { pairingId: exec.id, callOf: exec.id });
+      ctx.note(exec.from, `${swapWord(answer)}: קרדיט על הטיסה שבוצעה${DAY_DUES}.`, rule, { pairingId: exec.id, callOf: exec.id });
     }
     if (extra <= 0) continue;
 
@@ -1421,7 +1415,8 @@ function voluntary_swap(ctx, params, rule) {
       continue;
     }
     const slip = minSlipTopUp(ctx, match.exec) ? ', כולל השלמה לסליפ קצר' : '';
-    ctx.note(date, `החלפה מרצוני או בהסכמתי: קרדיט על הטיסה שבוצעה${slip}.`, rule, { pairingId: match.exec.id });
+    // הפיצויים היומיים על הטיסה (קריאה מחופשה, קריאה מיוחדת על הארכה) – עם הימים שלהם (`DAY_DUES`; טיוטה 398).
+    ctx.note(date, `החלפה מרצוני או בהסכמתי: קרדיט על הטיסה שבוצעה${slip}${DAY_DUES}.`, rule, { pairingId: match.exec.id, callOf: match.exec.id });
   }
 }
 
@@ -1893,7 +1888,7 @@ function training_cancelled_flight(ctx, params, rule) {
     if (training.length && !marked.has(pairing)) {
       marked.add(pairing);
       ctx.markPairing(pairing, 'training_cancelled');
-      ctx.note(day.date, `${training.join(', ')} בוטל והוצבת לטיסה: קרדיט הטיסה${CALL_DAYS}.`, rule, { pairingId: pairing.id, callOf: pairing.id });
+      ctx.note(day.date, `${training.join(', ')} בוטל והוצבת לטיסה: קרדיט הטיסה${DAY_DUES}.`, rule, { pairingId: pairing.id, callOf: pairing.id });
     }
 
     const own = ctx.matches.find((m) => m.exec === pairing);
@@ -1987,7 +1982,7 @@ function standby_end_for_bid(ctx, params, rule) {
       }
       if (answer.value === 'standby_bid') {
         ctx.markPairing(pairing, 'standby_bid');
-        ctx.note(pairing.from, `סיום כוננות (${range}) בגלל זכייה במכרז: קרדיט הטיסה${CALL_DAYS}.`, rule, { pairingId: pairing.id, callOf: pairing.id });
+        ctx.note(pairing.from, `סיום כוננות (${range}) בגלל זכייה במכרז: קרדיט הטיסה${DAY_DUES}.`, rule, { pairingId: pairing.id, callOf: pairing.id });
       } else if (answer.value === 'standby_activated') {
         // הקרדיט על ימי ההפעלה נבדק בחוק ההפעלה מכוננות.
         ctx.markPairing(pairing, 'standby_activated');
@@ -2168,10 +2163,11 @@ function scDays(pairing, ctx, sc) {
 }
 
 /**
- * מקום בהערה של " וקריאה מיוחדת על <הימים>": חוק שרץ לפני הקריאה המיוחדת אינו יודע על אילו ימים היא מגיעה,
- * ו-`evaluate` משלים אחרי כל החוקים לפי הציפיות שלה על `callOf`, ובלעדיהן מוחק (בעל המוצר, 21/10/2026; טיוטה 395).
+ * מקום בהערה של הפיצויים היומיים על הטיסה `callOf` – קריאה מיוחדת, קריאה מחופשה ופעילות שנייה, כל אחד עם הימים שלו
+ * (" וקריאה מיוחדת על 09/09", ", קריאה מיוחדת על 01/09 וקריאה מחופשה על 02/09"): חוק שרץ לפניהם אינו יודע על אילו
+ * ימים הם מגיעים, ו-`evaluate` משלים אחרי כל החוקים לפי הציפיות שלהם, ובלעדיהן מוחק (בעל המוצר, 21/10/2026; טיוטות 395, 398).
  */
-export const CALL_DAYS = '⁣call⁣';
+export const DAY_DUES = '⁣dues⁣';
 
 export const LOGIC = {
   credit_from_scheduled,

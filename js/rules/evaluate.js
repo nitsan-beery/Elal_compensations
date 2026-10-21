@@ -6,7 +6,7 @@
 // ההשוואה נעשית ב"קבוצות ימים": סבב ביצוע והימים שהקרדיט שלו התפצל אליהם הם קבוצה אחת,
 // וכל יום אחר הוא קבוצה לעצמו. כך טיסת לילה שהקרדיט שלה נרשם בשני ימים נבדקת כמכלול.
 
-import { LOGIC, LOGIC_ORDER, CALL_DAYS } from './logic.js';
+import { LOGIC, LOGIC_ORDER, DAY_DUES } from './logic.js';
 import { rulesInEffect, partitionRules, rulesByLogic, classifyCode } from './catalog.js';
 import { buildTimeline, buildPairings, markCarryIn, matchPairings, describePairing, describeRoute, pairingParts, fdpParts, sameFdp } from '../model.js';
 import { hoursToMin, minToHhmm } from '../time.js';
@@ -282,11 +282,21 @@ function evaluateFiles({ rulesData, plan = null, exec = null, answers = {}, hist
       LOGIC[logicId](ctx, rule.logic.params ?? {}, rule);
     }
   }
-  // " וקריאה מיוחדת על <הימים>" בהערות של חוקים שרצו לפני הקריאה המיוחדת (`CALL_DAYS`; טיוטה 395).
-  const callRules = new Set(rulesByLogic(supported, 'special_call').map((r) => r.id));
-  for (const n of out.notes.filter((x) => x.message.includes(CALL_DAYS))) {
-    const days = [...new Set(out.expectations.filter((e) => e.pairingId === n.callOf && callRules.has(e.ruleId)).map((e) => e.date))].sort();
-    n.message = n.message.replace(CALL_DAYS, days.length ? ` וקריאה מיוחדת על ${days.map(ddmm).join(' ועל ')}` : '');
+  // הפיצויים היומיים על הטיסה, כל אחד עם הימים שלו, בהערות של חוקים שרצו לפניהם (`DAY_DUES`; טיוטות 395, 398).
+  const logicById = new Map(supported.map((r) => [r.id, r.logic.id]));
+  for (const n of out.notes.filter((x) => x.message.includes(DAY_DUES))) {
+    const dues = new Map();
+    for (const e of out.expectations) {
+      const logic = logicById.get(e.ruleId);
+      if (e.pairingId !== n.callOf || !DAY_BOUND_LOGIC.has(logic)) continue;
+      const wording = DUE_WORDING[logic] ?? e.shortTitle ?? e.ruleTitle;
+      if (!dues.has(wording)) dues.set(wording, new Set());
+      for (const d of e.ownDays ? e.dates : [e.date]) dues.get(wording).add(d);
+    }
+    // לפי היום הראשון של כל אחד.
+    const list = [...dues].map(([w, days]) => [w, [...days].sort()]).sort((a, b) => a[1][0].localeCompare(b[1][0]))
+      .map(([w, days]) => `${w} על ${days.map(ddmm).join(' ועל ')}`);
+    n.message = n.message.replace(DAY_DUES, !list.length ? '' : list.length === 1 ? ` ו${list[0]}` : `, ${list.slice(0, -1).join(', ')} ו${list.at(-1)}`);
   }
   // לוגיקה נתמכת שלא הוכנסה לסדר ההרצה היא באג, ולא חוק שמדלגים עליו בשקט.
   for (const rule of supported) {
@@ -1597,12 +1607,14 @@ function explainChanges(out, supported, moved = new Set()) {
       const rowDays = [];
       for (let d = from; last && d <= last; d = new Date(Date.parse(d) + 86400000).toISOString().slice(0, 10)) rowDays.push(d);
       if (rowDays.length > 1 || c.dates?.length > 1) {
-        items = new Set([...items].map((t) => {
+        // השאר במקומם, והפיצויים היומיים אחריהם לפי היום הראשון של כל אחד (טיוטה 398).
+        const first = (t) => [...dayBound.get(t)].sort()[0];
+        const bound = [...items].filter((t) => dayBound.has(t)).sort((a, b) => first(a).localeCompare(first(b)));
+        items = new Set([...[...items].filter((t) => !dayBound.has(t)), ...bound.map((t) => {
           const set = dayBound.get(t);
-          if (!set) return t;
           if (rowDays.length > 1 && rowDays.every((d) => set.has(d))) return `${t} על כל אחד מהימים`;
           return `${t} על ${[...set].sort().map(ddmm).join(' ועל ')}`;
-        }));
+        })]);
       }
       const dayWording = ({ e, dates }) => {
         const one = e.shortTitle ?? e.ruleTitle;
