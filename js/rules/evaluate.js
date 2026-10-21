@@ -6,7 +6,7 @@
 // ההשוואה נעשית ב"קבוצות ימים": סבב ביצוע והימים שהקרדיט שלו התפצל אליהם הם קבוצה אחת,
 // וכל יום אחר הוא קבוצה לעצמו. כך טיסת לילה שהקרדיט שלה נרשם בשני ימים נבדקת כמכלול.
 
-import { LOGIC, LOGIC_ORDER } from './logic.js';
+import { LOGIC, LOGIC_ORDER, CALL_DAYS } from './logic.js';
 import { rulesInEffect, partitionRules, rulesByLogic, classifyCode } from './catalog.js';
 import { buildTimeline, buildPairings, markCarryIn, matchPairings, describePairing, describeRoute, pairingParts, fdpParts, sameFdp } from '../model.js';
 import { hoursToMin, minToHhmm } from '../time.js';
@@ -281,6 +281,12 @@ function evaluateFiles({ rulesData, plan = null, exec = null, answers = {}, hist
     for (const rule of rulesByLogic(supported, logicId)) {
       LOGIC[logicId](ctx, rule.logic.params ?? {}, rule);
     }
+  }
+  // " וקריאה מיוחדת על <הימים>" בהערות של חוקים שרצו לפני הקריאה המיוחדת (`CALL_DAYS`; טיוטה 395).
+  const callRules = new Set(rulesByLogic(supported, 'special_call').map((r) => r.id));
+  for (const n of out.notes.filter((x) => x.message.includes(CALL_DAYS))) {
+    const days = [...new Set(out.expectations.filter((e) => e.pairingId === n.callOf && callRules.has(e.ruleId)).map((e) => e.date))].sort();
+    n.message = n.message.replace(CALL_DAYS, days.length ? ` וקריאה מיוחדת על ${days.map(ddmm).join(' ועל ')}` : '');
   }
   // לוגיקה נתמכת שלא הוכנסה לסדר ההרצה היא באג, ולא חוק שמדלגים עליו בשקט.
   for (const rule of supported) {
@@ -1498,6 +1504,8 @@ const DUE_WORDING = {
   higher_of_planned_performed: 'קרדיט נוסף (הגבוה מבין השתיים)',
   second_unplanned_activity: 'פיצוי על פעילות שנייה באותה יממה',
 };
+/** פיצוי שמגיע על ימים מסוימים: מתחת לשינוי של כמה ימים – עם הימים שלו (טיוטה 395). */
+const DAY_BOUND_LOGIC = new Set(['special_call', 'vacation_recall', 'second_unplanned_activity']);
 
 /**
  * ימים שפעילות קרקע שזזה בתוך החודש (`moved_ok_prefixes`, HOME) בוצעה בהם, ולא תוכננה בהם: הזיכוי היומי
@@ -1560,7 +1568,8 @@ function explainChanges(out, supported, moved = new Set()) {
       let items = new Set();
       // זיכוי יומי על כמה ימים: במספר המדויק וברבים ("קרדיט 2 ימי מחלה"; בעל המוצר, 07/10/2026).
       const days = new Map();
-      const callDays = new Set();
+      // פיצוי שמגיע על ימים מסוימים: הימים של כל אחד (טיוטה 395).
+      const dayBound = new Map();
       for (const e of out.expectations) {
         const logic = logicOf.get(e.ruleId);
         if (!CHANGE_DUE_LOGIC.has(logic)) continue;
@@ -1575,15 +1584,25 @@ function explainChanges(out, supported, moved = new Set()) {
           items.add(`absence:${e.ruleId}`);
           continue;
         }
-        if (logic === 'special_call') callDays.add(e.date);
-        items.add(DUE_WORDING[logic] ?? e.shortTitle ?? e.ruleTitle);
+        const wording = DUE_WORDING[logic] ?? e.shortTitle ?? e.ruleTitle;
+        items.add(wording);
+        if (DAY_BOUND_LOGIC.has(logic)) {
+          if (!dayBound.has(wording)) dayBound.set(wording, new Set());
+          for (const d of e.ownDays ? e.dates : [e.date]) dayBound.get(wording).add(d);
+        }
       }
-      // קריאה מיוחדת על כל יום של שורה שמשתרעת על כמה ימים, עד הנחיתה בבסיס (בעל המוצר, 08/10/2026;
-      // ‏BCN ‏23–25/09/2026). כשיום אחד לא עמד בסף – בלי התוספת, וההערה על היום ההוא בהערות.
+      // שורה שמשתרעת על כמה ימים, עד הנחיתה בבסיס: קריאה מיוחדת, קריאה מחופשה ופעילות שנייה – עם הימים שלהן
+      // ("קריאה מחופשה על 02/09"), ועל כל ימי השורה "על כל אחד מהימים" (בעל המוצר, 08/10/2026 ו-21/10/2026; טיוטה 395;
+      // ‏BCN ‏23–25/09/2026). בשורה של יום אחד – בלי תאריך.
       const rowDays = [];
       for (let d = from; last && d <= last; d = new Date(Date.parse(d) + 86400000).toISOString().slice(0, 10)) rowDays.push(d);
-      if (rowDays.length > 1 && rowDays.every((d) => callDays.has(d)) && items.delete(DUE_WORDING.special_call)) {
-        items.add(`${DUE_WORDING.special_call} על כל אחד מהימים`);
+      if (rowDays.length > 1 || c.dates?.length > 1) {
+        items = new Set([...items].map((t) => {
+          const set = dayBound.get(t);
+          if (!set) return t;
+          if (rowDays.length > 1 && rowDays.every((d) => set.has(d))) return `${t} על כל אחד מהימים`;
+          return `${t} על ${[...set].sort().map(ddmm).join(' ועל ')}`;
+        }));
       }
       const dayWording = ({ e, dates }) => {
         const one = e.shortTitle ?? e.ruleTitle;
