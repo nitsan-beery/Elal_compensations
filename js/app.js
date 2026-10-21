@@ -13,7 +13,7 @@ import * as store from './store.js';
 import * as calendar from './calendar.js';
 
 // מספר הגרסה של הקוד שרץ בדף. עולה יחד עם CACHE ב-sw.js, לאותו מספר (בעל המוצר, 15/10/2026).
-const APP_VERSION = 271;
+const APP_VERSION = 272;
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -1153,7 +1153,8 @@ function creditPicker() {
   </div>`;
 }
 
-function renderQuestion(q, i) {
+/** `edit`: השאלה נפתחה ב"תשובות שנשמרו" ("answer" או "assumed"; `editAnswer`), עם "ביטול". */
+function renderQuestion(q, i, edit = null) {
   const name = `q${i}`;
   const options = q.options.map((o) => `
     <label class="option">
@@ -1175,9 +1176,9 @@ function renderQuestion(q, i) {
     <h3>${titleHtml(q.title)}</h3>
     ${q.body ? `<p>${esc(datesFirst(q.body))}</p>` : ''}
     ${hint ? `<p class="small muted">ענית קודם ${esc(answerLabel(hint.answer, kind))}, וביומן ${esc(answerLabel(hint.calendar, kind))}.</p>` : ''}
-    <form data-qid="${esc(q.id)}">
+    <form data-qid="${esc(q.id)}"${edit ? ` data-edit="${edit}"` : ''}>
       ${picker}${options}
-      <div class="row" style="margin-top:.5rem"><button class="btn primary" type="submit" ${q.dateInput ? '' : 'disabled'}>שמור תשובה</button></div>
+      <div class="row" style="margin-top:.5rem"><button class="btn primary" type="submit" ${q.dateInput ? '' : 'disabled'}>שמור תשובה</button>${edit ? '<button class="btn" type="button" data-cancel-edit>ביטול</button>' : ''}</div>
     </form>
   </div>`;
 }
@@ -1537,71 +1538,133 @@ function bindResults(root) {
   for (const chip of root.querySelectorAll('[data-filter]')) {
     chip.addEventListener('click', () => { state.filter = chip.dataset.filter; renderResults(); });
   }
-  for (const btn of root.querySelectorAll('[data-unanswer]')) {
-    btn.addEventListener('click', async () => {
-      const id = btn.dataset.unanswer;
-      // שאלה שנשאלה רק בגלל התשובה הזאת נפתחת מחדש יחד איתה.
-      for (const dep of [id, ...(state.result?.dependentAnswers?.[id] ?? [])]) delete state.record.answers[dep];
-      // בלי זה היומן היה עונה במקום התשובה שנמחקה, והשאלה לא הייתה נשאלת (בעל המוצר, 04/10/2026).
-      if (/^(crew|night_crew|white):/.test(id)) state.record.calendarIgnored = [...new Set([...(state.record.calendarIgnored ?? []), ...relatedCrewIds(id, state.result?.crewIdOf)])];
-      state.notices = [];
-      await runAndSave();
-    });
+  for (const btn of root.querySelectorAll('[data-unanswer]')) btn.addEventListener('click', () => editAnswer(btn.closest('li'), btn.dataset.unanswer, false));
+  for (const btn of root.querySelectorAll('[data-unassume]')) btn.addEventListener('click', () => editAnswer(btn.closest('li'), btn.dataset.unassume, true));
+  for (const form of root.querySelectorAll('form[data-qid]')) bindQuestionForm(form);
+}
+
+/** שאלות שתשובה עליהן נפתחה בשורה שלה, וחלק מהשאלה שאינו בטופס (התווית של האפשרות). */
+const editedQuestions = new Map();
+let editSeq = 0;
+
+/** תשובות שנמחקות עם התשובה: היא עצמה, והשאלות שנשאלו רק בגללה. */
+const answerWithDependents = (id) => [id, ...(state.result?.dependentAnswers?.[id] ?? [])];
+
+/** שאלת הרכב צוות: גם השאלות שהיומן עונה עליהן דרכה (בלי זה היומן היה עונה במקום התשובה; 04/10/2026). */
+const crewReopen = (id) => (/^(crew|night_crew|white):/.test(id) ? relatedCrewIds(id, state.result?.crewIdOf) : []);
+
+/**
+ * "שנה" ב"תשובות שנשמרו": השאלה נפתחת בשורה שלה, ולא בכרטיס השאלות בראש הדף (בעל המוצר, 21/10/2026; טיוטה 385).
+ * החודש רץ בלי התשובה (ובלי התשובות שתלויות בה), ועל הנחה – בלי ההנחה, בלי לשמור; השאלה שחזרה מוצגת עם התשובה
+ * הנוכחית מסומנת. שום דבר אינו נמחק עד "שמור תשובה", ו"ביטול" מחזיר את השורה. כשהשאלה אינה חוזרת (היומן עונה
+ * עליה) – כמו קודם: התשובה נמחקת, או ההנחה מתבטלת (`assumedIgnored`; טיוטה 365), והשאלה בכרטיס השאלות.
+ */
+async function editAnswer(li, id, assumed) {
+  const r = state.record;
+  const answers = { ...(r.answers ?? {}) };
+  if (!assumed) for (const dep of answerWithDependents(id)) delete answers[dep];
+  const months = await safe(() => store.listMonths(), []);
+  let trial = null;
+  try {
+    trial = evaluate({ rulesData: rulesFor([r, ...months]), plan: r.plan, exec: r.exec, answers, history: historyFor(r, months), calendar: r.calendar ?? null,
+      reopen: [...(r.calendarIgnored ?? []), ...crewReopen(id)], calendarHistory: r.calendarHistory ?? null, assumedIgnored: assumed ? [...(r.assumedIgnored ?? []), id] : r.assumedIgnored ?? [] });
+  } catch { /* כמו קודם, למטה */ }
+  const q = trial?.questions.find((x) => x.id === id);
+  if (!q || !li) {
+    if (assumed) r.assumedIgnored = [...new Set([...(r.assumedIgnored ?? []), id])];
+    else {
+      for (const dep of answerWithDependents(id)) delete r.answers[dep];
+      r.calendarIgnored = [...new Set([...(r.calendarIgnored ?? []), ...crewReopen(id)])];
+    }
+    state.notices = [];
+    await runAndSave();
+    return;
   }
-  // "שנה" על הנחה של האפליקציה: ההנחה מתבטלת, והשאלה נשאלת (`assumedIgnored`; טיוטה 365).
-  for (const btn of root.querySelectorAll('[data-unassume]')) {
-    btn.addEventListener('click', async () => {
-      state.record.assumedIgnored = [...new Set([...(state.record.assumedIgnored ?? []), btn.dataset.unassume])];
-      state.notices = [];
-      await runAndSave();
-    });
+  const current = assumed ? state.result?.assumptions?.find((a) => a.id === id) : r.answers?.[id];
+  editedQuestions.set(id, q);
+  li.className = 'editing';
+  li.innerHTML = renderQuestion(q, `e${++editSeq}`, assumed ? 'assumed' : 'answer');
+  const form = $('form', li);
+  bindQuestionForm(form);
+  preselectAnswer(form, current);
+  $('[data-cancel-edit]', li).addEventListener('click', () => renderResults());
+}
+
+/** התשובה הנוכחית מסומנת בטופס שנפתח ב"שנה": האפשרות, הטיסה בקישור, המספר, הטקסט והקרדיט ב"סיבה אחרת". */
+function preselectAnswer(form, a) {
+  if (!a) return;
+  const date = $('input[type="date"]', form);
+  if (date && a.value) date.value = a.value;
+  const radio = [...form.querySelectorAll('input[type="radio"]')].find((x) => x.value === a.value);
+  if (radio) {
+    radio.checked = true;
+    const extra = $(`.extra[data-for="${CSS.escape(a.value)}"]`, form);
+    const link = extra && $('select[name="link"]', extra);
+    if (link && a.link !== undefined && [...link.options].some((o) => o.value === (a.link ?? ''))) link.value = a.link ?? '';
+    const text = extra && $('textarea', extra);
+    if (text && a.text) text.value = a.text;
+    const credit = extra && $('.credit-pick', extra);
+    if (credit && typeof a.creditMin === 'number') {
+      $('select[name="credit"]', credit).value = a.creditMin ? 'yes' : 'no';
+      if (a.creditMin) $('select[name="creditMin"]', credit).value = String(a.creditMin);
+    }
+    const count = $(`select[data-count-for="${CSS.escape(a.value)}"]`, form);
+    if (count && a.count != null) count.value = String(a.count);
   }
-  for (const form of root.querySelectorAll('form[data-qid]')) {
-    const submit = $('button[type="submit"]', form);
-    form.addEventListener('change', (e) => {
-      // בחירת מספר באפשרות שיש בה בחירה כזו בוחרת גם את האפשרות עצמה.
-      const countFor = e.target.dataset?.countFor;
-      if (countFor) { const radio = $(`input[type="radio"][value="${CSS.escape(countFor)}"]`, form); if (radio) radio.checked = true; }
-      const chosen = $('input[type="radio"]:checked', form);
-      for (const extra of form.querySelectorAll('.extra')) extra.hidden = extra.dataset.for !== chosen?.value;
-      for (const pick of form.querySelectorAll('.credit-pick')) {
-        $('[data-credit-hours]', pick).hidden = $('select[name="credit"]', pick).value !== 'yes';
-      }
-      submit.disabled = !chosen && !$('input[type="date"]', form);
-    });
-    form.addEventListener('submit', async (e) => {
-      e.preventDefault();
-      const picker = $('input[type="date"]', form);
-      const chosen = $('input[type="radio"]:checked', form);
-      if (!chosen && !picker) return;
-      if (picker && !picker.value) { alert('בחר תאריך.'); return; }
-      const answer = { value: picker ? picker.value : chosen.value };
-      // התווית של האפשרות שנבחרה, כפי שהופיעה בשאלה: "תשובות שנשמרו" מציג אותה.
-      const label = state.result?.questions.find((q) => q.id === form.dataset.qid)?.options?.find((o) => o.value === answer.value)?.label;
-      if (label) answer.label = label;
-      if (chosen?.hasAttribute('data-needs-link')) {
-        const sel = $(`.extra[data-for="${CSS.escape(chosen.value)}"] select`, form);
-        answer.link = sel?.value || null;
-      }
-      const count = chosen && $(`select[data-count-for="${CSS.escape(chosen.value)}"]`, form);
-      if (count) answer.count = Number(count.value);
-      if (chosen?.hasAttribute('data-needs-text')) {
-        const text = $(`.extra[data-for="${CSS.escape(chosen.value)}"] textarea`, form)?.value.trim();
-        if (!text) { alert('פרט בבקשה מה קרה.'); return; }
-        answer.text = text;
-      }
-      const credit = chosen && $(`.extra[data-for="${CSS.escape(chosen.value)}"] .credit-pick`, form);
-      if (credit) {
-        const due = $('select[name="credit"]', credit).value;
-        if (!due) { alert('בחר אם מגיע קרדיט.'); return; }
-        answer.creditMin = due === 'yes' ? Number($('select[name="creditMin"]', credit).value) : 0;
-      }
-      state.record.answers = { ...(state.record.answers ?? {}), [form.dataset.qid]: answer };
-      if (state.record.crewHints) for (const id of relatedCrewIds(form.dataset.qid, state.result?.crewIdOf)) delete state.record.crewHints[id];
-      state.notices = [];
-      await runAndSave();
-    });
-  }
+  form.dispatchEvent(new Event('change'));
+}
+
+function bindQuestionForm(form) {
+  const submit = $('button[type="submit"]', form);
+  form.addEventListener('change', (e) => {
+    // בחירת מספר באפשרות שיש בה בחירה כזו בוחרת גם את האפשרות עצמה.
+    const countFor = e.target.dataset?.countFor;
+    if (countFor) { const radio = $(`input[type="radio"][value="${CSS.escape(countFor)}"]`, form); if (radio) radio.checked = true; }
+    const chosen = $('input[type="radio"]:checked', form);
+    for (const extra of form.querySelectorAll('.extra')) extra.hidden = extra.dataset.for !== chosen?.value;
+    for (const pick of form.querySelectorAll('.credit-pick')) {
+      $('[data-credit-hours]', pick).hidden = $('select[name="credit"]', pick).value !== 'yes';
+    }
+    submit.disabled = !chosen && !$('input[type="date"]', form);
+  });
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const picker = $('input[type="date"]', form);
+    const chosen = $('input[type="radio"]:checked', form);
+    if (!chosen && !picker) return;
+    if (picker && !picker.value) { alert('בחר תאריך.'); return; }
+    const answer = { value: picker ? picker.value : chosen.value };
+    // התווית של האפשרות שנבחרה, כפי שהופיעה בשאלה: "תשובות שנשמרו" מציג אותה.
+    const question = form.dataset.edit ? editedQuestions.get(form.dataset.qid) : state.result?.questions.find((q) => q.id === form.dataset.qid);
+    const label = question?.options?.find((o) => o.value === answer.value)?.label;
+    if (label) answer.label = label;
+    if (chosen?.hasAttribute('data-needs-link')) {
+      const sel = $(`.extra[data-for="${CSS.escape(chosen.value)}"] select`, form);
+      answer.link = sel?.value || null;
+    }
+    const count = chosen && $(`select[data-count-for="${CSS.escape(chosen.value)}"]`, form);
+    if (count) answer.count = Number(count.value);
+    if (chosen?.hasAttribute('data-needs-text')) {
+      const text = $(`.extra[data-for="${CSS.escape(chosen.value)}"] textarea`, form)?.value.trim();
+      if (!text) { alert('פרט בבקשה מה קרה.'); return; }
+      answer.text = text;
+    }
+    const credit = chosen && $(`.extra[data-for="${CSS.escape(chosen.value)}"] .credit-pick`, form);
+    if (credit) {
+      const due = $('select[name="credit"]', credit).value;
+      if (!due) { alert('בחר אם מגיע קרדיט.'); return; }
+      answer.creditMin = due === 'yes' ? Number($('select[name="creditMin"]', credit).value) : 0;
+    }
+    // תשובה שהוחלפה ב"שנה" (`editAnswer`): השאלות שנשאלו רק בגללה נפתחות מחדש, כמו כשהיא נמחקת.
+    if (form.dataset.edit === 'answer') {
+      for (const dep of answerWithDependents(form.dataset.qid)) delete state.record.answers[dep];
+      state.record.calendarIgnored = [...new Set([...(state.record.calendarIgnored ?? []), ...crewReopen(form.dataset.qid)])];
+    }
+    state.record.answers = { ...(state.record.answers ?? {}), [form.dataset.qid]: answer };
+    if (state.record.crewHints) for (const id of relatedCrewIds(form.dataset.qid, state.result?.crewIdOf)) delete state.record.crewHints[id];
+    state.notices = [];
+    await runAndSave();
+  });
 }
 
 // ---------- היסטוריה ----------

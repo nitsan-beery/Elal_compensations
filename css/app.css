@@ -264,6 +264,8 @@ tr.detail td { background: var(--surface-2); font-size: .85rem; color: var(--mut
 
 /* ---------- שאלות ---------- */
 .question { border: 1px solid var(--line); border-radius: 8px; padding: .8rem; margin-bottom: .7rem; }
+/* "שנה" ב"תשובות שנשמרו": השאלה בשורה שלה (`editAnswer`). */
+.list > li.editing .question { margin: 0; border-color: var(--accent); }
 .question h3 { font-size: .98rem; white-space: pre-line; }
 .question h3 .mixed { font-weight: normal; }
 .question h3 .mixed b { font-weight: 700; }
