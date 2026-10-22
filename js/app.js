@@ -13,7 +13,7 @@ import * as store from './store.js';
 import * as calendar from './calendar.js';
 
 // מספר הגרסה של הקוד שרץ בדף. עולה יחד עם CACHE ב-sw.js, לאותו מספר (בעל המוצר, 15/10/2026).
-const APP_VERSION = 288;
+const APP_VERSION = 289;
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -24,7 +24,7 @@ const KIND_LABEL = { plan: 'קובץ תכנון', exec: 'קובץ ביצוע' };
 const THE_KIND = { plan: 'קובץ התכנון', exec: 'קובץ הביצוע' };
 const MODE_LABEL = { full: 'תכנון וביצוע', plan: 'תכנון בלבד', exec: 'ביצוע בלבד' };
 const CATEGORY_LABEL = { plan: 'תכנון', exec: 'ביצוע', train: 'הדרכה' };
-const KEY_LABEL = { flight: 'קרדיט טיסה', absence: 'קרדיט יום', credit: 'קרדיט', rig: 'Rig', com: 'COM', sc: 'S/C' };
+const KEY_LABEL = { flight: 'קרדיט טיסה', absence: 'קרדיט יום', credit: 'קרדיט', rig: 'Rig', com: 'COM', sc: 'COM' }; // S/C מוצג כ-COM (טיוטה 402)
 const CREDIT_KEYS = new Set(['flight', 'absence', 'credit']);
 const COM_KEYS = new Set(['com', 'sc']); // S/C נספר יחד עם COM בסיכום
 // ימים שזוכו על פעילות שאינה טיסה, לפי החוק שזיכה אותם (ובאימון קרקע – לפי הקוד).
@@ -859,9 +859,23 @@ const MAIN_COLUMNS = ['Credit', 'Rig', 'COM', 'S/C'];
  * שורות הטבלה: לכל יום (או סבב) שורת Credit, ושורות Rig, ‏COM ו-S/C כשיש בהן ערך.
  * FLT+DH, ‏TAB ועמודות הסימון (VAC, SICK...) אינן מוצגות כשורות. פער באחת מהן נרשם
  * על שורת ה-Credit של אותו יום (`marks`), כדי שלא ייעלם. אם אין שורת Credit, היא מוצגת.
+ * S/C מוצג כ-COM, ו-COM ו-S/C של אותה שורה הם שורה אחת עם הסכום, שמושווית לסכום שתי העמודות
+ * ברומה (בעל המוצר, 22/10/2026; טיוטה 402).
  */
 function shownComparison(res) {
-  const main = res.comparison.filter((c) => MAIN_COLUMNS.includes(c.column)).map((c) => ({ ...c, marks: [] }));
+  const main = [];
+  for (const c of res.comparison.filter((x) => MAIN_COLUMNS.includes(x.column))) {
+    const row = { ...c, column: c.column === 'S/C' ? 'COM' : c.column, items: [...c.items], notes: c.notes && [...c.notes], marks: [] };
+    const same = row.column === 'COM' && main.find((m) => m.column === 'COM' && m.label === row.label && (m.at ?? m.dates[0]) === (row.at ?? row.dates[0]));
+    if (!same) { main.push(row); continue; }
+    same.expected += row.expected;
+    same.reported += row.reported;
+    same.diff = same.reported - same.expected;
+    same.pending = (same.pending || row.pending) && same.diff !== 0;
+    same.ok = same.pending ? null : same.diff === 0 || Boolean(same.ok && row.ok);
+    same.items.push(...row.items);
+    if (row.notes) same.notes = [...(same.notes ?? []), ...row.notes];
+  }
   const orphans = [];
   for (const c of res.comparison) {
     if (MAIN_COLUMNS.includes(c.column) || c.ok !== false) continue;
@@ -1219,7 +1233,7 @@ function planTotals(res) {
 
 /** שם המשבצת בסיכום. ליד Rig: השעות שלו כבר בקרדיט (בעל המוצר, 22/10/2026; טיוטה 400). */
 const totalLabel = (column) => (column === 'Rig'
-  ? '<div class="label" style="direction:rtl">Rig <span class="sub">מוכל בקרדיט</span></div>'
+  ? '<div class="label" style="direction:rtl">Rig <span class="sub">(מוכל בקרדיט)</span></div>'
   : `<div class="label">${esc(column)}</div>`);
 
 function renderTotals(res) {
