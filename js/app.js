@@ -13,7 +13,7 @@ import * as store from './store.js';
 import * as calendar from './calendar.js';
 
 // מספר הגרסה של הקוד שרץ בדף. עולה יחד עם CACHE ב-sw.js, לאותו מספר (בעל המוצר, 15/10/2026).
-const APP_VERSION = 287;
+const APP_VERSION = 288;
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -1219,7 +1219,7 @@ function planTotals(res) {
 
 /** שם המשבצת בסיכום. ליד Rig: השעות שלו כבר בקרדיט (בעל המוצר, 22/10/2026; טיוטה 400). */
 const totalLabel = (column) => (column === 'Rig'
-  ? '<div class="label" style="direction:rtl">Rig <span class="sub">(השעות מוכלות בקרדיט)</span></div>'
+  ? '<div class="label" style="direction:rtl">Rig <span class="sub">מוכל בקרדיט</span></div>'
   : `<div class="label">${esc(column)}</div>`);
 
 function renderTotals(res) {
