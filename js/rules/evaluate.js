@@ -1575,7 +1575,7 @@ function explainChanges(out, supported, moved = new Set()) {
   const rangeOf = (id) => String(id ?? '').match(/^(\d{4}-\d{2}-\d{2})\.\.(\d{4}-\d{2}-\d{2}):/)?.slice(1) ?? null;
   for (const c of out.changes) {
     // יום כוננות שאינו ברומה: מה שמתחתיו כבר נכתב בחוק (`standbyMissing`).
-    if (c.how === 'exact' || c.how === 'noplan' || c.how === 'standby_missing') continue;
+    if (c.how === 'exact' || c.how === 'noplan' || c.how === 'standby_missing' || c.how === 'reserve_missing') continue;
     const ids = [c.planId, c.execId].filter(Boolean);
     const ranges = ids.map(rangeOf).filter(Boolean);
     // שורה אחת מכמה על אותו סבב (`splitChangesByFdp`): רק מה שנרשם בימים שלה.

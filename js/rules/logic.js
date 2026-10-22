@@ -325,11 +325,12 @@ function absence_day_credit(ctx, params, rule) {
     creditDay(ctx, day, params, rule, credit, matchedCode(day, params, ctx));
   }
   if (params.ask_when_missing) standbyMissing(ctx, params, rule, credit);
+  if (params.unserved_empty_rule) unservedEmptyDays(ctx, params, rule);
 }
 
-/** הזיכוי היומי על `day`: הקרדיט, ה-TAB וסימון העמודה, לפי הקוד `code`. */
-function creditDay(ctx, day, params, rule, credit, code) {
-  ctx.expect(day.date, 'absence', credit, rule, rule.title, { code });
+/** הזיכוי היומי על `day`: הקרדיט, ה-TAB וסימון העמודה, לפי הקוד `code`. `extra` – לציפייה (`explain`). */
+function creditDay(ctx, day, params, rule, credit, code, extra = {}) {
+  ctx.expect(day.date, 'absence', credit, rule, rule.title, { code, ...extra });
   // יום בתוך סבב, בלי טיסה פעילה משלו (SIM_BER ב-18/11/2025, באמצע סבב BER; SIM_PRG ב-28/01/2025,
   // עם DH ‏PRG→ZRH): ה-TAB הוא של השהייה בחו"ל, וסימון העמודה נרשם ביום תחילת הסבב.
   const active = (legs, dh) => (legs ?? []).some((l) => !dh(l));
@@ -352,16 +353,7 @@ function creditDay(ctx, day, params, rule, credit, code) {
 function standbyMissing(ctx, params, rule, credit) {
   if (!ctx.hasExec || !ctx.hasPlan || ctx.calendarRun) return;
   const planCode = (day) => (day.plan?.codes ?? []).find((c) => codeIn(c, params.plan_codes, params.plan_code_prefixes));
-  const empty = (day) => !ctx.execCodes(day).length && !(day.exec?.legs ?? []).length &&
-    !ctx.execPairings.some((p) => p.from <= day.date && day.date <= p.to);
-  const runs = [];
-  for (const day of ctx.timeline) {
-    if (!planCode(day) || !empty(day)) continue;
-    const run = runs.at(-1);
-    if (run && run.at(-1).date === addDays(day.date, -1)) run.push(day);
-    else runs.push([day]);
-  }
-  for (const run of runs) {
+  for (const run of dayRuns(ctx.timeline.filter((day) => planCode(day) && emptyExecDay(ctx, day)))) {
     const from = run[0].date;
     const to = run.at(-1).date;
     const many = run.length > 1;
@@ -399,6 +391,84 @@ function standbyMissing(ctx, params, rule, credit) {
       ctx.review(`${what} (${when}): ${answer.text || 'סיבה אחרת'}. דורש בדיקה ידנית.`, rule);
       row('סיבה אחרת', 'דורש בדיקה ידנית.');
     }
+  }
+}
+
+/** יום שברומה לא רשום בו כלום: לא קוד, לא רגל, ולא בתוך סבב. */
+const emptyExecDay = (ctx, day) => !ctx.execCodes(day).length && !(day.exec?.legs ?? []).length &&
+  !ctx.execPairings.some((p) => p.from <= day.date && day.date <= p.to);
+
+/** ימים לפי הסדר, ברצפים של ימים עוקבים. */
+function dayRuns(days) {
+  const runs = [];
+  for (const day of days) {
+    const run = runs.at(-1);
+    if (run && run.at(-1).date === addDays(day.date, -1)) run.push(day);
+    else runs.push([day]);
+  }
+  return runs;
+}
+
+/**
+ * ימים שתוכנן בהם קוד מ-`prefixes` (מילואים), מול הרומה – לפי מספר הימים ולא לפי היום (בעל המוצר, 22/10/2026; טיוטה 406):
+ * יום מתוכנן שהקוד אינו בו ברומה מותאם ליום שהקוד ברומה ולא תוכנן בו (`moved`), קודם הימים שלא רשום בהם כלום ברומה,
+ * כדי שטיסה או חופשה ביום המתוכנן לא ייבלעו בהזזה. מה שנשאר (`unserved`) לא בוצע.
+ */
+function unservedPlanDays(ctx, prefixes) {
+  const has = (codes) => codes.some((c) => codeIn(c, [], prefixes));
+  const missing = ctx.timeline.filter((d) => has(d.plan?.codes ?? []) && !has(ctx.execCodes(d)));
+  const extra = ctx.timeline.filter((d) => has(ctx.execCodes(d)) && !has(d.plan?.codes ?? []));
+  const byDate = (a, b) => a.date.localeCompare(b.date);
+  const order = [...missing].sort((a, b) => Number(!emptyExecDay(ctx, a)) - Number(!emptyExecDay(ctx, b)) || byDate(a, b));
+  const from = order.slice(0, extra.length).sort(byDate);
+  return { moved: from.map((d, i) => ({ from: d.date, to: extra[i].date })), unserved: order.slice(extra.length).sort(byDate) };
+}
+
+/**
+ * מילואים מתוכננים מול הרומה (`unserved_empty_rule`; בעל המוצר, 22/10/2026; טיוטה 406). ימים שזזו – הערה, בלי פער. יום
+ * מתוכנן שלא בוצע ולא רשום בו כלום ברומה – ברירת המחדל ברומה היא יום חופשה: הזיכוי של החוק `unserved_empty_rule` (ואחריו
+ * איזון החופשה), ושורה בשינויים, כמו יום כוננות שאינו ברומה. טיסה ביום כזה – `training_cancelled_flight` עם
+ * `unserved_only`; קוד אחר – הזיכוי של החוק שלו. רק מול רומה, ולא מול היומן.
+ */
+function unservedEmptyDays(ctx, params, rule) {
+  if (!ctx.hasExec || !ctx.hasPlan || ctx.calendarRun) return;
+  const prefixes = params.plan_code_prefixes ?? [];
+  const { moved, unserved } = unservedPlanDays(ctx, prefixes);
+  const planCode = (date) => (ctx.timeline.find((d) => d.date === date)?.plan?.codes ?? []).find((c) => codeIn(c, params.plan_codes, prefixes));
+  // בשם העברי, ובמילואים ברבים ("מילואים תוכננו"; `plural` ב-`codes.labels`).
+  const verb = (code) => (ctx.codeLabel(code)?.plural ? 'ו' : ctx.codeLabel(code)?.feminine ? 'ה' : '');
+  if (moved.length) {
+    const code = planCode(moved[0].from);
+    const planned = verb(code) ? `תוכננ${verb(code)}` : 'תוכנן'; // נון סופית רק בסוף המילה
+    const list = (pre, dates) => dates.map((d, i) => `${i ? 'ו' : ''}${pre}-${dayOf(d)}`).join(' ');
+    ctx.note(moved[0].from, `${ctx.codeName(code)} ${planned} ${list('ל', moved.map((m) => m.from))} ובוצע${verb(code)} ${list('ב', moved.map((m) => m.to))}.`, rule);
+  }
+  const empty = unserved.filter((d) => emptyExecDay(ctx, d));
+  if (!empty.length) return;
+  const target = ctx.rulesWithLogic('absence_day_credit').find((r) => r.id === params.unserved_empty_rule);
+  if (!target) {
+    ctx.review(`${rule.title}: ${empty.map((d) => dayOf(d.date)).join(', ')} – לא בוצעו, וברומה לא רשום כלום. החוק "${params.unserved_empty_rule}" אינו בתוקף. דורש בדיקה ידנית.`, rule);
+    return;
+  }
+  const p = target.logic.params;
+  const one = target.short_title ?? target.title;
+  const many = target.short_title_plural ?? (one.startsWith('יום ') ? `ימי ${one.slice(4)}` : `ימי ${one}`);
+  for (const run of dayRuns(empty)) {
+    const from = run[0].date;
+    const to = run.at(-1).date;
+    const code = planCode(from);
+    const name = ctx.codeName(code);
+    for (const day of run) {
+      creditDay(ctx, day, p, target, H(p.credit_hours), p.plan_codes?.[0] ?? null,
+        { explain: `${name} שלא בוצע${verb(code)}: ברירת המחדל ברומה היא ${one}.` });
+    }
+    const several = run.length > 1;
+    ctx.addChange({
+      how: 'reserve_missing', label: several ? `ימי ${name} שאינם ברומה` : `יום ${name} שאינו ברומה`,
+      date: from, lastDay: to, to, planId: null, execId: null,
+      plan: several ? `${name} ${from.slice(8, 10)}–${dayOf(to)}` : name, exec: null,
+      notes: [{ message: several ? `קרדיט ${run.length} ${many}.` : `קרדיט ${one}.`, byUser: false, ruleTitle: rule.title }],
+    });
   }
 }
 
@@ -1876,6 +1946,8 @@ function vacation_recall(ctx, params, rule) {
 function training_cancelled_flight(ctx, params, rule) {
   if (!ctx.hasPlan || !ctx.hasExec) return;
   const marked = new Set();
+  // `unserved_only` (מילואים): רק יום מתוכנן שלא בוצע ולא זז ליום אחר (`unservedPlanDays`; טיוטה 406).
+  const unserved = params.unserved_only ? new Set(unservedPlanDays(ctx, params.plan_code_prefixes ?? []).unserved.map((d) => d.date)) : null;
   for (const day of ctx.timeline) {
     // רק טיסה שהמריאה ביום הזה. יום שהייה בחו"ל בתוך סבב אינו הצבה לטיסה: SIM_BER ב-18/11/2025
     // הוא סימולטור בברלין, בתוך סבב BER 17–19 שתוכנן בשבילו.
@@ -1884,13 +1956,14 @@ function training_cancelled_flight(ctx, params, rule) {
     if (!pairing) continue;
     const planCodes = day.plan?.codes ?? [];
 
-    const training = planCodes.filter((c) => codeIn(c, params.plan_codes, params.plan_code_prefixes));
+    const training = unserved && !unserved.has(day.date) ? [] : planCodes.filter((c) => codeIn(c, params.plan_codes, params.plan_code_prefixes));
     if (training.length && !marked.has(pairing)) {
       marked.add(pairing);
       ctx.markPairing(pairing, 'training_cancelled');
-      // בשם העברי ("פעילות קרקעית בוטלה"; טיוטה 403).
+      // בשם העברי ("פעילות קרקעית בוטלה", "מילואים בוטלו"; טיוטות 403, 406).
       const names = ctx.codeNames(training);
-      const verb = names.includes(', ') ? 'בוטלו' : ctx.codeLabel(training[0])?.feminine ? 'בוטלה' : 'בוטל';
+      const label = ctx.codeLabel(training[0]);
+      const verb = names.includes(', ') || label?.plural ? 'בוטלו' : label?.feminine ? 'בוטלה' : 'בוטל';
       ctx.note(day.date, `${names} ${verb} והוצבת לטיסה: קרדיט הטיסה${DAY_DUES}.`, rule, { pairingId: pairing.id, callOf: pairing.id });
     }
 
@@ -2206,7 +2279,7 @@ export const LOGIC = {
 export const KNOWN_PARAMS = {
   credit_from_scheduled: [],
   min_slip_credit: ['min_credit_hours', 'per_fdp', 'legal_rest_hours'],
-  absence_day_credit: ['plan_codes', 'report_codes', 'plan_code_prefixes', 'report_code_prefixes', 'report_flag_column', 'credit_hours', 'tab_hours', 'requires_assigned_activity', 'flight_day_takes_higher', 'away_flag_on_pairing_start', 'confirm_code_prefixes', 'confirm_label', 'confirm_answer', 'exclude_codes', 'ask_when_missing', 'missing_label', 'assume_unknown_codes'],
+  absence_day_credit: ['plan_codes', 'report_codes', 'plan_code_prefixes', 'report_code_prefixes', 'report_flag_column', 'credit_hours', 'tab_hours', 'requires_assigned_activity', 'flight_day_takes_higher', 'away_flag_on_pairing_start', 'confirm_code_prefixes', 'confirm_label', 'confirm_answer', 'exclude_codes', 'ask_when_missing', 'missing_label', 'assume_unknown_codes', 'unserved_empty_rule'],
   unpaid_leave_days: ['plan_codes', 'report_codes', 'plan_code_prefixes', 'report_code_prefixes'],
   hotel_waiver_days: ['report_column'],
   per_diem_estimate: ['rates', 'default_position', 'slip_month', 'slip_owner_staff', 'stay_column', 'flight_column', 'stay_deduction_usd', 'hotel_waiver_column', 'hotel_waiver'],
@@ -2221,7 +2294,7 @@ export const KNOWN_PARAMS = {
   voluntary_swap: ['requires_user_answer'],
   cancelled_no_compensation: ['requires_user_answer'],
   vacation_recall: ['plan_codes', 'plan_code_prefixes', 'report_codes', 'report_code_prefixes', 'hours', 'report_column', 'exclude_codes'],
-  training_cancelled_flight: ['plan_codes', 'plan_code_prefixes', 'moved_ok_prefixes'],
+  training_cancelled_flight: ['plan_codes', 'plan_code_prefixes', 'moved_ok_prefixes', 'unserved_only'],
   dh_activated: ['hours', 'report_column', 'report_dh_types'],
   standby_end_for_bid: ['requires_user_answer', 'plan_codes', 'plan_code_prefixes', 'last_days'],
   standby_activation: ['plan_codes', 'plan_code_prefixes'],
