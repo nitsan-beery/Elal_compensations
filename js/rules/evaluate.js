@@ -1395,8 +1395,20 @@ function describeMatch(m, codes) {
     execId: m.exec?.id ?? null,
     plan: m.plan ? describePairing(m.plan) : null,
     exec: m.exec ? describePairing(m.exec) : null,
-    replacedBy: m.replacedBy?.map((r) => `${codeName(r.code, codes)} ${r.date.slice(8, 10)}/${r.date.slice(5, 7)}`) ?? null,
+    replacedBy: m.replacedBy ? nameRuns(m.replacedBy, codes) : null,
   };
+}
+
+/** מה שבוצע במקום סבב, בשמות: ימים רצופים באותו שם – טווח אחד ("מחלה 13/07–14/07"; בעל המוצר, 22/10/2026; טיוטה 404). */
+function nameRuns(list, codes) {
+  const runs = [];
+  for (const r of [...list].sort((a, b) => a.date.localeCompare(b.date))) {
+    const name = codeName(r.code, codes);
+    const last = runs.findLast((x) => x.name === name);
+    if (last && (last.to === r.date || addDay(last.to) === r.date)) last.to = r.date;
+    else runs.push({ name, from: r.date, to: r.date });
+  }
+  return runs.map((x) => `${x.name} ${x.from === x.to ? ddmm(x.from) : `${ddmm(x.from)}–${ddmm(x.to)}`}`);
 }
 
 /**
