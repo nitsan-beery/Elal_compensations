@@ -365,21 +365,21 @@ function standbyMissing(ctx, params, rule, credit) {
     const from = run[0].date;
     const to = run.at(-1).date;
     const many = run.length > 1;
-    const codes = [...new Set(run.map(planCode))].join(', ');
+    const codes = ctx.codeNames(run.map(planCode)); // בשם העברי ("כוננות"; טיוטה 403)
     const when = many ? `${from.slice(8, 10)}–${dayOf(to)}` : dayOf(from);
     const what = many ? 'ימי כוננות שאינם ברומה' : 'יום כוננות שאינו ברומה';
     const id = `standby_missing:${from}`;
     const answer = ctx.answer(id);
     const row = (label, message, byUser = false) => ctx.addChange({
       how: 'standby_missing', label, date: from, lastDay: to, to, planId: null, execId: null,
-      // בצד התכנון SBY, בלי הסיומת (בעל המוצר, 21/10/2026; טיוטה 393).
-      plan: many ? `SBY ${when}` : 'SBY', exec: null, notes: [{ message, byUser, ruleTitle: rule.title }],
+      // בצד התכנון שם הקוד, בלי הקוד (בעל המוצר, 22/10/2026; טיוטה 403; עד אז SBY, טיוטה 393).
+      plan: many ? `${codes} ${when}` : codes, exec: null, notes: [{ message, byUser, ruleTitle: rule.title }],
     });
     if (!answer) {
       ctx.ask({
         id,
         date: from,
-        title: `ב-${when} תוכננה ${params.missing_label} (${codes}), וברומה לא רשום כלום ${many ? 'בימים האלה' : 'ביום הזה'}. מה קרה?`,
+        title: `ב-${when} תוכננה ${params.missing_label}, וברומה לא רשום כלום ${many ? 'בימים האלה' : 'ביום הזה'}. מה קרה?`,
         options: [
           { value: 'standby_held', label: 'הכוננות התקיימה', hint: `${minToHhmm(credit * run.length)} – פער מול הרומה` },
           { value: 'standby_cancelled_mine', label: 'ביקשתי לבטל את הכוננות', hint: 'אין קרדיט' },
@@ -1888,7 +1888,10 @@ function training_cancelled_flight(ctx, params, rule) {
     if (training.length && !marked.has(pairing)) {
       marked.add(pairing);
       ctx.markPairing(pairing, 'training_cancelled');
-      ctx.note(day.date, `${training.join(', ')} בוטל והוצבת לטיסה: קרדיט הטיסה${DAY_DUES}.`, rule, { pairingId: pairing.id, callOf: pairing.id });
+      // בשם העברי ("פעילות קרקעית בוטלה"; טיוטה 403).
+      const names = ctx.codeNames(training);
+      const verb = names.includes(', ') ? 'בוטלו' : ctx.codeLabel(training[0])?.feminine ? 'בוטלה' : 'בוטל';
+      ctx.note(day.date, `${names} ${verb} והוצבת לטיסה: קרדיט הטיסה${DAY_DUES}.`, rule, { pairingId: pairing.id, callOf: pairing.id });
     }
 
     const own = ctx.matches.find((m) => m.exec === pairing);
@@ -1900,7 +1903,8 @@ function training_cancelled_flight(ctx, params, rule) {
       if (movedTo.length) {
         // `aside`: ההזזה אינה מה שמגיע על הטיסה של אותם ימים, ולכן ההערה נשארת בהערות, ומתחת לשינוי
         // של הטיסה מה שמגיע עליה (07/06/2026: HOME_RGT שזז, ו-BER; בעל המוצר, 15/10/2026).
-        ctx.note(day.date, `${code} תוכנן ל-${dayOf(day.date)} ובוצע ב-${movedTo.map((d) => dayOf(d.date)).join(', ')}${placed}. ` +
+        const f = ctx.codeLabel(code)?.feminine ? 'ה' : ''; // בשם העברי ("HOME RGT תוכנן"; טיוטה 403)
+        ctx.note(day.date, `${ctx.codeName(code)} תוכנן${f} ל-${dayOf(day.date)} ובוצע${f} ב-${movedTo.map((d) => dayOf(d.date)).join(', ')}${placed}. ` +
           'הזזה בתוך החודש אינה מזכה בפיצוי.', rule, { aside: true, pairingId: pairing.id });
       } else {
         ctx.review(`${code} תוכנן ל-${dayOf(day.date)}${placed}. ` +

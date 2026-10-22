@@ -7,7 +7,7 @@
 // וכל יום אחר הוא קבוצה לעצמו. כך טיסת לילה שהקרדיט שלה נרשם בשני ימים נבדקת כמכלול.
 
 import { LOGIC, LOGIC_ORDER, DAY_DUES } from './logic.js';
-import { rulesInEffect, partitionRules, rulesByLogic, classifyCode } from './catalog.js';
+import { rulesInEffect, partitionRules, rulesByLogic, classifyCode, codeLabel, codeName, codeNames } from './catalog.js';
 import { buildTimeline, buildPairings, markCarryIn, matchPairings, describePairing, describeRoute, pairingParts, fdpParts, sameFdp } from '../model.js';
 import { hoursToMin, minToHhmm } from '../time.js';
 import { OPTIONAL_COLUMNS } from '../pdf/exec.js';
@@ -263,7 +263,7 @@ function evaluateFiles({ rulesData, plan = null, exec = null, answers = {}, hist
   if (mode === 'full') matches.splice(0, matches.length, ...splitSwappedElsewhere(matches, answers, dependentAnswers));
   explainByCarriedStay(matches, fdp);
   explainByActivity(matches, timeline, codes, sickCodeTest(supported), movableCodeTest(supported));
-  out.changes = mergeCarriedStay(matches.map(describeMatch), matches);
+  out.changes = mergeCarriedStay(matches.map((m) => describeMatch(m, codes)), matches);
   // פעילות קרקע במקום סבב: הזיכוי עליה בא מחוק הקוד שלה. קוד שאף חוק נתמך לא מכסה – לבדיקה ידנית.
   const covered = new Set(supported.flatMap((r) => [...(r.logic.params?.plan_codes ?? []), ...(r.logic.params?.report_codes ?? [])]));
   const coveredPrefixes = supported.flatMap((r) => [...(r.logic.params?.plan_code_prefixes ?? []), ...(r.logic.params?.report_code_prefixes ?? [])]);
@@ -317,12 +317,9 @@ function evaluateFiles({ rulesData, plan = null, exec = null, answers = {}, hist
   showSwaps(out, answers, assumed);
   splitChangesByFdp(out, matches, ctx, fdp);
   // טיסה לא מתוכננת בימים שתוכננה בהם פעילות שאינה סבב: הקודים בצד התכנון, ולא "—" (בעל המוצר, 21/10/2026; טיוטה 392).
-  // קוד VAC שחוקי החופשה אינם כוללים (VAC_NOC, חופשה ללא תשלום) נשאר מלא (טיוטה 394).
-  const unpaidLeave = new Set(supported.filter((r) => (r.logic.params?.plan_code_prefixes ?? []).includes('VAC'))
-    .flatMap((r) => r.logic.params.exclude_codes ?? []));
   for (const c of out.changes) {
     if (c.how !== 'unplanned' || c.plan) continue;
-    c.plan = plannedCodes(timeline, codes, c.date, c.lastDay ?? c.date, unpaidLeave);
+    c.plan = plannedCodes(timeline, codes, c.date, c.lastDay ?? c.date);
     if (ctx.pairingHandledBy({ id: c.execId }, 'standby_activated')) c.label = 'הפעלה מכוננות';
     else if (c.plan && !c.label.startsWith('המשך סבב')) c.label = 'פעילות לא מתוכננת';
   }
@@ -975,6 +972,11 @@ function makeContext({ out, timeline, domicile, codes, holidays, answers, plan, 
     /** האם המשתמש ביטל את ההנחה על השאלה (`assume`). */
     assumeIgnored: (id) => assumedIgnored.includes(id),
 
+    /** השם העברי של קוד (`codes.labels`; טיוטה 403): `codeName` – השם או הקוד, `codeLabel` – הרשומה (`feminine`) או null. */
+    codeName: (code) => codeName(code, codes),
+    codeLabel: (code) => codeLabel(code, codes),
+    codeNames: (list) => codeNames(list, codes),
+
     /** קודי פעילות ביום (קרקע, סימולטור, כוננות), בלי היעדרות, הערות ו-DUM. לפי הדוח כשיש. */
     activityCodes(day) {
       const list = exec ? execCodesOf(day, codes) : (day.plan?.codes ?? []);
@@ -1366,7 +1368,7 @@ function sickCodeTest(supported) {
 const unplannedLabel = (p) => (p.carriedFrom ? 'המשך סבב מהחודש הקודם'
   : (p.shownTo ?? p.to) > p.from ? 'פעילות בימים לא מתוכננים' : 'פעילות ביום לא מתוכנן');
 
-function describeMatch(m) {
+function describeMatch(m, codes) {
   const labels = {
     exact: 'בוצע כמתוכנן',
     dates: 'הוחלף בסבב אחר באותם ימים',
@@ -1393,7 +1395,7 @@ function describeMatch(m) {
     execId: m.exec?.id ?? null,
     plan: m.plan ? describePairing(m.plan) : null,
     exec: m.exec ? describePairing(m.exec) : null,
-    replacedBy: m.replacedBy?.map((r) => `${r.code} ${r.date.slice(8, 10)}/${r.date.slice(5, 7)}`) ?? null,
+    replacedBy: m.replacedBy?.map((r) => `${codeName(r.code, codes)} ${r.date.slice(8, 10)}/${r.date.slice(5, 7)}`) ?? null,
   };
 }
 
@@ -1485,13 +1487,13 @@ function splitChangesByFdp(out, matches, ctx, fdp) {
  * הקודים שתוכננו בימים from–to (לא סבבים, ובלי קודים שמושמטים מהתכנון), ורצף ימים באותם קודים בטווח אחד:
  * "HOME_RGT 01/09 · VAC 02/09", "SBY 27/09–30/09". בלי קודים – null.
  */
-function plannedCodes(timeline, codes, from, to, unpaidLeave = new Set()) {
-  // כוננות – SBY, וחופשה – VAC, בלי הסיומת; חופשה ללא תשלום – הקוד המלא (בעל המוצר, 21/10/2026; טיוטות 393–394).
-  const short = (c) => (isStandbyCode(c) ? 'SBY' : c.startsWith('VAC') && !unpaidLeave.has(c) ? 'VAC' : c);
+function plannedCodes(timeline, codes, from, to) {
+  // כל קוד בשם העברי שלו ("כוננות", "חופשה", "חופשה ללא תשלום"; בעל המוצר, 22/10/2026; טיוטה 403).
+  const short = (c) => codeName(c, codes);
   const runs = [];
   for (const day of timeline) {
     if (day.date < from || day.date > to) continue;
-    const cs = [...new Set((day.plan?.codes ?? []).filter((c) => !isIgnoredPlanCode(c, codes)).map(short))].join(' ');
+    const cs = [...new Set((day.plan?.codes ?? []).filter((c) => !isIgnoredPlanCode(c, codes)).map(short))].join(', ');
     const last = runs.at(-1);
     if (cs && last?.cs === cs && last.next === day.date) Object.assign(last, { to: day.date, next: addDay(day.date) });
     else runs.push({ cs, from: day.date, to: day.date, next: addDay(day.date) });
@@ -2126,11 +2128,12 @@ function compare({ out, timeline, execPairings, tz, codes: catalog, fdp, hideCod
       const own = execCodesOf(dayOf(timeline, d), catalog);
       return own.length ? own.filter((c) => !hideCode(d, c)) : [...new Set(expectations.filter((e) => e.code && e.dates[0] === d).map((e) => e.code))];
     };
-    const codes = (dayCodes ?? dates.flatMap(codesOn)).join(' ');
+    // כל קוד בשם העברי שלו, ובקטע משלו אחרי הטיסה (בעל המוצר, 22/10/2026; טיוטה 403).
+    const codes = codeNames(dayCodes ?? dates.flatMap(codesOn), catalog);
     // בלי סבב שבוצע: הטיסה שתוכננה, כשציפייה עליה נושאת אותה (`plannedRoute`, הורדה מהטיסה).
     const planned = [...new Set(expectations.filter((e) => e.plannedRoute && dates.includes(e.dates[0])).map((e) => e.plannedRoute))];
     if (!lines.length) lines.push([range(dates), planned.join(', ')]);
-    if (codes) lines.at(-1)[1] = [lines.at(-1)[1], codes].filter(Boolean).join(' · ');
+    if (codes) lines.at(-1).push(codes);
     return lines.map((l) => l.filter(Boolean).map((t) => `⁦${t}⁩`).join(' · ')).join('\n');
   };
   const reportedOn = (d, column) => raw(d, column) + (shift.get(`${d}|${column}`) ?? 0);

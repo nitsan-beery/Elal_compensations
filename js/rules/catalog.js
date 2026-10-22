@@ -141,3 +141,20 @@ export function expandReportCode(code, codes) {
   for (const [full, short] of Object.entries(map)) if (short === code) return full;
   return code;
 }
+
+/**
+ * השם העברי של קוד (`codes.labels`; בעל המוצר, 22/10/2026; טיוטה 403): הראשון שהקוד ברשימה שלו או מתחיל
+ * באחת הקידומות שלו; קוד פעילות קרקע בלי שם (כולל קוד לא מוכר שהונח כזה) – הרשומה עם `ground`.
+ * null – אין שם, והקוד מוצג כמות שהוא.
+ */
+export function codeLabel(code, codes) {
+  const labels = codes.labels ?? [];
+  return labels.find((l) => l.codes?.includes(code) || l.prefixes?.some((p) => code.startsWith(p)))
+    ?? (codes.ground_activity?.includes(code) ? labels.find((l) => l.ground) ?? null : null);
+}
+
+/** השם שמוצג במקום הקוד. */
+export const codeName = (code, codes) => codeLabel(code, codes)?.label ?? code;
+
+/** כמה קודים בשמות שלהם, כל שם פעם אחת ("מחלה, כוננות"). */
+export const codeNames = (list, codes) => [...new Set(list.map((c) => codeName(c, codes)))].join(', ');

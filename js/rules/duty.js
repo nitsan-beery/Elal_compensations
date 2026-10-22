@@ -1153,7 +1153,7 @@ function special_date_activity(ctx, params, rule) {
         id,
         date: coded.date,
         title: `${occ.title}: האם היית בפעילות מטעם החברה בין ${hhmm(wFrom)} ל-${hhmm(wTo)}?`,
-        body: `ב-${ddmm(coded.date)} רשום ${ctx.activityCodes(coded).join(', ')}, אין בקבצים שעות לפעילות הזאת, והרומה לא מזכה עליה.`,
+        body: `ב-${ddmm(coded.date)} רשום ${ctx.codeNames(ctx.activityCodes(coded))}, אין בקבצים שעות לפעילות הזאת, והרומה לא מזכה עליה.`,
         options: [
           { value: 'yes', label: 'כן', hint: `${minToHhmm(H(params.hours))} – פער מול הרומה` },
           { value: 'no', label: 'לא', hint: 'אין פיצוי' },
@@ -1161,7 +1161,7 @@ function special_date_activity(ctx, params, rule) {
         ruleId: rule.id,
       });
     } else if (a.value === 'yes') {
-      ctx.expect(coded.date, key, H(params.hours), rule, `${occ.title}: ${ctx.activityCodes(coded).join(', ')} בחלון ${window} ` +
+      ctx.expect(coded.date, key, H(params.hours), rule, `${occ.title}: ${ctx.codeNames(ctx.activityCodes(coded))} בחלון ${window} ` +
         `(${answered ? 'לפי תשובתך' : `הרומה מזכה את הפיצוי`})`, { explain });
     }
   }
