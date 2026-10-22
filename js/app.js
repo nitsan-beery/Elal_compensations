@@ -13,7 +13,7 @@ import * as store from './store.js';
 import * as calendar from './calendar.js';
 
 // מספר הגרסה של הקוד שרץ בדף. עולה יחד עם CACHE ב-sw.js, לאותו מספר (בעל המוצר, 15/10/2026).
-const APP_VERSION = 294;
+const APP_VERSION = 295;
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -1922,14 +1922,23 @@ function syncCancelledOption(root) {
   if (rulesUi.category === 'cancelled') { rulesUi.category = ''; select.value = ''; }
 }
 
+/**
+ * חוקי ההסכמים, והסיבה לכל חוק שאינו נתמך. חוק שהאפליקציה צריכה לבדיקה ואינו סעיף בהסכם
+ * (`agreement: false`) אינו מוצג – חוץ מכשאינו נתמך, כדי שלא ייעלם בשקט.
+ */
+function agreementRules() {
+  const { unsupported } = partitionRules(state.rulesData.rules);
+  const reasonOf = new Map(unsupported.map((u) => [u.rule.id, u.rule.unsupported_reason ?? u.reason]));
+  const all = state.rulesData.rules.filter((r) => r.agreement !== false || reasonOf.has(r.id));
+  return { all, reasonOf };
+}
+
 /** החוקים לפי החיפוש והסינון שבמסך, והסיבה לכל חוק שאינו נתמך. */
 function filteredRules() {
-  const data = state.rulesData;
-  const { unsupported } = partitionRules(data.rules);
-  const reasonOf = new Map(unsupported.map((u) => [u.rule.id, u.reason]));
+  const { all, reasonOf } = agreementRules();
   const q = rulesUi.q.trim().toLowerCase();
 
-  const rules = data.rules.filter((r) => {
+  const rules = all.filter((r) => {
     // חוק שבוטל היה בתוקף עד שבוטל; `valid_from`/`valid_to` משמשים לחישוב חודשי עבר
     // ולא לתצוגה. למשתמש מוצג רק "בוטל", וכברירת מחדל הוא מוסתר.
     const isCancelled = r.status === 'cancelled';
@@ -1938,9 +1947,9 @@ function filteredRules() {
     else if (rulesUi.category === 'unsupported') { if (!reasonOf.has(r.id)) return false; }
     else if (rulesUi.category && r.category !== rulesUi.category) return false;
     if (!q) return true;
-    return [r.id, r.title, r.when, r.amount?.text, r.source, r.note, r.logic?.id].some((s) => String(s ?? '').toLowerCase().includes(q));
+    return [r.title, r.when, r.amount?.text, r.source, r.agreement_note].some((s) => String(s ?? '').toLowerCase().includes(q));
   });
-  return { rules, reasonOf };
+  return { rules, all, reasonOf };
 }
 
 const dmy = (iso) => (iso ? iso.split('-').reverse().join('/') : null);
@@ -1950,10 +1959,9 @@ const amountText = (r) => r.amount?.text ?? (r.amount?.value != null ? `${r.amou
 
 function renderRuleList() {
   const root = $('#view-rules');
-  const data = state.rulesData;
-  const { rules, reasonOf } = filteredRules();
+  const { rules, all, reasonOf } = filteredRules();
 
-  $('[data-role="count"]', root).textContent = `מוצגים ${rules.length} מתוך ${data.rules.length} חוקים (מתוכם ${rules.filter((r) => reasonOf.has(r.id)).length} לא נתמכים)`;
+  $('[data-role="count"]', root).textContent = `מוצגים ${rules.length} מתוך ${all.length} חוקים (מתוכם ${rules.filter((r) => reasonOf.has(r.id)).length} לא נתמכים)`;
   $('[data-role="list"]', root).innerHTML = rules.map((r) => {
     const reason = reasonOf.get(r.id);
     const tags = [
@@ -1970,9 +1978,8 @@ function renderRuleList() {
         <dt>כמה</dt><dd>${esc(amountText(r))}</dd>
         <dt>מקור</dt><dd>${esc(r.source)}</dd>
         <dt>תוקף</dt><dd>${esc(validity)}</dd>
-        ${r.note ? `<dt>הערה</dt><dd>${esc(r.note)}</dd>` : ''}
+        ${r.agreement_note ? `<dt>הערה</dt><dd>${esc(r.agreement_note)}</dd>` : ''}
         ${reason ? `<dt>למה לא נתמך</dt><dd>${esc(reason)}</dd>` : ''}
-        <dt>מזהה</dt><dd><code>${esc(r.id)}</code> · <code>${esc(r.logic?.id ?? '')}</code></dd>
       </dl>
     </article>`;
   }).join('') || '<p class="muted">לא נמצאו חוקים.</p>';
@@ -1991,13 +1998,12 @@ function exportRulesJson() {
   }, { type: 'application/json', description: 'קובץ החוקים' });
 }
 
-/** כל החוקים כגיליון Excel, בלי קשר לחיפוש ולסינון שבמסך. */
+/** חוקי ההסכמים כגיליון Excel, כמו במסך, בלי קשר לחיפוש ולסינון שבו. */
 function exportRulesXlsx() {
-  const { reasonOf } = filteredRules();
-  const rules = state.rulesData.rules;
+  const { all, reasonOf } = agreementRules();
   const STATUS = { ok: '', cancelled: 'בוטל', changed: 'שונה' };
-  const header = ['שם', 'קטגוריה', 'מתי', 'כמה', 'מקור', 'בתוקף מ-', 'בתוקף עד', 'סטטוס', 'נתמך', 'הערה', 'למה לא נתמך', 'מזהה', 'לוגיקה'];
-  const rows = rules.map((r) => [
+  const header = ['שם', 'קטגוריה', 'מתי', 'כמה', 'מקור', 'בתוקף מ-', 'בתוקף עד', 'סטטוס', 'נתמך', 'הערה', 'למה לא נתמך'];
+  const rows = all.map((r) => [
     r.title,
     CATEGORY_LABEL[r.category] ?? r.category,
     r.when,
@@ -2007,12 +2013,10 @@ function exportRulesXlsx() {
     validTo(r),
     STATUS[r.status] ?? r.status,
     reasonOf.has(r.id) ? 'לא' : 'כן',
-    r.note,
+    r.agreement_note,
     reasonOf.get(r.id),
-    r.id,
-    r.logic?.id,
   ]);
-  const blob = xlsxBlob(header, rows, { sheet: 'חוקים', widths: [30, 10, 50, 30, 25, 11, 11, 10, 7, 40, 40, 28, 24] });
+  const blob = xlsxBlob(header, rows, { sheet: 'חוקים', widths: [30, 10, 50, 30, 25, 11, 11, 10, 7, 40, 40] });
   return saveFile(`rules-${state.rulesData.rules_version}.xlsx`, () => blob,
     { type: blob.type, description: 'גיליון Excel' });
 }
