@@ -13,7 +13,7 @@ import * as store from './store.js';
 import * as calendar from './calendar.js';
 
 // מספר הגרסה של הקוד שרץ בדף. עולה יחד עם CACHE ב-sw.js, לאותו מספר (בעל המוצר, 15/10/2026).
-const APP_VERSION = 295;
+const APP_VERSION = 296;
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -1427,7 +1427,7 @@ function renderAnswered(res) {
       <button class="btn no-print" data-unassume="${esc(id)}">שנה</button>
     </li>` : `<li class="row">
       <span>${answeredHead(id)}: <strong>${esc(a.value === 'partial' && a.count ? `ויתרתי מרצוני על ${a.count === 1 ? 'יום אחד' : `${a.count} ימים`}` : a.label ?? answerLabel(a.value, id.split(':')[0]))}${recall(id)}</strong>
-        ${a.link !== undefined ? `<span class="small muted">(${a.link === 'none' ? 'מסירת הטיסה ללא חלופה' : a.link ? `עם ${esc(describePairingId(a.link))}` : 'בחודש אחר'})</span>` : ''}
+        ${a.link !== undefined ? `<span class="small muted">(${a.link === 'none' ? 'מסירת הטיסה ללא חלופה' : a.link ? esc(describePairingId(a.link)) : 'בחודש אחר'})</span>` : ''}
         ${a.text ? `<span class="small muted">– ${esc(a.text)}</span>` : ''}
         ${typeof a.creditMin === 'number' ? `<span class="small muted">(${a.creditMin ? `מגיע קרדיט ${minToHhmm(a.creditMin)}` : 'לא מגיע קרדיט'})</span>` : ''}</span>
       <span class="spacer"></span>
