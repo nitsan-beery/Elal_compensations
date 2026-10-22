@@ -206,6 +206,7 @@ main { max-width: 1100px; margin: 0 auto; padding: 1rem 16px 3rem; }
 .totals { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: .6rem; }
 .total { border: 1px solid var(--line); border-radius: 8px; padding: .5rem .7rem; }
 .total .label { font-size: .8rem; color: var(--muted); direction: ltr; text-align: right; }
+.total .label .sub { font-size: .85em; }
 .total .val { font-size: 1.2rem; font-weight: 700; }
 .total .rep { font-size: .85rem; color: var(--muted); }
 .total.ok { border-color: var(--ok); }

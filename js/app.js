@@ -13,7 +13,7 @@ import * as store from './store.js';
 import * as calendar from './calendar.js';
 
 // מספר הגרסה של הקוד שרץ בדף. עולה יחד עם CACHE ב-sw.js, לאותו מספר (בעל המוצר, 15/10/2026).
-const APP_VERSION = 286;
+const APP_VERSION = 287;
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -943,10 +943,10 @@ function summarize(res) {
   // (נובמבר ודצמבר 2025: Rig של 00:04 בשורה ובסיכום; בעל המוצר, 29/09/2026).
   // הכיוון כמו בטבלת הפירוט (`gapClass`): `gains` – הרומה זיכתה יותר מהצפוי, `losses` – פחות (בעל המוצר,
   // 18/10/2026). בסיכום החודשי – לפי מה שהשורות אינן מסבירות.
-  const rowsDiff = (column) => res.comparison.filter((c) => c.column === column && c.ok === false).reduce((s, c) => s + c.diff, 0);
+  const rowsDiff = (t) => res.comparison.filter((c) => (t.columns ?? [t.column]).includes(c.column) && c.ok === false).reduce((s, c) => s + c.diff, 0);
   const rows = shownComparison(res).filter(isGap).map((c) => (c.ok === false ? c.diff : -1));
-  const totals = res.questions.length ? [] : res.totals.filter((t) => t.ok === false && t.reported - t.expected !== rowsDiff(t.column))
-    .map((t) => t.reported - t.expected - rowsDiff(t.column));
+  const totals = res.questions.length ? [] : res.totals.filter((t) => t.ok === false && t.reported - t.expected !== rowsDiff(t))
+    .map((t) => t.reported - t.expected - rowsDiff(t));
   const diffs = [...rows, ...totals];
   return {
     mode: res.mode,
@@ -1217,6 +1217,11 @@ function planTotals(res) {
   ];
 }
 
+/** שם המשבצת בסיכום. ליד Rig: השעות שלו כבר בקרדיט (בעל המוצר, 22/10/2026; טיוטה 400). */
+const totalLabel = (column) => (column === 'Rig'
+  ? '<div class="label" style="direction:rtl">Rig <span class="sub">(השעות מוכלות בקרדיט)</span></div>'
+  : `<div class="label">${esc(column)}</div>`);
+
 function renderTotals(res) {
   const fd = res.freeDays;
   if (!hasTotals(res)) return '';
@@ -1232,13 +1237,13 @@ function renderTotals(res) {
       const status = t.ok === true ? '✓' : t.ok === false ? (pending ? `ממתין · ${gap}` : t.reported > t.expected ? `· ${gap}` : `✗ ${gap}`) : '';
       return `
       <div class="total ${t.ok === true ? 'ok' : t.ok === false && !pending ? gapClass(t.reported - t.expected) : ''}">
-        <div class="label">${esc(t.column)}</div>
+        ${totalLabel(t.column)}
         <div class="val num">${minToHhmm(t.expected)}</div>
         <div class="rep">ברומה <span class="num">${minToHhmm(t.reported)}</span> ${status}</div>
       </div>`;
     }).join('')}${plan.map((t) => `
       <div class="total">
-        <div class="label">${esc(t.column)}</div>
+        ${totalLabel(t.column)}
         <div class="val num">${minToHhmm(t.expected)}</div>
         <div class="rep">צפוי לפי התכנון</div>
       </div>`).join('')}${fd ? `

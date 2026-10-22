@@ -2302,18 +2302,18 @@ function compare({ out, timeline, execPairings, tz, codes: catalog, fdp, hideCod
 /**
  * סיכום חודשי מול שורת הסיכום בדוח.
  * עמודת פיצוי שאינה בדוח פירושה שלא היה פיצוי כזה בחודש, והיא נקראת כ-0.
+ * שעות טיסה משולמות כקרדיט או כפיצוי, וקריאה מיוחדת היא פיצוי: COM כולל את S/C, בצפוי וברומה
+ * (`columns`; בעל המוצר, 22/10/2026; טיוטה 400).
  */
 function compareTotals(out, exec) {
-  const sum = (column) => out.comparison.filter((r) => r.column === column).reduce((s, r) => s + r.expected, 0);
+  const sum = (columns) => out.comparison.filter((r) => columns.includes(r.column)).reduce((s, r) => s + r.expected, 0);
   const t = { ...exec.totals };
   for (const c of exec.missingColumns ?? []) if (OPTIONAL_COLUMNS.includes(c)) t[c] ??= 0;
-  const rows = [
-    { column: 'Credit', expected: sum('Credit'), reported: t.Credit ?? null },
-    { column: 'Rig', expected: sum('Rig'), reported: t.Rig ?? null },
-    { column: 'COM', expected: sum('COM'), reported: t.COM ?? null },
-    { column: 'S/C', expected: sum('S/C'), reported: t['S/C'] ?? null },
-  ];
-  return rows.map((r) => ({ ...r, ok: r.reported == null ? null : r.reported === r.expected }));
+  const reported = (columns) => (columns.some((c) => t[c] == null) ? null : columns.reduce((s, c) => s + t[c], 0));
+  return [['Credit'], ['Rig'], ['COM', 'S/C']].map((columns) => {
+    const r = { column: columns[0], columns, expected: sum(columns), reported: reported(columns) };
+    return { ...r, ok: r.reported == null ? null : r.reported === r.expected };
+  });
 }
 
 /**
@@ -2322,7 +2322,7 @@ function compareTotals(out, exec) {
 function warnMissingColumns(out, exec) {
   const missing = (exec.missingColumns ?? []).filter((c) => OPTIONAL_COLUMNS.includes(c));
   for (const column of missing) {
-    if (out.totals.find((t) => t.column === column)?.ok !== false) continue;
+    if (out.totals.find((t) => t.columns.includes(column))?.ok !== false) continue;
     out.warnings.push(`יש פער ב-${column}, והעמודה לא מופיעה ברומה. ` +
       'בדרך כלל זה אומר שלא היה פיצוי כזה בחודש, אבל ייתכן שהעמודה נחתכה בהדפסה.');
   }
