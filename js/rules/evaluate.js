@@ -262,7 +262,7 @@ function evaluateFiles({ rulesData, plan = null, exec = null, answers = {}, hist
   if (journal && mode === 'full') applyJournal(journal, { ctx, matches, execPairings, answers });
   if (mode === 'full') matches.splice(0, matches.length, ...splitSwappedElsewhere(matches, answers, dependentAnswers));
   explainByCarriedStay(matches, fdp);
-  explainByActivity(matches, timeline, codes, sickCodeTest(supported), movableCodeTest(supported));
+  explainByActivity(matches, timeline, codes, sickCodeTest(supported), movableCodeTest(supported), reserveCodeTest(supported), ctx);
   out.changes = mergeCarriedStay(matches.map((m) => describeMatch(m, codes)), matches);
   // פעילות קרקע במקום סבב: הזיכוי עליה בא מחוק הקוד שלה. קוד שאף חוק נתמך לא מכסה – לבדיקה ידנית.
   const covered = new Set(supported.flatMap((r) => [...(r.logic.params?.plan_codes ?? []), ...(r.logic.params?.report_codes ?? [])]));
@@ -962,11 +962,12 @@ function makeContext({ out, timeline, domicile, codes, holidays, answers, plan, 
     /**
      * תשובה שהאפליקציה מניחה בלי לשאול, כי הרומה כבר זיכתה: `{ value }`, ושורה ב"תשובות שנשמרו" עם "שנה"
      * (`out.assumptions`; בעל המוצר, 17/10/2026, טיוטה 365). null כשהמשתמש ביטל את ההנחה (`assumedIgnored`):
-     * החוק שואל כרגיל, כאילו הרומה לא זיכתה. `label`: התשובה, כפי שהיא בשאלה.
+     * החוק שואל כרגיל, כאילו הרומה לא זיכתה. `label`: התשובה, כפי שהיא בשאלה. `why`: על מה ההנחה נשענת, כשזו
+     * אינה הרומה שזיכתה ("ברומה רשום מילואים בימי הסבב"; טיוטה 405).
      */
-    assume(id, value, label) {
+    assume(id, value, label, why) {
       if (assumedIgnored.includes(id)) return null;
-      if (!out.assumptions.some((a) => a.id === id)) out.assumptions.push({ id, value, label });
+      if (!out.assumptions.some((a) => a.id === id)) out.assumptions.push({ id, value, label, ...(why ? { why } : {}) });
       return { value, assumed: true };
     },
     /** האם המשתמש ביטל את ההנחה על השאלה (`assume`). */
@@ -1278,14 +1279,17 @@ function fleetOf(plan) {
  * פעילות קרקע מזוהה גם בקוד המקוצר של הרומה (CPT_B הוא CPT_BAS; 17/06/2025: TBS שהוחלף ב-CPT_B).
  * פעילות שאפשר להזיז בלי פיצוי (HOME, `moved_ok_prefixes`) אינה מסבירה למה הסבב לא בוצע, כי
  * היא יכולה לזוז לימיו גם בלי קשר אליו, ולכן השאלה נשאלת (בעל המוצר, 01/10/2026).
+ *
+ * מילואים (כל MIL) – כמו מחלה: "בוטל עקב מילואים", לא ביוזמת החברה. זו הנחה שניתנת לשינוי (`ctx.assume`), ואחרי
+ * "שנה" נשאלת השאלה הרגילה על הסבב (בעל המוצר, 22/10/2026; טיוטה 405).
  */
-function explainByActivity(matches, timeline, codes, isSick, isMovable) {
+function explainByActivity(matches, timeline, codes, isSick, isMovable, isReserve, ctx) {
   const groundCodes = new Set(codes.ground_activity ?? []);
   const ground = { has: (c) => !isMovable(c) && (groundCodes.has(c) || groundCodes.has(expandCode(c, codes))) };
   const reportLeave = new Set(Object.entries(codes.plan_to_report ?? {})
     .filter(([full]) => (codes.leave ?? []).includes(full)).map(([, short]) => short));
   for (const c of codes.leave ?? []) reportLeave.add(c);
-  const kindOf = (code) => isStandbyCode(code) ? 'standby' : isSick(code) ? 'sick' :
+  const kindOf = (code) => isStandbyCode(code) ? 'standby' : isSick(code) ? 'sick' : isReserve(code) ? 'reserve' :
     isLeaveCode(code, reportLeave, codes) ? 'leave' : ground.has(code) ? 'ground' : 'other';
 
   for (const m of matches) {
@@ -1298,12 +1302,15 @@ function explainByActivity(matches, timeline, codes, isSick, isMovable) {
     if (!found.length) continue;
     const kinds = new Set(found.map((f) => f.kind));
     if (kinds.has('other')) continue; // קוד לא מוכר, או פעילות שאפשר להזיז: לא מסיקים ממנו, והשאלה תישאל
+    const id = `cancelled:${m.plan.id}`;
+    if (kinds.has('reserve') && (ctx.answer(id) || !ctx.assume(id, 'reserve', 'בוטל עקב מילואים', 'ברומה רשום מילואים בימי הסבב'))) continue;
     m.replacedBy = found;
-    m.byLeave = kinds.has('leave') || kinds.has('sick'); // היעדרות או מחלה, גם כשמעורבת גם כוננות
+    m.byLeave = kinds.has('leave') || kinds.has('sick') || kinds.has('reserve'); // היעדרות, מחלה או מילואים, גם כשמעורבת גם כוננות
     m.how = kinds.has('ground') ? 'replaced_by_ground'
       : kinds.has('sick') && kinds.has('standby') ? 'replaced_by_sick_standby'
       : kinds.has('sick') ? 'replaced_by_sick'
       : kinds.has('standby') ? 'replaced_by_standby'
+      : kinds.size === 1 && kinds.has('reserve') ? 'replaced_by_reserve'
       : 'replaced_by_leave';
   }
 }
@@ -1356,9 +1363,15 @@ function movableCodeTest(supported) {
 }
 
 /** קודי מחלה (כולל מחלת בן משפחה): הקודים של חוקי זיכוי היום שמסמנים את עמודת SICK או SCKFM בדוח. */
-function sickCodeTest(supported) {
+const sickCodeTest = (supported) => flagCodeTest(supported, ['SICK', 'SCKFM']);
+
+/** קודי מילואים: הקודים של חוקי זיכוי היום שמסמנים את עמודת MIL בדוח (טיוטה 405). */
+const reserveCodeTest = (supported) => flagCodeTest(supported, ['MIL']);
+
+/** הקודים של חוקי זיכוי היום שמסמנים בדוח אחת מהעמודות `columns`. */
+function flagCodeTest(supported, columns) {
   const sick = supported.filter((r) => r.logic.id === 'absence_day_credit' &&
-    [r.logic.params?.report_flag_column ?? []].flat().some((c) => c === 'SICK' || c === 'SCKFM'));
+    [r.logic.params?.report_flag_column ?? []].flat().some((c) => columns.includes(c)));
   const exact = new Set(sick.flatMap((r) => [...(r.logic.params.plan_codes ?? []), ...(r.logic.params.report_codes ?? [])]));
   const prefixes = sick.flatMap((r) => [...(r.logic.params.plan_code_prefixes ?? []), ...(r.logic.params.report_code_prefixes ?? [])]);
   return (c) => exact.has(c) || prefixes.some((p) => c.startsWith(p));
@@ -1379,6 +1392,7 @@ function describeMatch(m, codes) {
     replaced_by_leave: 'סבב מתוכנן שהוחלף בהיעדרות',
     replaced_by_ground: 'סבב מתוכנן שהוחלף בפעילות קרקע',
     replaced_by_sick: 'סבב מתוכנן שבוטל עקב מחלה',
+    replaced_by_reserve: 'סבב מתוכנן שבוטל עקב מילואים',
     replaced_by_standby: 'סבב מתוכנן שבוטל והוצבת לכוננות',
     replaced_by_sick_standby: 'סבב מתוכנן שבוטל עקב מחלה והוצבת לכוננות',
   };

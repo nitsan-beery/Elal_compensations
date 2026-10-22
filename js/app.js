@@ -13,7 +13,7 @@ import * as store from './store.js';
 import * as calendar from './calendar.js';
 
 // מספר הגרסה של הקוד שרץ בדף. עולה יחד עם CACHE ב-sw.js, לאותו מספר (בעל המוצר, 15/10/2026).
-const APP_VERSION = 291;
+const APP_VERSION = 292;
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -1414,7 +1414,7 @@ const answerOrder = (a, b) => answerDate(a).localeCompare(answerDate(b)) ||
 function renderAnswered(res) {
   const saved = state.record?.answers ?? {};
   // הנחה שאין בה מה לשנות – בלי שאלה כשמבטלים אותה – אינה מוצגת (`changeable`; טיוטה 388).
-  const assumed = (res.assumptions ?? []).filter((x) => !saved[x.id] && x.changeable !== false).map((x) => [x.id, { value: x.value, label: x.label }, true]);
+  const assumed = (res.assumptions ?? []).filter((x) => !saved[x.id] && x.changeable !== false).map((x) => [x.id, { value: x.value, label: x.label, why: x.why }, true]);
   const answers = [...Object.entries(saved), ...assumed].sort(answerOrder);
   if (!answers.length) return '';
   const recall = (id) => (res.vacationRecall?.includes(id) ? ' וביטול חופשה' : '');
@@ -1422,7 +1422,7 @@ function renderAnswered(res) {
     <summary><h2 style="display:inline">תשובות שנשמרו <span class="count">${answers.length}</span></h2></summary>
     <ul class="list">${answers.map(([id, a, byApp]) => byApp ? `<li class="row">
       <span>${answeredHead(id)}: <strong>${esc(a.label ?? answerLabel(a.value, id.split(':')[0]))}${recall(id)}</strong>
-        <div class="explain">הנחת האפליקציה: הרומה מזכה את הפיצוי</div></span>
+        <div class="explain">הנחת האפליקציה: ${esc(a.why ?? 'הרומה מזכה את הפיצוי')}</div></span>
       <span class="spacer"></span>
       <button class="btn no-print" data-unassume="${esc(id)}">שנה</button>
     </li>` : `<li class="row">
