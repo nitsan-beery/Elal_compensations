@@ -2345,15 +2345,20 @@ function compareTotals(out, exec) {
   });
 }
 
+/** מה צפוי בעמודה, באזהרה על עמודה חסרה. */
+const EXPECTED_IN_COLUMN = { 'S/C': 'צפויה קריאה מיוחדת', COM: 'צפוי פיצוי', Rig: 'צפוי Rig' };
+
 /**
- * עמודת פיצוי חסרה אינה תקלה, אבל אם יש פער בסיכום שהיא חלק ממנו, ייתכן שהיא נחתכה בהדפסה.
+ * עמודת פיצוי חסרה אינה תקלה, אבל כשהאפליקציה מצפה לסכום בה, ייתכן שהיא נחתכה בהדפסה. רק כשאין שאלות
+ * פתוחות: עד התשובות הציפייה עוד יכולה להשתנות (בעל המוצר, 22/10/2026; טיוטה 407; עד אז לפי הפער במשבצת
+ * הסיכום, ומאז ש-S/C בתוך COM גם פער ב-COM הציג אזהרה על S/C).
  */
 function warnMissingColumns(out, exec) {
+  if (out.questions.length) return;
   const missing = (exec.missingColumns ?? []).filter((c) => OPTIONAL_COLUMNS.includes(c));
   for (const column of missing) {
-    if (out.totals.find((t) => t.columns.includes(column))?.ok !== false) continue;
-    out.warnings.push(`יש פער ב-${column}, והעמודה לא מופיעה ברומה. ` +
-      'בדרך כלל זה אומר שלא היה פיצוי כזה בחודש, אבל ייתכן שהעמודה נחתכה בהדפסה.');
+    if (!out.comparison.some((r) => r.column === column && r.expected > 0)) continue;
+    out.warnings.push(`${EXPECTED_IN_COLUMN[column] ?? `צפוי ${column}`}, והעמודה ${column} לא מופיעה ברומה. ייתכן שהעמודה נחתכה בהדפסה.`);
   }
 }
 
