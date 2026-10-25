@@ -13,7 +13,7 @@ import * as store from './store.js';
 import * as calendar from './calendar.js';
 
 // מספר הגרסה של הקוד שרץ בדף. עולה יחד עם CACHE ב-sw.js, לאותו מספר (בעל המוצר, 15/10/2026).
-const APP_VERSION = 297;
+const APP_VERSION = 298;
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -1152,7 +1152,7 @@ function renderQuestions(res) {
   return `<div class="card">
     <h2>שאלות <span class="count">${res.questions.length}</span></h2>
     <p class="small muted">המידע הזה אינו בקבצים. עד שתענה, השורות שתלויות בתשובה מסומנות "ממתין".</p>
-    ${res.questions.map(renderQuestion).join('')}
+    ${res.questions.map((q, i) => renderQuestion(q, i)).join('')}
   </div>`;
 }
 
@@ -1202,7 +1202,7 @@ function renderQuestion(q, i, edit = null) {
     ${hint ? `<p class="small muted">ענית קודם ${esc(answerLabel(hint.answer, kind))}, וביומן ${esc(answerLabel(hint.calendar, kind))}.</p>` : ''}
     <form data-qid="${esc(q.id)}"${edit ? ` data-edit="${edit}"` : ''}>
       ${picker}${options}
-      <div class="row" style="margin-top:.5rem"><button class="btn primary" type="submit" ${q.dateInput ? '' : 'disabled'}>שמור תשובה</button>${edit ? '<button class="btn" type="button" data-cancel-edit>ביטול</button>' : ''}</div>
+      <div class="row" style="margin-top:.5rem"><button class="btn primary" type="submit" ${q.dateInput ? '' : 'disabled'}>שמור תשובה</button><button class="btn" type="button" ${edit ? 'data-cancel-edit' : 'data-clear-answer'}>ביטול</button></div>
     </form>
   </div>`;
 }
@@ -1668,6 +1668,12 @@ function bindQuestionForm(form) {
       $('[data-credit-hours]', pick).hidden = $('select[name="credit"]', pick).value !== 'yes';
     }
     submit.disabled = !chosen && !$('input[type="date"]', form);
+  });
+  // "ביטול" בכרטיס השאלות: מנקה את הבחירה, והשאלה נשארת בלי תשובה (בעל המוצר, 25/10/2026; טיוטה 411).
+  $('[data-clear-answer]', form)?.addEventListener('click', () => {
+    form.reset();
+    for (const radio of form.querySelectorAll('input[type="radio"]')) radio.checked = false;
+    form.dispatchEvent(new Event('change'));
   });
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
