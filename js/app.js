@@ -13,7 +13,7 @@ import * as store from './store.js';
 import * as calendar from './calendar.js';
 
 // מספר הגרסה של הקוד שרץ בדף. עולה יחד עם CACHE ב-sw.js, לאותו מספר (בעל המוצר, 15/10/2026).
-const APP_VERSION = 296;
+const APP_VERSION = 297;
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -63,7 +63,7 @@ const ANSWER_LABEL = {
 };
 
 // "כן" ו"לא" שייכים לשאלה, ולא לערך: בלעדי זה תשובה על סטיה לשדה משנה הוצגה "כן, הייתי מוצב" (23/09/2024).
-const ANSWER_LABEL_BY_KIND = { assigned: { yes: 'כן, הייתי מוצב', no: 'לא הייתי מוצב' } };
+const ANSWER_LABEL_BY_KIND = { assigned: { yes: 'כן, הייתי מוצב', no: 'לא הייתי מוצב' }, fleet: { B737: '737', B787: '787', MFF: '\u20667877\u00a0(MFF)\u2069' } };
 
 /** ערך תשובה לתצוגה. תאריך שנבחר ביומן מוצג כיום/חודש. */
 const answerLabel = (v, kind = null) => ANSWER_LABEL_BY_KIND[kind]?.[v] ?? ANSWER_LABEL[v] ?? (/^\d{4}-\d{2}-\d{2}$/.test(v) ? ddmm(v) : v);
@@ -337,7 +337,7 @@ function slipText(r) {
 // 08/10/2026: HHM ב-COM של היום, ספטמבר 2026 של רון).
 // 2: מספר העובד בתכנון (בעל המוצר, 08/10/2026). 5: Pay Queries ברומה מדולגת (15/10/2026).
 // 6: העמודה MIL ברומה נקראת, ו-MILUP מדולגת (16/10/2026). 9: MILUP נקראת (21/10/2026).
-const PARSE_VERSION = 10;
+const PARSE_VERSION = 11;
 
 async function reparseStale(record) {
   if (record.parseVersion === PARSE_VERSION) return;
@@ -493,6 +493,7 @@ async function runAndSave() {
     if (!r.exec) r.calendarHistory = appendSnapshot(r.calendarHistory ?? (r.calendar ? [r.calendar] : []), fresh);
     r.calendar = fresh;
   }
+  state.fleetPreset = lastFleetAnswer(r, months);
   state.result = evaluate({ rulesData: rulesFor([r, ...months]), plan: r.plan, exec: r.exec, answers: r.answers ?? {}, history: historyFor(r, months), calendar: r.calendar ?? null,
     reopen: r.calendarIgnored ?? [], calendarHistory: r.calendarHistory ?? null, assumedIgnored: r.assumedIgnored ?? [] });
   // שלב שחזר למצב שלפניו יוצא מהשרשרת, יחד עם התשובה עליו (בעל המוצר, 06/10/2026).
@@ -845,6 +846,15 @@ async function disconnectCalendar() {
  * החודשים של אותו טייס שלפני `record`, מהחדש לישן, לחלונות של מגבלות החוק שמתחילים לפני החודש (168 שעות,
  * 672 שעות, 365 ימים). `months` כבר ממוינים מהחדש לישן.
  */
+/** התשובה האחרונה על הצי בחודש אחר של אותו טייס, לפי החודש המאוחר ביותר (טיוטה 410). */
+function lastFleetAnswer(record, months) {
+  const key = store.monthKey(record.period);
+  return months.filter((m) => store.samePilot(m, record) && store.monthKey(m.period) !== key)
+    .sort((a, b) => store.monthKey(b.period).localeCompare(store.monthKey(a.period)))
+    .map((m) => Object.entries(m.answers ?? {}).find(([id]) => id.startsWith('fleet:'))?.[1]?.value)
+    .find(Boolean) ?? null;
+}
+
 function historyFor(record, months) {
   const key = store.monthKey(record.period);
   return months.filter((m) => store.samePilot(m, record) && store.monthKey(m.period) < key && (m.plan || m.exec)).map((m) => ({ period: m.period, plan: m.plan ?? null, exec: m.exec ?? null }));
@@ -1024,7 +1034,7 @@ function renderHead(res) {
   const r = state.record;
   const emp = r.person ?? store.personOf(r.exec) ?? store.personOf(r.plan) ?? '';
   // פרטי החישוב לא על המסך: בחלון צף במעבר עם העכבר, ובמכשיר בלי עכבר (אייפד) בלחיצה על שם החודש. בהדפסה הם מופיעים.
-  const meta = `${MODE_LABEL[res.mode]} · בסיס ${res.domicile ?? '?'}${res.fleet ? ` · צי ${res.fleet}` : ''} · חוקים ${res.rulesVersion}`;
+  const meta = `${MODE_LABEL[res.mode]} · בסיס ${res.domicile ?? '?'}${res.fleetPending ? ' · צי ?' : res.mff ? ' · צי \u20667877\u00a0(MFF)\u2069' : res.fleet ? ` · צי ${res.fleet}` : ''} · חוקים ${res.rulesVersion}`;
   const hover = matchMedia('(hover: hover)').matches;
   // שם הטייס ליד שם החודש, לפני היומן; "ייצוא PDF" בכרטיס הסיכום, וכאן רק כשאין כזה (בעל המוצר, 08/10/2026).
   return `<div class="card">
@@ -1450,7 +1460,7 @@ function renderNotes(res) {
   </details>`;
 }
 
-const QUESTION_KIND = { cancelled: 'סבב שלא בוצע', unplanned: 'פעילות לא מתוכננת', replaced: 'סבב שהוחלף', assigned: 'מוצב לפעילות', standby_bid: 'טיסה בסוף כוננות', standby_code: 'קוד כוננות',
+const QUESTION_KIND = { fleet: 'הצי', cancelled: 'סבב שלא בוצע', unplanned: 'פעילות לא מתוכננת', replaced: 'סבב שהוחלף', assigned: 'מוצב לפעילות', standby_bid: 'טיסה בסוף כוננות', standby_code: 'קוד כוננות',
   school_start: 'פתיחת שנת הלימודים', free_days: 'ימים ללא פעילות', free_days_first: 'ימים ללא פעילות, X ב-1 לחודש',
   crew: 'הרכב הצוות', night_crew: 'הרכב הצוות', white: 'טיסה לבנה', diversion: 'סטיה לשדה משנה', swap_conflict: 'סבב שהוחלף',
   base_rest: 'מנוחה בבסיס', second_activity: 'פעילות נוספת באותו FDP', occasion: 'תאריך מיוחד', night_rounds: 'טיסות סבב לילה עוקבות',
@@ -1568,7 +1578,11 @@ function bindResults(root) {
   }
   for (const btn of root.querySelectorAll('[data-unanswer]')) btn.addEventListener('click', () => editAnswer(btn.closest('li'), btn.dataset.unanswer, false));
   for (const btn of root.querySelectorAll('[data-unassume]')) btn.addEventListener('click', () => editAnswer(btn.closest('li'), btn.dataset.unassume, true));
-  for (const form of root.querySelectorAll('form[data-qid]')) bindQuestionForm(form);
+  for (const form of root.querySelectorAll('form[data-qid]')) {
+    bindQuestionForm(form);
+    // הצי: התשובה האחרונה מחודש אחר של אותו טייס מסומנת מראש (בעל המוצר, 25/10/2026; טיוטה 410).
+    if (form.dataset.qid.startsWith('fleet:') && state.fleetPreset) preselectAnswer(form, { value: state.fleetPreset });
+  }
 }
 
 /** שאלות שתשובה עליהן נפתחה בשורה שלה, וחלק מהשאלה שאינו בטופס (התווית של האפשרות). */

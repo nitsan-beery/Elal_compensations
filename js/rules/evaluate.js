@@ -109,7 +109,13 @@ function evaluateFiles({ rulesData, plan = null, exec = null, answers = {}, hist
   const codes = ground?.codes ?? rulesData.codes ?? {};
   const domicile = exec?.domicile ?? guessDomicile(plan);
   if (!domicile) warnings.push('לא ניתן לקבוע את בסיס הבית מהקבצים. חוקים שתלויים בבסיס לא ייבדקו.');
-  const fleet = fleetOf(plan) ?? rulesData.crew?.fleet ?? null;
+  // הצי (בעל המוצר, 25/10/2026; טיוטה 410): מרגלי התכנון, מהפרופיל ברומה, ובלעדיהם מהשאלה על החודש (`fleet:`).
+  // עד התשובה – `crew.fleet` מ-rules.json. MFF הוא צי רחב גוף, כמו B787.
+  const fleetId = `fleet:${period.year}-${String(period.month).padStart(2, '0')}`;
+  const fileFleet = fleetOf(plan) ?? execFleet(exec, period);
+  const fleetAnswer = fileFleet ? null : FLEET_ANSWERS[answers[fleetId]?.value] ? answers[fleetId].value : null;
+  const mff = fleetAnswer === 'MFF';
+  const fleet = fileFleet ?? FLEET_ANSWERS[fleetAnswer] ?? rulesData.crew?.fleet ?? null;
   // התפקיד (CP, ‏FO), לתעריף האש"ל: מהרומה, ובלעדיה מהתכנון (בעל המוצר, 18/10/2026).
   const position = exec?.position ?? plan?.position ?? null;
   if (exec?.position && plan?.position && exec.position !== plan.position) {
@@ -144,6 +150,8 @@ function evaluateFiles({ rulesData, plan = null, exec = null, answers = {}, hist
     mode,
     domicile,
     fleet,
+    mff,
+    fleetPending: !fileFleet && !fleetAnswer,
     rulesVersion: rulesData.rules_version,
     rules: {
       supported: supported.map((r) => r.id),
@@ -181,6 +189,14 @@ function evaluateFiles({ rulesData, plan = null, exec = null, answers = {}, hist
   ctx.legalRest = legalRest;
   ctx.duty = duty;
   ctx.tz = tz;
+  if (out.fleetPending) {
+    ctx.ask({
+      id: fleetId,
+      title: 'הצי',
+      body: 'הצי אינו מופיע בקבצים. באיזה צי טסת החודש?',
+      options: [{ value: 'B737', label: '737' }, { value: 'B787', label: '787' }, { value: 'MFF', label: '\u20667877\u00a0(MFF)\u2069' }],
+    });
+  }
   // הרומה של החודש הקודם, אם היא בחודשים השמורים: לקיזוז בגבול החודש (`credit_from_scheduled`; טיוטה 373).
   const prev = history[0];
   ctx.prevExec = prev?.exec && (period.month === 1 ? prev.period.year === period.year - 1 && prev.period.month === 12
@@ -366,7 +382,8 @@ function evaluateFiles({ rulesData, plan = null, exec = null, answers = {}, hist
   // בתכנון לבד, מה שהיומן מראה אחרת מהתכנון: מהריצה מול היומן (`mergeCalendarRun`).
   out.calendarChanges = null;
   // שלבים שחזרו למצב שלפניהם: התשובות עליהם נמחקות מהחודש (בעל המוצר, 06/10/2026).
-  out.obsoleteAnswers = journal?.obsolete ?? [];
+  // תשובה על הצי מחודש שהצי כבר בקבצים שלו (הועלה תכנון): הקבצים קובעים, והתשובה נמחקת.
+  out.obsoleteAnswers = [...(journal?.obsolete ?? []), ...(fileFleet && answers[fleetId] ? [fleetId] : [])];
   out.calendarCrew = [...monthKeys].filter((k) => cal.has(k.slice(0, 10), k.slice(11))).length;
   // טיסות שבוצעו ואין ביומן הרכב הצוות שלהן, כשביומן יש טיסות מהחודש: כנראה שהיומן לא מעודכן.
   // רק טיסות שהרכב הצוות שלהן נדרש לבדיקת מגבלות החוק או הזכאות לפיצוי (`crewMatters`), ולא
@@ -1257,6 +1274,20 @@ function guessDomicile(plan) {
  * הצי לפי סוג המטוס ברגלי התכנון (עמודת A/C), בלי DH. סוגי משנה מאוחדים למשפחה
  * (B738 → B737, ‏B789 → B787). בלי תכנון, או כשאין סוג מטוס, נלקח `crew.fleet` מ-rules.json.
  */
+/** התשובה בשאלה על הצי → הצי בחוקים. */
+const FLEET_ANSWERS = { B737: 'B737', B787: 'B787', MFF: 'B787' };
+
+/**
+ * הצי מהטבלה "Domiciles and Positions" ברומה: השורה שהתאריכים שלה כוללים את החודש (בעל המוצר, 25/10/2026).
+ * הטבלה מופיעה רק כשהרומה הודפסה עם פרופיל איש הצוות פתוח.
+ */
+function execFleet(exec, period) {
+  const first = `${period.year}-${String(period.month).padStart(2, '0')}-01`;
+  const last = `${first.slice(0, 8)}31`;
+  const row = (exec?.positions ?? []).filter((p) => p.from <= last && p.to >= first).sort((a, b) => b.from.localeCompare(a.from))[0];
+  return row ? row.fleet.replace(/^(B7[0-9])[0-9]$/, '$17') : null;
+}
+
 function fleetOf(plan) {
   const count = {};
   for (const d of Object.values(plan?.days ?? {})) {

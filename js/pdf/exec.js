@@ -130,6 +130,12 @@ function parseHeader(pages, warnings) {
     return m ? m[1].trim() : null;
   };
 
+  // "Domiciles and Positions" בפרופיל איש הצוות, רק כשהרומה הודפסה עם הפרופיל פתוח: בסיס, תפקיד, צי
+  // ותאריכים, שורה לכל תקופה (פברואר 2026: "TLV FO B737 01/02/2023 31/12/2099"; בעל המוצר, 25/10/2026).
+  const dmy = (d) => d.split('/').reverse().join('-');
+  const positions = [...text.matchAll(/\b([A-Z]{3}) ([A-Z]{2,3}) ([AB]\d{3}) (\d{2}\/\d{2}\/\d{4}) (\d{2}\/\d{2}\/\d{4})/g)]
+    .map(([, base, category, fleet, from, to]) => ({ base, category, fleet, from: dmy(from), to: dmy(to) }));
+
   // בפורמט ה-iPad נחתכת לפעמים העמודה הימנית (PICK). אין אזהרה כללית: עמודה שחוק צריך נבדקת ב-missingColumns.
   const format = /Upload Document/i.test(text) ? 'ipad' : 'print';
 
@@ -141,6 +147,7 @@ function parseHeader(pages, warnings) {
     status: pick('Status'),
     lineType: pick('Line Type'),
     modified: pick('Modified'),
+    positions,
     format,
   };
 }
