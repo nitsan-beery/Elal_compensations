@@ -899,6 +899,13 @@ function special_call(ctx, params, rule) {
     if (ctx.pairingHandledBy(match.exec, 'swap_conflict_void')) continue;
     const reported = ctx.reportedOn(match.exec, column);
     const answer = ctx.answerFor(match);
+    // סבב שכל הרגליים שלו בחודש המריאו בחודש הקודם (`prevMonth`) הוא הנחיתה של סבב מהחודש הקודם, ואינו בתכנון של
+    // החודש (שם היום מסומן X): לא פעילות לא מתוכננת, ואין עליו שאלה (בעל המוצר, 29/10/2026; טיוטה 418; LY374 מ-OPO
+    // ב-01/10/2026). S/C ברומה או תשובה – כרגיל.
+    if (match.how === 'unplanned' && !answer && !reported && match.exec.legs.every((l) => l.prevMonth)) {
+      ctx.markPairing(match.exec, 'carried_in');
+      continue;
+    }
     // סטיה לשדה משנה היא אותה טיסה, ולא קריאה מיוחדת, גם כשהרומה זיכתה S/C (`explainUnexplained`; בעל המוצר, 06/10/2026).
     if (ctx.pairingHandledBy(match.exec, 'diversion_assumed') || answer?.value === 'diversion') continue;
 

@@ -2470,7 +2470,7 @@ function auditDays(ctx, out, matches, execPairings, timeline) {
   const matchOf = (o) => matches.find((m) => m.exec === o) ?? null;
   const answerOf = (o) => { const m = matchOf(o); return m ? ctx.answerFor(m) : null; };
   // סיבות מפורשות שאין פיצוי על כל ימי הסבב. `special_call` בלי ציפייה ביום פנוי – יממה שנייה מתחת לסף (`countSpecialCallDays`).
-  const quiet = (o) => ['standby_activated', 'diversion_assumed', 'stay_extension', 'swap_conflict_void'].some((t) => ctx.pairingHandledBy(o, t)) ||
+  const quiet = (o) => ['standby_activated', 'diversion_assumed', 'stay_extension', 'swap_conflict_void', 'carried_in'].some((t) => ctx.pairingHandledBy(o, t)) ||
     answerOf(o)?.value === 'other' || ctx.answer(`extended:${o.id}`)?.value === 'agreed';
   const expected = (d, test) => out.expectations.some((e) => (e.date === d || e.dates?.includes(d)) && test(e));
   const asked = (o, d) => { const m = matchOf(o); return out.questions.some((q) => q.date === d || q.id.includes(o.id) || (m?.plan && q.id.includes(m.plan.id))); };
