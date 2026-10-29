@@ -123,6 +123,8 @@ export function pairingTimes(pairing, tz, { away = false } = {}) {
 
 /** רגל שהמריאה לפני חצות בשעון הבסיס ונחתה בחצות או אחריו, לפי הזמנים המתוכננים או בפועל. */
 export function crossesMidnight(leg, tz) {
+  // רגל שיצאה בחודש הקודם (`prevMonth`) כבר חצתה את חצות אל היום שבו היא רשומה.
+  if (leg.prevMonth) return false;
   const t = legTimes(leg, tz);
   if (!t) return false;
   return (t.sta != null && dateOf(t.sta) > dateOf(t.std)) || (t.ata != null && dateOf(t.ata) > dateOf(t.atd));

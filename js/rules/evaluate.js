@@ -124,7 +124,11 @@ function evaluateFiles({ rulesData, plan = null, exec = null, answers = {}, hist
   const cal = calendarFacts(calendar, domicile);
 
   const planPairings = plan ? buildPairings(timeline, domicile, planLegsWithCredit).map(ftOnLastDay) : [];
-  if (exec) markCarryIn(timeline, domicile);
+  // הרומה של החודש הקודם, אם היא בחודשים השמורים: לזיהוי הרגל שיצאה בו ולקיזוז בגבול החודש (טיוטות 373, 417).
+  const prev = history[0];
+  const prevExec = prev?.exec && (period.month === 1 ? prev.period.year === period.year - 1 && prev.period.month === 12
+    : prev.period.year === period.year && prev.period.month === period.month - 1) ? prev.exec : null;
+  if (exec) markCarryIn(timeline, domicile, prevExec);
   // אזורי הזמן של החודש, לזמני הרגליים והסבבים (js/flight-times.js).
   const tz = timeZones(domicile, plan?.stationOffsets ?? null, timeline);
   // חזרה לבסיס אחרי המראה מצטרפת לטיסה שיוצאת אחריה באותו FDP, לפי הגדרת ה-FDP של הסליפ הקצר.
@@ -197,10 +201,7 @@ function evaluateFiles({ rulesData, plan = null, exec = null, answers = {}, hist
       options: [{ value: 'B737', label: '737' }, { value: 'B787', label: '787' }, { value: 'MFF', label: '\u20667877\u00a0(MFF)\u2069' }],
     });
   }
-  // הרומה של החודש הקודם, אם היא בחודשים השמורים: לקיזוז בגבול החודש (`credit_from_scheduled`; טיוטה 373).
-  const prev = history[0];
-  ctx.prevExec = prev?.exec && (period.month === 1 ? prev.period.year === period.year - 1 && prev.period.month === 12
-    : prev.period.year === period.year && prev.period.month === period.month - 1) ? prev.exec : null;
+  ctx.prevExec = prevExec; // לקיזוז בגבול החודש (`credit_from_scheduled`; טיוטה 373)
   // טיסות שהרכב הצוות שלהן משנה את בדיקת מגבלות החוק או את הזכאות לפיצוי, "date|flight": רק עליהן
   // ההודעה על הרכב צוות שחסר ביומן (`calendarMissing`; בעל המוצר, 04/10/2026).
   const crewMatters = new Set();

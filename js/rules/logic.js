@@ -65,6 +65,10 @@ function credit_from_scheduled(ctx, params, rule) {
           : null;
       const note = (msg) => [basis, msg].filter(Boolean).join('. ');
       const split = splitAtMidnight(leg, ctx.tz);
+      if (leg.carryUnknown) {
+        // הרומה אינה מכריעה אם הרגל המריאה ב-1 לחודש או ביום האחרון של החודש הקודם (`markCarryIn`; טיוטה 417).
+        ctx.review(`${dayOf(leg.date)} ${leg.flight}: לא ניתן לדעת מהרומה אם הרגל המריאה ב-${dayOf(leg.date)} או ביום האחרון של החודש הקודם. הקרדיט הצפוי לפי המראה ב-${dayOf(leg.date)}. דורש בדיקה ידנית.`, rule);
+      }
       if (leg.prevMonth) {
         // הרגל רשומה ביום 1 אבל יצאה ביום האחרון של החודש הקודם.
         if (split.error) { error = split.error; break; }

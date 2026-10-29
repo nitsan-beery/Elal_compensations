@@ -5,6 +5,7 @@
 
 import { isoDate, daysInMonth } from './time.js';
 import { legTimes } from './flight-times.js';
+import { stationOffset } from './airports.js';
 
 /** ציר הימים של החודש, עם התכנון והביצוע של כל יום זה לצד זה. */
 export function buildTimeline(period, plan, exec) {
@@ -74,16 +75,69 @@ export function buildPairings(days, domicile, getLegs, fdp = null) {
 }
 
 /**
- * דוח הביצוע חוזר ביום 1 על סבב שיצא בחודש הקודם, כולל הרגל שכבר זוכתה שם
- * (01/06/2026: LY387 יצאה ב-31/05 ומופיעה שוב ב-01/06). הסימן: TAB של 24:00 ביום 1,
- * כלומר מחוץ לבסיס מתחילת החודש, והרגל הראשונה יוצאת מהבסיס. רק הרגל הזאת מסומנת.
+ * דוח הביצוע חוזר ביום 1 על הרגל שהמריאה ביום האחרון של החודש הקודם ונחתה אחרי חצות, ומזכה בה
+ * רק את מה שאחרי חצות (01/06/2026: LY387 יצאה ב-31/05 ומופיעה שוב ב-01/06; 01/10/2026: LY374
+ * מ-OPO יצאה ב-30/09). רק הרגל הראשונה ביום 1 נבדקת, ומסומנת `prevMonth`. הזיהוי, לפי הסדר
+ * (בעל המוצר, 29/10/2026; טיוטה 417):
+ * 1. הרומה של החודש הקודם, כשהיא שמורה (`prevExec`): אותה טיסה, מאותו מוצא לאותו יעד, ביום האחרון שלה.
+ * 2. ה-TAB ביום 1, כשהוא סותר המראה ב-1 לחודש: רגל מהבסיס עם TAB של 24:00 (היית בחוץ כל היום),
+ *    או רגל מחו"ל לבסיס שחוצה חצות עם TAB קטן מ-24:00 (נחתת בבית ב-1 לחודש).
+ * 3. רגל מחו"ל לחו"ל שחוצה חצות (TAB של 24:00 בשני המקרים): הקרדיט ביום 1 ברומה – החלק שאחרי חצות,
+ *    ועוד הרגליים שאחריה באותו יום, או החלק שלפני חצות.
+ * 4. בלי הכרעה – `carryUnknown`, לבדיקה ידנית (`credit_from_scheduled`).
  */
-export function markCarryIn(days, domicile) {
-  const first = days[0]?.exec;
-  const leg = first?.legs?.[0];
-  if (!leg || leg.org !== domicile || (first.values?.TAB?.min ?? 0) < 1440) return;
-  leg.prevMonth = true;
+export function markCarryIn(days, domicile, prevExec = null) {
+  const day = days[0];
+  const exec = day?.exec;
+  const leg = exec?.legs?.[0];
+  const date = day?.date ?? exec?.date;
+  if (!leg || !date?.endsWith('-01')) return;
+  const carried = carriedIn(leg, exec, date, domicile, prevExec);
+  if (carried) leg.prevMonth = true;
+  else if (carried == null) leg.carryUnknown = true;
 }
+
+function carriedIn(leg, exec, date, domicile, prevExec) {
+  const last = prevExec?.days?.[new Date(Date.parse(date) - 86400000).toISOString().slice(0, 10)];
+  if (last) return (last.legs ?? []).some((l) => l.flight === leg.flight && l.org === leg.org && l.dst === leg.dst);
+  const tab = exec.values?.TAB?.min;
+  if (leg.org === domicile) return (tab ?? 0) >= 1440;
+  const split = midnightSplit(leg, date, domicile);
+  if (split === false) return false; // נחתה לפני חצות: המריאה ב-1 לחודש
+  if (leg.dst === domicile && tab != null) return tab < 1440;
+  const credit = exec.values?.Credit?.min;
+  if (!split || credit == null) return null;
+  const others = exec.legs.slice(1).reduce((sum, l) => sum + ((l.org === domicile || l.dst === domicile ? l.skdDur : l.actDur ?? l.skdDur) ?? 0), 0);
+  const near = (a, b) => Math.abs(a - b) <= 1;
+  const after = near(credit, split.after + others);
+  const before = near(credit, split.before);
+  return after === before ? null : after;
+}
+
+/**
+ * החלוקה של הרגל בחצות בשעון הבסיס: `before` מההמראה בפועל (ובלעדיה המתוכננת) עד חצות, ו-`after`
+ * השאר מתוך הקרדיט שלה. false כשאינה חוצה חצות, null כשאי אפשר לדעת.
+ */
+function midnightSplit(leg, date, domicile) {
+  if (leg.std == null || leg.skdDur == null) return null;
+  let depBase;
+  if (leg.dst === domicile) {
+    if (leg.sta == null) return null;
+    depBase = mod(leg.sta - leg.skdDur, 1440);
+  } else {
+    const off = stationOffset(leg.org, date, domicile);
+    if (off == null) return null;
+    depBase = mod(leg.std - off, 1440);
+  }
+  if (depBase + leg.skdDur <= 1440) return false;
+  const dur = leg.dst === domicile ? leg.skdDur : leg.actDur ?? leg.skdDur;
+  const dep = leg.atd != null ? depBase + nearest(leg.atd - leg.std) : depBase;
+  const before = Math.min(dur, Math.max(0, 1440 - dep));
+  return { before, after: dur - before };
+}
+
+const mod = (n, m) => ((n % m) + m) % m;
+const nearest = (n) => mod(n + 720, 1440) - 720;
 
 const isAirReturnOnly = (pairing) => pairing.legs.every((l) => l.org === l.dst);
 

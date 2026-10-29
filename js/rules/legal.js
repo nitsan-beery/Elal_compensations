@@ -77,7 +77,12 @@ export function checkLegalLimits(o) {
     return { result, crewIdOf, fdps };
   }
 
-  const own = o.exec ? execDuties(o.exec, o, plannedCodes(o.plan, o), o.softStart) : planDuties(o.plan, o);
+  // הרומה של החודש שלפני כל חודש, לזיהוי הרגל שיצאה בו (`markCarryIn`; טיוטה 417).
+  const prevExecOf = (p) => {
+    const want = prevMonth(p);
+    return (o.history ?? []).find((m) => m.period.year === want.year && m.period.month === want.month)?.exec ?? null;
+  };
+  const own = o.exec ? execDuties(o.exec, o, plannedCodes(o.plan, o), o.softStart, prevExecOf(period)) : planDuties(o.plan, o);
   // החודשים הקודמים: לפי הרומה, כי המגבלות חלות על מה שבוצע בפועל; בלי רומה – לפי התכנון.
   // רק חודשים רצופים לאחור נחשבים כיסוי.
   let coverStart = monthStart;
@@ -85,7 +90,7 @@ export function checkLegalLimits(o) {
   let expect = prevMonth(period);
   for (const m of o.history ?? []) {
     if (m.period.year !== expect.year || m.period.month !== expect.month) break;
-    const items = m.exec ? execDuties(m.exec, o, plannedCodes(m.plan, o)) : m.plan ? planDuties(m.plan, o) : null;
+    const items = m.exec ? execDuties(m.exec, o, plannedCodes(m.plan, o), null, prevExecOf(m.period)) : m.plan ? planDuties(m.plan, o) : null;
     if (!items) break;
     older.push(...items);
     coverStart = at(isoMonth(m.period), 0);
@@ -187,12 +192,12 @@ function planDuties(plan, o) {
  * מתוכננת שהמריאה באיחור: ה-FDP מתחיל בהתייצבות החדשה (בעל המוצר, 15/10/2026).
  * כוננות שאינה בתכנון ורשומה ביומן (`calendarStandby`) – בשעות שביומן, גם בעיכוב לפני FDP.
  */
-function execDuties(exec, o, planned = null, softStart = null) {
+function execDuties(exec, o, planned = null, softStart = null, prevExec = null) {
   const { limits, domicile, offsetAt, classify } = o;
   const out = [];
   const days = Object.values(exec.days).sort((a, b) => a.date.localeCompare(b.date));
   // ב-1 לחודש הרומה חוזרת על הרגל שיצאה ביום האחרון של החודש הקודם (`prevMonth`), גם בחודשים הקודמים.
-  if (days[0]?.date.endsWith('-01')) markCarryIn(days.map((d) => ({ exec: d })), domicile);
+  if (days[0]?.date.endsWith('-01')) markCarryIn(days.map((d) => ({ exec: d })), domicile, prevExec);
   for (const day of days) {
     const legs = [];
     for (const leg of day.legs ?? []) {
