@@ -2121,6 +2121,73 @@ function short_rest_las_vegas(ctx, params, rule) {
 }
 
 
+// ---------- ניו יורק (2018 ס' 27.3, 58.1, 143.1.1) ----------
+
+const NY_REASONS = [
+  { value: 'voluntary', label: 'החלפה מרצוני' },
+  { value: 'peak_month', label: 'חודש עומס' },
+  { value: 'other', label: 'סיבה אחרת' },
+];
+const NY_NO_PAY = { voluntary: 'החלפה מרצוני – אין פיצוי.', peak_month: 'חודש עומס – הקיצור מותר בלי פיצוי.', other: 'סיבה אחרת – אין פיצוי.' };
+
+/**
+ * קיצור המנוחה בניו יורק: המנוחה במלון היא STD של הרגל שיוצאת מהשדה פחות STA של הרגל שנחתה בו (המתוכננים, גם
+ * מול הרומה), פחות `transfer_minutes` לנסיעות ולקבלת החדר (בעל המוצר, 29/10/2026). מתחת ל-`rest_hours` מגיע פיצוי
+ * (2018 ס' 27.3), אלא בחודש עומס, שבו החברה רשאית לקצר בלי פיצוי (ס' 143.1.1, 143.1.5). חודשי העומס אינם בקבצים:
+ * כשהרומה זיכתה – הנחה; כשלא – שאלה, עם סיבה ליד "לא מגיע פיצוי". רגל DH נספרת גם היא.
+ */
+function short_rest_new_york(ctx, params, rule) {
+  const key = keyFor(params.report_column);
+  const hours = H(params.hours);
+  const own = ctx.rulesWithLogic('short_rest_new_york').map((r) => r.id);
+  for (const p of ctx.hasExec ? ctx.execPairings : ctx.planPairings) {
+    const legs = p.legs;
+    let n = 0;
+    for (let i = 0; i < legs.length - 1; i++) {
+      const [inLeg, outLeg] = [legs[i], legs[i + 1]];
+      if (!params.stations.includes(inLeg.dst) || outLeg.org !== inLeg.dst) continue;
+      const [a, b] = [legTimes(inLeg, ctx.tz), legTimes(outLeg, ctx.tz)];
+      if (a?.sta == null || b?.std == null) continue;
+      const gap = b.std - a.sta;
+      const rest = gap - params.transfer_minutes;
+      if (rest >= H(params.rest_hours)) continue;
+      const days = inLeg.date === outLeg.date ? ddmm(inLeg.date) : `${ddmm(inLeg.date)}–${ddmm(outLeg.date)}`;
+      const where = `⁦${days} ${inLeg.dst}⁩`;
+      const calc = `${minToHhmm(gap)} בין STA ל-STD`;
+      const explain = `פחות מ-${params.rest_hours} שעות מנוחה במלון (${calc}, פחות ${minToHhmm(params.transfer_minutes)} זמן מנהלות = ${minToHhmm(rest)}).`;
+      if (!ctx.hasExec) {
+        ctx.expectPairing(p, key, hours, rule, `${where}: ${explain}`, { explain: `${explain.replace(/\.$/, '')}, אלא אם זה חודש עומס.` });
+        continue;
+      }
+      const id = `new_york_rest:${p.id}${n++ ? `:${n}` : ''}`;
+      const answered = ctx.answer(id);
+      const a2 = answered ?? (ctx.paidOn(p, params.report_column, key, hours, own) ? ctx.assume(id, 'yes', 'מגיע פיצוי') : null);
+      if (!a2) {
+        ctx.ask({
+          id,
+          date: inLeg.date,
+          title: `${rule.title}: האם מגיע פיצוי?`,
+          body: `${where}: פחות מ-${params.rest_hours} שעות מנוחה במלון (${calc}, פחות ${minToHhmm(params.transfer_minutes)} זמן נסיעה והתארגנות במלון = ` +
+            `${minToHhmm(rest)} שעות במלון). הרומה לא מזכה ${minToHhmm(hours)}.`,
+          options: [
+            { value: 'yes', label: 'מגיע פיצוי', hint: `${minToHhmm(hours)}, פער מול הרומה` },
+            { value: 'no', label: 'לא מגיע פיצוי', reasons: NY_REASONS },
+          ],
+          ruleId: rule.id,
+        });
+        continue;
+      }
+      if (a2.value !== 'yes') {
+        ctx.note(inLeg.date, `${where}: ${minToHhmm(rest)} שעות מנוחה במלון. ${NY_NO_PAY[a2.reason] ?? NY_NO_PAY.other}`, rule);
+        continue;
+      }
+      ctx.expectPairing(p, key, hours, rule, `${where}: ${explain}`,
+        { explain: answered ? explain : `${explain} הרומה מזכה את הפיצוי.` });
+    }
+  }
+}
+
+
 // ---------- סימולטור בישראל (2024 ס' 15–18; 2026 ס' 18) ----------
 
 /**
@@ -2266,6 +2333,7 @@ export const DUTY_LOGIC = {
   short_rest_miami,
   miami_delay,
   short_rest_las_vegas,
+  short_rest_new_york,
   sim_night_session,
   sim_extension,
   sim_friday_holiday_eve,
@@ -2289,6 +2357,7 @@ export const DUTY_PARAMS = {
   short_rest_miami: ['station', 'night_from', 'night_to', 'max_nights', 'hours', 'report_column'],
   miami_delay: ['station', 'phase', 'min_delay_hours', 'min_delay_exclusive', 'hours', 'report_column'],
   short_rest_las_vegas: ['station', 'rest_hours', 'hours', 'report_column'],
+  short_rest_new_york: ['stations', 'rest_hours', 'transfer_minutes', 'hours', 'report_column'],
   sim_night_session: ['hours', 'report_column', 'stations', 'night_from', 'night_to', 'start_after_std_minutes'],
   sim_friday_holiday_eve: ['hours', 'report_column', 'stations'],
   sim_extension: ['hours', 'report_column', 'stations', 'max_hours'],

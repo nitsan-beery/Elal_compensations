@@ -2338,6 +2338,7 @@ export const LOGIC_ORDER = [
   'short_rest_miami',
   'miami_delay',
   'short_rest_las_vegas',
+  'short_rest_new_york',
   'free_days_waived',
   'consecutive_saturdays',
   'consecutive_night_rounds',

@@ -13,7 +13,7 @@ import * as store from './store.js';
 import * as calendar from './calendar.js';
 
 // מספר הגרסה של הקוד שרץ בדף. עולה יחד עם CACHE ב-sw.js, לאותו מספר (בעל המוצר, 15/10/2026).
-const APP_VERSION = 299;
+const APP_VERSION = 300;
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -1183,7 +1183,7 @@ function renderQuestion(q, i, edit = null) {
   const options = q.options.map((o) => `
     <label class="option">
       <input type="radio" name="${name}" value="${esc(o.value)}" ${o.needsLink ? 'data-needs-link' : ''} ${o.needsText ? 'data-needs-text' : ''}>
-      <span>${esc(datesFirst(o.label))}${o.count ? ` <select name="count" data-count-for="${esc(o.value)}">${o.count.map((c) => `<option value="${esc(c.value)}">${esc(c.label)}</option>`).join('')}</select>` : ''}${o.hint ? ` <span class="hint-inline">– ${esc(datesFirst(o.hint))}</span>` : ''}</span>
+      <span>${esc(datesFirst(o.label))}${o.count ? ` <select name="count" data-count-for="${esc(o.value)}">${o.count.map((c) => `<option value="${esc(c.value)}">${esc(c.label)}</option>`).join('')}</select>` : ''}${o.reasons ? ` <select name="reason" data-reason-for="${esc(o.value)}"><option value="">סיבה: בחר</option>${o.reasons.map((c) => `<option value="${esc(c.value)}">${esc(c.label)}</option>`).join('')}</select>` : ''}${o.hint ?` <span class="hint-inline">– ${esc(datesFirst(o.hint))}</span>` : ''}</span>
     </label>
     ${o.needsLink ? `<div class="extra" data-for="${esc(o.value)}" hidden>
       <label class="small">עם איזו טיסה הוחלף?
@@ -1652,6 +1652,8 @@ function preselectAnswer(form, a) {
     }
     const count = $(`select[data-count-for="${CSS.escape(a.value)}"]`, form);
     if (count && a.count != null) count.value = String(a.count);
+    const reason = $(`select[data-reason-for="${CSS.escape(a.value)}"]`, form);
+    if (reason && a.reason) reason.value = a.reason;
   }
   form.dispatchEvent(new Event('change'));
 }
@@ -1659,8 +1661,8 @@ function preselectAnswer(form, a) {
 function bindQuestionForm(form) {
   const submit = $('button[type="submit"]', form);
   form.addEventListener('change', (e) => {
-    // בחירת מספר באפשרות שיש בה בחירה כזו בוחרת גם את האפשרות עצמה.
-    const countFor = e.target.dataset?.countFor;
+    // בחירת מספר או סיבה באפשרות שיש בה בחירה כזו בוחרת גם את האפשרות עצמה.
+    const countFor = e.target.dataset?.countFor ?? e.target.dataset?.reasonFor;
     if (countFor) { const radio = $(`input[type="radio"][value="${CSS.escape(countFor)}"]`, form); if (radio) radio.checked = true; }
     const chosen = $('input[type="radio"]:checked', form);
     for (const extra of form.querySelectorAll('.extra')) extra.hidden = extra.dataset.for !== chosen?.value;
@@ -1692,6 +1694,13 @@ function bindQuestionForm(form) {
     }
     const count = chosen && $(`select[data-count-for="${CSS.escape(chosen.value)}"]`, form);
     if (count) answer.count = Number(count.value);
+    // סיבה מתפריט ליד התשובה ("לא מגיע פיצוי – חודש עומס"; בעל המוצר, 29/10/2026; טיוטה 414).
+    const reason = chosen && $(`select[data-reason-for="${CSS.escape(chosen.value)}"]`, form);
+    if (reason) {
+      if (!reason.value) { alert('בחר סיבה.'); return; }
+      answer.reason = reason.value;
+      answer.label = `${answer.label} – ${reason.selectedOptions[0].textContent}`;
+    }
     if (chosen?.hasAttribute('data-needs-text')) {
       const text = $(`.extra[data-for="${CSS.escape(chosen.value)}"] textarea`, form)?.value.trim();
       if (!text) { alert('פרט בבקשה מה קרה.'); return; }
