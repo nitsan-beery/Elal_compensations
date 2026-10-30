@@ -1016,7 +1016,8 @@ function special_call(ctx, params, rule) {
         return ['voluntary_swap', 'replaced', 'bid'].includes(a?.value) && a.link !== match.exec.id;
       };
       const planned = new Set(ctx.planPairings.filter((p) => !ctx.pairingHandledBy(p, 'cancelled_no_compensation') && !movedAway(p)).flatMap(daysOf));
-      if (!because || companyLinked) {
+      // הדרכה שבוטלה (ישן כ"ה ס' 17.ג): על יום ההדרכה ועל ימים פנויים, ולא על יום שתוכננה בו טיסה (טיוטה 452).
+      if (!because || companyLinked || (training && !cancelledPlan)) {
         const replaced = companyLinked ? ctx.planPairings.find((p) => `cancelled:${p.id}` === answer.via) : null;
         const own = new Set([match.plan, replaced].filter(Boolean).flatMap(daysOf));
         days.counted = days.counted.filter((d) => !own.has(d) && (!planned.has(d) || ctx.reportedOnDate(d, column) > 0));
