@@ -113,7 +113,7 @@ export function classifyCode(code, codes, supportedRules) {
   if (isIgnored(code, codes)) return 'ignored';
   // קוד שמופיע בפרמטרים של חוק נתמך נחשב מוכר גם אם אינו ברשימת `relevant`. קידומת מספיקה
   // רק בחוק שקובע כמה מגיע על היום (`credit_hours`): חוק שרק משתמש בקידומת, כמו רצף כוננות
-  // שמזהה כל קוד SBY, אינו יודע מה שווה SBY_FLD, וקוד כזה נשאר לא מוכר ומוצג למשתמש
+  // שמזהה כל קוד SBY, אינו יודע מה שווה קוד SBY בלי חוק זיכוי, וקוד כזה נשאר לא מוכר ומוצג למשתמש
   // (החלטת בעל המוצר, 23/09/2026).
   for (const rule of supportedRules) {
     const p = rule.logic.params || {};

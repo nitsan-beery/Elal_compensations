@@ -2221,7 +2221,7 @@ function standby_end_for_bid(ctx, params, rule) {
           date: pairing.from,
           title: `טיסה ביומיים האחרונים של כוננות: ${describePairing(pairing)}`,
           body: `בתכנון כוננות ב-${range}, והטיסה ${ctx.calendarRun ? 'ביומן' : 'יצאה'} ב-${dayOf(pairing.from)}. ` +
-            (run.at(-1) === monthEnd ? 'הכוננות מגיעה לסוף החודש, וייתכן שהיא נמשכת בחודש הבא. ' : '') +
+            (run.at(-1) === monthEnd && !ctx.nextPlan ? 'הכוננות מגיעה לסוף החודש, וייתכן שהיא נמשכת בחודש הבא. ' : '') +
             (ctx.calendarRun ? '' : 'הרומה לא מזכה קריאה מיוחדת. ') + 'אם הכוננות הופעלה, מגיע רק קרדיט הטיסה. אם החברה אישרה לך לסיים את הכוננות בגלל זכייה במכרז, מגיעה קריאה מיוחדת על ימי הטיסה. מה קרה?',
           // הפעלת הכוננות ראשונה (בעל המוצר, 21/10/2026; טיוטה 390).
           options: [
@@ -2250,14 +2250,22 @@ function standby_end_for_bid(ctx, params, rule) {
   }
 }
 
-/** רצפי כוננות בתכנון: ימים עוקבים עם קוד כוננות (`plan_codes` / `plan_code_prefixes`). */
+/**
+ * רצפי כוננות בתכנון: ימים עוקבים עם קוד כוננות (`plan_codes` / `plan_code_prefixes`). רצף שמגיע לסוף החודש נמשך
+ * בתכנון של החודש הבא, כשהוא שמור, כי היומיים האחרונים נספרים מסוף הרצף (2024 ס' 50; טיוטה 451).
+ */
 function standbyRuns(ctx, params) {
+  const isStandby = (plan) => (plan?.codes ?? []).some((c) => codeIn(c, params.plan_codes, params.plan_code_prefixes));
   const runs = [];
   for (const day of ctx.timeline) {
-    if (!(day.plan?.codes ?? []).some((c) => codeIn(c, params.plan_codes, params.plan_code_prefixes))) continue;
+    if (!isStandby(day.plan)) continue;
     const run = runs.at(-1);
     if (run && run.at(-1) === addDays(day.date, -1)) run.push(day.date);
     else runs.push([day.date]);
+  }
+  const end = runs.at(-1);
+  if (end?.at(-1) === ctx.timeline.at(-1).date) {
+    for (let d = addDays(end.at(-1), 1); isStandby(ctx.nextPlan?.days[d]); d = addDays(d, 1)) end.push(d);
   }
   return runs;
 }
@@ -2267,7 +2275,7 @@ function standbyRuns(ctx, params) {
  * ס' 12.ב: קריאה מיוחדת היא ביממה שבה לא היה משובץ לטיסה או לכוננות), ולא שואלים עליה. היומיים
  * האחרונים של הרצף הם של חוק סיום הכוננות למכרז, ומגיעים לכאן רק אחרי התשובה "הפעלת הכוננות".
  *
- * - הקרדיט על ימי הכוננות שבהם טס: הגבוה מבין קרדיט הטיסה, כולל ההשלמה לסליפ קצר (`minSlipTopUp`), לבין
+ * - הקרדיט על ימי הכוננות שבהם טס: הגבוה מבין קרדיט הרגליים באותם ימים, כולל ההשלמה לסליפ קצר (`minSlipTopUp`), לבין
  *   סכום הערכים של ימי הכוננות האלה, כל יום לפי הקוד שלו (2018 ס' 98.1–98.3, 98.5; `compareStandbyFlown`).
  *   כשהכוננות גבוהה – ההפרש ב-Rig (סבב של יומיים ומעלה; ביום אחד הטיסה תמיד גבוהה; בעל המוצר, 10/10/2026).
  * - החזרה אחרי סוף הכוננות: החברה רשאית להפעיל רק כשהחזרה מתוכננת בתוך הכוננות (2018 ס' 88), ולכן הימים
@@ -2331,8 +2339,9 @@ function standbyDaysFlown(ctx, pairing) {
 }
 
 /**
- * הפעלה מכוננות לסליפ (2018 ס' 98.1–98.3, 98.5): הגבוה מבין קרדיט הסליפ (כולל ההשלמה לסליפ קצר) לבין סכום
- * הערכים של ימי הכוננות שבהם טס (`standbyDaysFlown`). פעם אחת לסבב, בין שהכוננות רשומה ברומה ביום הטיסה
+ * הפעלה מכוננות לסליפ (2018 ס' 98.1–98.3, 98.5): הגבוה מבין קרדיט הרגליים באותם ימים (כולל ההשלמה לסליפ קצר) לבין
+ * סכום הערכים של ימי הכוננות שבהם טס (`standbyDaysFlown`). רגל אחרי סוף הכוננות אינה נכנסת להשוואה, ומזוכה בנוסף
+ * (בעל המוצר, 30/10/2026, טיוטה 451). פעם אחת לסבב, בין שהכוננות רשומה ברומה ביום הטיסה
  * (`absence_day_credit`) ובין שרק בתכנון (`standby_activation`). הכוננות גבוהה – ההפרש ב-Rig (בעל המוצר,
  * 10/10/2026; כל יום לפי הקוד שלו – 15/10/2026; העמודה לא אומתה מול הרומה).
  */
@@ -2341,7 +2350,9 @@ function compareStandbyFlown(ctx, pairing, rule) {
   ctx.markPairing(pairing, 'standby_compared');
   const days = standbyDaysFlown(ctx, pairing);
   if (!days.length) return;
-  const legs = sumLegs(pairing, ctx.domicile);
+  const inside = pairing.legs.filter((l) => days.some((d) => d.date === l.date));
+  const partial = inside.length < pairing.legs.length;
+  const legs = sumLegs({ ...pairing, legs: inside }, ctx.domicile);
   const credit = legs == null ? null : legs + minSlipTopUp(ctx, pairing);
   const n = days.length;
   const what = `${n === 1 ? 'יום הכוננות שבו' : `${n} ימי הכוננות שבהם`} טסת (${days.map((d) => dayOf(d.date)).join(', ')})`;
@@ -2360,14 +2371,14 @@ function compareStandbyFlown(ctx, pairing, rule) {
     ctx.markPairing(pairing, 'standby_rig');
     ctx.expectPairing(pairing, 'rig', value - credit, rule,
       `${describePairing(pairing)}: ${parts} על ${what}, יחד ${minToHhmm(value)}, גבוה מקרדיט הטיסה ${minToHhmm(credit)}`,
-      { explain: `ערך ${n === 1 ? 'יום הכוננות' : `${n} ימי הכוננות`} שבהם טסת גבוה מקרדיט הסבב.` });
+      { explain: `ערך ${n === 1 ? 'יום הכוננות שבו' : `${n} ימי הכוננות שבהם`} טסת גבוה מקרדיט ${partial ? `הרגליים ${n === 1 ? 'באותו יום' : 'באותם ימים'}` : 'הסבב'}.` });
   } else {
     ctx.markPairing(pairing, 'standby_flight_higher');
     // מספר הרגל הראשונה ביום בראש ההערה, כמו בשאר ההערות על יום של טיסה. `aside`: בהערות, ולא מתחת
     // לשינוי, שבו אין סכומים (בעל המוצר, 15/10/2026).
     const day = ctx.timeline.find((d) => d.date === days[0].date);
     const leg = (day?.exec?.legs ?? []).find((l) => l.flight) ?? pairing.legs?.find((l) => l.flight);
-    ctx.note(days[0].date, `${leg ? `${leg.flight} ` : ''}הופעלת מכוננות, וקרדיט הסליפ (${minToHhmm(credit)}) גבוה מערך הכוננות, ולכן אין תוספת.`,
+    ctx.note(days[0].date, `${leg ? `${leg.flight} ` : ''}הופעלת מכוננות, וקרדיט ${partial ? 'הרגליים בימי הכוננות' : 'הסליפ'} (${minToHhmm(credit)}) גבוה מערך הכוננות, ולכן אין תוספת.`,
       rule, { pairingId: pairing.id, aside: true });
   }
 }

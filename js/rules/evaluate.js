@@ -149,6 +149,7 @@ function evaluateFiles({ rulesData, plan = null, exec = null, answers = {}, hist
   const nextOne = next?.period?.year === following.year && next.period.month === following.month ? next : null;
   attachNext(execPairings.at(-1), domicile, nextOne, 'exec');
   attachNext(planPairings.at(-1), domicile, nextOne, 'plan');
+  const nextPlan = nextOne?.plan ?? null;
   const reportDays = exec ? attachReportTails(execPairings, timeline, tz, codes, answers) : [];
   markLandingDays(planPairings, execPairings, timeline, tz);
   const dependentAnswers = {};
@@ -210,6 +211,7 @@ function evaluateFiles({ rulesData, plan = null, exec = null, answers = {}, hist
     });
   }
   ctx.prevExec = prevExec; // לקיזוז בגבול החודש (`credit_from_scheduled`; טיוטה 373)
+  ctx.nextPlan = nextPlan; // לרצף כוננות שמגיע לסוף החודש (`standbyRuns`; טיוטה 451)
   // החודש הקודם, לרצף שחוצה חודש: שבתות וטיסות סבב לילה (טיוטה 431).
   if (prev) {
     const days = buildTimeline(prev.period, prev.plan, prev.exec);
