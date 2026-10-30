@@ -2178,7 +2178,8 @@ function dh_activated(ctx, params, rule) {
       const flown = pairing?.legs.find(same);
       if (!flown || dhTypes.includes(flown.type) || flown.dhd) continue;
       ctx.expectPairing(pairing, params.report_column === 'S/C' ? 'sc' : 'com', H(params.hours), rule,
-        `${rule.title}: ${leg.flight} ${leg.org}→${leg.dst} ב-${dayOf(day.date)} תוכננה כ-DH ובוצעה כאיש צוות פעיל.`);
+        `${rule.title}: ${leg.flight} ${leg.org}→${leg.dst} ב-${dayOf(day.date)} תוכננה כ-DH ובוצעה כאיש צוות פעיל.`,
+        { explain: `${leg.flight} תוכננה כ-DH ובוצעה כאיש צוות פעיל.` });
     }
   }
 }
