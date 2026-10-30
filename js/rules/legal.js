@@ -104,7 +104,13 @@ export function checkLegalLimits(o) {
     return true;
   });
   for (const it of items) setTimes(it, o);
-  items.sort((a, b) => a.start - b.start);
+  // כוננות קצרה שה-FDP מתחיל בתוכה, או באותה דקה שהיא מתחילה: הופעלת ממנה. היא קודמת לו ונגמרת בהתייצבות
+  // (בעל המוצר, 30/10/2026; טיוטה 419; עד אז 07/10/2026 "מנוחה של -06:36 בלבד לפני הכוננות, אחרי LY223").
+  for (const r of items.filter((i) => i.kind === 'rap')) {
+    const f = items.find((i) => (i.kind === 'flight' || i.kind === 'dh') && i.start >= r.start && i.start < r.end);
+    if (f) r.end = r.release = f.start;
+  }
+  items.sort((a, b) => a.start - b.start || (b.kind === 'rap') - (a.kind === 'rap'));
 
   const chains = buildChains(items, H(limits.rest_hours));
   const inMonth = (t) => t >= monthStart && t < monthEnd;

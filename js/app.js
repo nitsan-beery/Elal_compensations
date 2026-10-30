@@ -13,7 +13,7 @@ import * as store from './store.js';
 import * as calendar from './calendar.js';
 
 // מספר הגרסה של הקוד שרץ בדף. עולה יחד עם CACHE ב-sw.js, לאותו מספר (בעל המוצר, 15/10/2026).
-const APP_VERSION = 304;
+const APP_VERSION = 305;
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -337,7 +337,7 @@ function slipText(r) {
 // 08/10/2026: HHM ב-COM של היום, ספטמבר 2026 של רון).
 // 2: מספר העובד בתכנון (בעל המוצר, 08/10/2026). 5: Pay Queries ברומה מדולגת (15/10/2026).
 // 6: העמודה MIL ברומה נקראת, ו-MILUP מדולגת (16/10/2026). 9: MILUP נקראת (21/10/2026).
-const PARSE_VERSION = 11;
+const PARSE_VERSION = 12;
 
 async function reparseStale(record) {
   if (record.parseVersion === PARSE_VERSION) return;

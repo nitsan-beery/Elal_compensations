@@ -212,7 +212,7 @@ function evaluateFiles({ rulesData, plan = null, exec = null, answers = {}, hist
   // (`absence_day_credit`) ולמגבלות החוק (בעל המוצר, 15/10/2026).
   const isRap = (c) => (rulesData.legal_limits?.short_call_reserve_codes ?? []).some((x) => c === x || c === x.slice(0, 5));
   const softStart = exec ? softStartDays({ timeline, execPairings, planPairings, codes, answer: ctx.answer, domicile,
-    snapshots: (calendarHistory?.length ? calendarHistory : calendar ? [calendar] : []).map(withoutKept), isRap }) : new Set();
+    snapshots: (calendarHistory?.length ? calendarHistory : calendar ? [calendar] : []).map(withoutKept), isRap, reportBefore: duty.reportBefore }) : new Set();
   ctx.softStart = (date) => softStart.has(date);
 
   // מגבלות החוק על התכנון (בעל המוצר, 03/10/2026). לפני החוקים, כדי ששאלת הרכב הצוות שלהן
@@ -414,7 +414,9 @@ function evaluateFiles({ rulesData, plan = null, exec = null, answers = {}, hist
  *    ברומה אותו דבר, והסכום זהה – ולכן הוא הפעלה מכוננות.
  * אין תנאי על האיחור: גם המראה בזמן היא Soft Start. מחזירה את התאריכים.
  */
-function softStartDays({ timeline, execPairings, planPairings, codes, answer, domicile, snapshots, isRap }) {
+const SOFT_START_ROW_MINUTES = 15;
+
+function softStartDays({ timeline, execPairings, planPairings, codes, answer, domicile, snapshots, isRap, reportBefore }) {
   const out = new Set();
   const on = (iso, date) => baseTime(iso, domicile)?.date === date;
   const journalFirst = (date, flight) => {
@@ -430,13 +432,19 @@ function softStartDays({ timeline, execPairings, planPairings, codes, answer, do
       const a = answer(`cancelled:${p.id}`);
       return ['bid', 'voluntary_swap'].includes(a?.value) && a.link === pairing.id;
     });
+  // שורת הכוננות ברומה מתחילה בדיוק בהתייצבות המקורית לטיסה ונמשכת דקות ספורות: הכוננות הוצבה בגלל דחיית
+  // ההמראה (בעל המוצר, 30/10/2026; טיוטה 419; 07/10/2026: ‏SBY_S ‏05:00–05:01 ו-LY223 ב-06:00; כוננות רגילה רשומה
+  // בשעות שלה, 22/06/2026: ‏01:50–09:00).
+  const atReport = (day, leg) => leg.org === domicile && leg.std != null && (day.exec.standby ?? []).some((s) =>
+    isRap(s.type ?? '') && s.std != null && s.sta != null && (s.sta - s.std + 1440) % 1440 <= SOFT_START_ROW_MINUTES &&
+    s.std === (leg.std - reportBefore({ ...leg, date: day.date }) + 1440) % 1440);
   for (const day of timeline) {
     const leg = day.exec?.legs?.[0];
     if (leg?.type !== 'LEG' || !leg.flight || !execCodesOf(day, codes).some(isRap)) continue;
     if ((day.plan?.codes ?? []).some((c) => c.startsWith('SBY'))) continue;
     const first = journalFirst(day.date, leg.flight);
     const pairing = execPairings.find((p) => p.dates.includes(day.date));
-    if (first ? first === 'flight' : (day.plan?.legs ?? []).some((l) => !l.dh && l.flight === leg.flight) || (pairing && own(pairing))) {
+    if (first ? first === 'flight' : (day.plan?.legs ?? []).some((l) => !l.dh && l.flight === leg.flight) || (pairing && own(pairing)) || atReport(day, leg)) {
       out.add(day.date);
     }
   }

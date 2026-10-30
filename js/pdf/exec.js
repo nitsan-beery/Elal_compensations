@@ -72,7 +72,7 @@ export async function parseExec(data) {
       const dayNo = readDayNumber(row, dayCols);
       if (dayNo != null) {
         const date = isoDate(header.period.year, header.period.month, dayNo);
-        current = days[date] = { date, day: dayNo, src: null, details: null, values: {}, legs: [], sims: [] };
+        current = days[date] = { date, day: dayNo, src: null, details: null, values: {}, legs: [], sims: [], standby: [] };
         fillDayRow(current, row, dayCols);
         legCols = null;
         continue;
@@ -81,6 +81,8 @@ export async function parseExec(data) {
       if (legCols && current && isLegRow(row, legCols)) { current.legs.push(readLegRow(row, legCols)); continue; }
       // שורת SIM: אימון בסימולטור, עם התחנה ו-STD/STA בשעון מקומי (שעות האימון בפועל).
       if (legCols && current && isSimRow(row, legCols)) { current.sims.push(readLegRow(row, legCols)); continue; }
+      // שורת כוננות (SBY…), עם STD ו-STA: לזיהוי Soft Start (`softStartDays` ב-js/rules/evaluate.js; טיוטה 419).
+      if (legCols && current && isStandbyRow(row, legCols)) { current.standby.push({ ...readLegRow(row, legCols), flight: null }); continue; }
 
       const totals = readTotalsRow(row, dayCols);
       if (totals) totalsRows.push(totals);
@@ -248,6 +250,11 @@ const isLegRow = (row, cols) => {
 const isSimRow = (row, cols) => {
   const first = row[0];
   return first.s === 'SIM' && Math.abs(centerX(first) - (cols.Details ?? centerX(first))) <= MAX_SNAP * 2;
+};
+
+const isStandbyRow = (row, cols) => {
+  const first = row[0];
+  return /^SBY/.test(first.s) && Math.abs(centerX(first) - (cols.Details ?? centerX(first))) <= MAX_SNAP * 2;
 };
 
 function readLegRow(row, cols) {
