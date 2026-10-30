@@ -1179,8 +1179,9 @@ function extendedPairing(ctx, params, rule, match, answer) {
     ext.second.every((d) => ctx.paidOnDate(d, second.report_column ?? 'COM', keyFor(second.report_column ?? 'COM'), H(second.hours)));
   // סבב שהוחלף באותם ימים בשינוי ביוזמת החברה או בזכייה במכרז: התשובה עליו כבר אומרת שהימים הנוספים
   // אינם בהסכמה, ועל יום שלא תוכנן בו כלום מגיעה קריאה מיוחדת, כמו ב-`companySwapToFreeDay` (בעל המוצר,
-  // 08/10/2026; רון, ספטמבר 2026: WAW ב-10/09 שהוחלף ב-BCN ‏09–11/09).
-  const swapped = match.how === 'dates' && ['replaced', 'bid'].includes(answer?.value);
+  // 08/10/2026; רון, ספטמבר 2026: WAW ב-10/09 שהוחלף ב-BCN ‏09–11/09). כך גם בהורדה עקב חניך: ס' 46 עוסק בקרדיט,
+  // ואינו שולל קריאה מיוחדת (בעל המוצר, 30/10/2026, טיוטה 442).
+  const swapped = match.how === 'dates' && ['replaced', 'bid', 'trainee'].includes(answer?.value);
   const a = ctx.answer(id) ?? (swapped ? { value: 'company' } : paid ? ctx.assume(id, 'company', 'הסבב הוארך ביוזמת החברה') : null);
   const list = ext.days.map(dayOf).join(', ');
   if (!a) {
@@ -1485,7 +1486,7 @@ function lost_hours_credit(ctx, params, rule) {
     const key = params.credit_column === 'Rig' ? 'rig' : 'credit';
     const why = assumed
       ? `הרומה מזכה את השעות שהפסיד, והסיבה אינה בקבצים (${assumed.labels})`
-      : params.answer_label;
+      : match.exec ? params.answer_label_with_flight ?? params.answer_label : params.answer_label;
     const note = `${describePairing(removed)}: ${why}. השעות שהפסיד` +
       (match.exec ? `, בנוסף לקרדיט של ${describePairing(match.exec)}.` : '.');
     // ההסבר בשורת הפירוט קצר (בעל המוצר, 01/10/2026). כשהרומה זיכתה בלי שנשאלה שאלה: "…האפליקציה מניחה:"
@@ -1555,15 +1556,17 @@ function lostHours(ctx, planPairing, params) {
 /**
  * תשובות "השעות שהפסיד" לפי החוקים שבתוקף בחודש (מטוס חכור, הורדה בגלל חניך). הרמז מנוסח
  * על הטיסה המקורית, ו-`extra` מוסיף את הקרדיט על הטיסה שבוצעה כשיש כזאת (בקשת בעל המוצר,
- * 23/09/2026).
+ * 23/09/2026). כשיש טיסה כזאת, רק ס' 46 נותן קרדיט על שתיהן: `answer_label_with_flight` הוא הנוסח
+ * אז, ו-`only_without_flight` – תשובה שאז אינה מוצעת (בעל המוצר, 30/10/2026, טיוטה 442).
  */
 function lostHoursOptions(ctx, planPairing, extra) {
-  return ctx.rulesWithLogic('lost_hours_credit').filter((r) => lostHoursApplies(ctx, planPairing, r.logic.params ?? {})).map((r) => {
+  const offered = (p) => lostHoursApplies(ctx, planPairing, p) && !(extra && p.only_without_flight);
+  return ctx.rulesWithLogic('lost_hours_credit').filter((r) => offered(r.logic.params ?? {})).map((r) => {
     const p = r.logic.params ?? {};
     const lost = lostHours(ctx, planPairing, p);
     const word = amountWord(p.credit_column ?? 'Credit');
     const amount = lost == null ? `מגיע ${word}` : `מגיע ${word} של ${minToHhmm(lost)}`;
-    return { value: p.answer_value, label: p.answer_label, hint: extra ? `${amount} על הטיסה המקורית ${extra}` : amount };
+    return { value: p.answer_value, label: (extra && p.answer_label_with_flight) || p.answer_label, hint: extra ? `${amount} על הטיסה המקורית ${extra}` : amount };
   });
 }
 
@@ -2437,7 +2440,7 @@ export const KNOWN_PARAMS = {
   examiner_training_boost: ['dd_codes', 'slip_threshold', 'hours', 'report_column'],
   special_call: ['hours', 'report_column', 'second_day_min_gap_hours', 'second_day_min_hours', 'ask_user_if_no_sc'],
   higher_of_planned_performed: ['requires_user_answer', 'excluded_when_special_call', 'excluded_when_voluntary_swap', 'shortfall_column'],
-  lost_hours_credit: ['requires_user_answer', 'credit_column', 'include_min_slip_credit', 'answer_value', 'answer_label', 'merged_answer_values', 'fleets', 'plan_aircraft'],
+  lost_hours_credit: ['requires_user_answer', 'credit_column', 'include_min_slip_credit', 'answer_value', 'answer_label', 'answer_label_with_flight', 'only_without_flight', 'merged_answer_values', 'fleets', 'plan_aircraft'],
   voluntary_swap: ['requires_user_answer'],
   cancelled_no_compensation: ['requires_user_answer'],
   vacation_recall: ['plan_codes', 'plan_code_prefixes', 'report_codes', 'report_code_prefixes', 'hours', 'report_column', 'exclude_codes'],
