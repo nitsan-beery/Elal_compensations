@@ -1020,8 +1020,8 @@ function makeContext({ out, timeline, domicile, codes, holidays, answers, plan, 
     codeNames: (list) => codeNames(list, codes),
 
     /** קודי פעילות ביום (קרקע, סימולטור, כוננות), בלי היעדרות, הערות ו-DUM. לפי הדוח כשיש. */
-    activityCodes(day) {
-      const list = exec ? execCodesOf(day, codes) : (day.plan?.codes ?? []);
+    activityCodes(day, fromPlan = false) {
+      const list = exec && !fromPlan ? execCodesOf(day, codes) : (day.plan?.codes ?? []);
       return list.filter((c) => !isLeaveCode(c, leave, codes) && !isIgnoredPlanCode(c, codes) &&
         (activityCodes.has(c) || activityCodes.has(expandCode(c, codes))));
     },

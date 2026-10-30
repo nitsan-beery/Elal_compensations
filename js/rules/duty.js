@@ -998,6 +998,8 @@ function night_landings(ctx, params, rule) {
  * `bid` – זכייה במכרז: אינה "ביוזמת החברה" (ס' 40), ולכן אינה נספרת, אלא אם הטיסה שזכה בה
  * מאותו סוג (נחיתת לילה, שבת). את זה בודק החוק עצמו, לפי הטיסה שבקישור (`bidTarget`).
  */
+const COMPANY_CANCEL = ['cancelled', 'wet_lease', 'trainee', 'swap_777', 'replaced', 'diversion'];
+
 function cancelStatus(ctx, planPairing) {
   const m = ctx.matches.find((x) => x.plan === planPairing);
   if (!m) return 'unknown';
@@ -1021,7 +1023,7 @@ function cancelStatus(ctx, planPairing) {
   const a = ctx.answerFor(m)?.value;
   if (a === 'voluntary_swap') return 'no';
   if (a === 'bid') return 'bid';
-  if (['cancelled', 'wet_lease', 'trainee', 'swap_777', 'replaced', 'diversion'].includes(a)) return 'company';
+  if (COMPANY_CANCEL.includes(a)) return 'company';
   if (a === 'other') return 'review';
   return 'unknown';
 }
@@ -1344,62 +1346,63 @@ function free_days_waived(ctx, params, rule) {
  * פעילות = סבב שחופף לחלון: טיסה בתוך החלון, או יציאה לפניו וחזרה לארץ אחריו (טיסה חוצת
  * שבת). גם פעילות קרקע בשבת נספרת, חוץ מלימוד עצמי בבית (`ground_excluded_prefixes`: HOME) ומכוננות
  * (בעל המוצר, 10/10/2026; לא אמורה להיות כזו). סימולטור עם שעות ברומה – כשהוא חופף לחלון (מוצ"ש אינו
- * נספר); פעילות קרקע בלי שעות – כל יום השבת. לפי הביצוע כשיש; סבב מתוכנן שבוטל ביוזמת החברה נחשב
- * ביצוע (ס' 40). רק לבקשת החברה: כשהרומה לא זיכתה, ובתכנון לבד תמיד, שואלים (`saturdays:`; בעל המוצר,
+ * נספר); פעילות קרקע בלי שעות – כל יום השבת. "יתוכנן ויבצע": שבת נספרת רק כשתוכננה בה פעילות, ובוצעה בה
+ * פעילות או שהסבב בוטל ביוזמת החברה (ס' 34, 40; בעל המוצר, 30/10/2026, טיוטה 434). רק לבקשת החברה: כשהרומה לא זיכתה, ובתכנון לבד תמיד, שואלים (`saturdays:`; בעל המוצר,
  * 16/10/2026; עד אז ההסכמה לא נבדקה). שלוש שבתות ברצף הן שני זוגות. זוג שחוצה חודש נבדק בחודש של השבת
  * השנייה, מול הרומה של החודש הקודם, ובלעדיה התכנון שלו (`ctx.prevMonth`; בעל המוצר, 30/10/2026, טיוטה 431).
  */
 function consecutive_saturdays(ctx, params, rule) {
+  if (!ctx.hasPlan) return;
   const key = keyFor(params.report_column);
   const prior = ctx.prevMonth;
-  const priorSpans = !prior ? [] : prior.hasExec
-    ? spansOf(ctx, prior.execPairings, (p) => pairingTimes(p, ctx.tz, { away: true }))
-    : spansOf(ctx, prior.planPairings, (p) => pairingTimes(p, ctx.tz));
-  const planSpans = ctx.hasPlan ? spansOf(ctx, ctx.planPairings, (p) => pairingTimes(p, ctx.tz)) : [];
+  const priorPlan = prior ? spansOf(ctx, prior.planPairings, (p) => pairingTimes(p, ctx.tz)) : [];
+  const priorExec = prior?.hasExec ? spansOf(ctx, prior.execPairings, (p) => pairingTimes(p, ctx.tz, { away: true })) : [];
+  const planSpans = spansOf(ctx, ctx.planPairings, (p) => pairingTimes(p, ctx.tz));
   const execSpans = ctx.hasExec ? spansOf(ctx, ctx.execPairings, (p) => pairingTimes(p, ctx.tz, { away: true })) : [];
   const inShabbat = (sp, date) =>
     sp.start < at(date, parseClock(params.shabbat_to)) && sp.end > at(addDays(date, -1), parseClock(params.shabbat_from));
   const excluded = params.ground_excluded_prefixes ?? [];
   // פעילות קרקע בחלון השבת (בעל המוצר, 10/10/2026): סימולטור עם שעות ברומה לפי השעות, ושאר הקודים לפי יום השבת.
-  const groundIn = (date) => {
+  const groundIn = (date, performed) => {
     const found = [];
     for (const d of [addDays(date, -1), date]) {
       const day = [...(prior?.timeline ?? []), ...ctx.timeline].find((x) => x.date === d);
       if (!day) continue;
-      const timed = ctx.hasExec ? (day.exec?.sims ?? []).filter((s) => s.std != null && s.sta != null) : [];
+      const timed = performed ? (day.exec?.sims ?? []).filter((s) => s.std != null && s.sta != null) : [];
       for (const s of timed) {
         const start = at(d, s.std);
         if (inShabbat({ start, end: start + mod(s.sta - s.std, 1440) }, date)) found.push(`SIM ${minToHhmm(s.std)} ב-${ddmm(d)}`);
       }
       if (d !== date) continue;
-      const codes = ctx.activityCodes(day).filter((c) => !c.startsWith('SBY') && !excluded.some((p) => c.startsWith(p)) &&
+      const codes = ctx.activityCodes(day, !performed).filter((c) => !c.startsWith('SBY') && !excluded.some((p) => c.startsWith(p)) &&
         !(timed.length && c.startsWith('SIM')));
       found.push(...codes.map((c) => `${c} ב-${ddmm(d)}`));
     }
     return found.length ? [...new Set(found)] : null;
   };
   // סבב מהחודש הקודם בשבת של החודש הזה (חלון השבת מתחיל ביום האחרון שלו): הפיצוי לפי התאריך, ולא על הסבב.
-  const hit = (date, spans) => {
+  const hit = (date, spans, before) => {
+    const earlier = date < ctx.monthFirst;
     // סבב שחזר בחודש הזה נמצא גם ב-`spans`, ועד סופו (end אינסופי בחודש הקודם).
-    const before = date < ctx.monthFirst ? priorSpans : priorSpans.filter((s) => s.end !== Infinity);
-    const sp = [...before, ...spans].find((s) => inShabbat(s, date));
+    const pool = earlier ? before : [...before.filter((s) => s.end !== Infinity), ...spans];
+    const sp = pool.find((s) => inShabbat(s, date));
     if (!sp) return null;
-    const own = spans.includes(sp) || date < ctx.monthFirst;
-    return own ? { pairing: sp.p } : { date, ground: [] };
+    return earlier || spans.includes(sp) ? { pairing: sp.p } : { date, ground: [] };
   };
+  // ביטול ביוזמת החברה (ס' 40): בחודש הזה לפי השאלה על הסבב, ובחודש הקודם לפי התשובה שם.
+  const cancelledByCompany = (p, earlier) => (earlier
+    ? COMPANY_CANCEL.includes(prior.answers?.[`cancelled:${p.id}`]?.value) : cancelStatus(ctx, p) === 'company');
   const active = (date) => {
-    if (!ctx.hasExec) {
-      const sp = hit(date, planSpans);
-      if (sp) return sp;
-      const g = groundIn(date);
-      return g ? { date, ground: g } : null;
-    }
-    const sp = hit(date, execSpans);
-    if (sp) return sp;
-    const g = groundIn(date);
+    const earlier = date < ctx.monthFirst;
+    const planned = hit(date, planSpans, priorPlan);
+    const ground = planned ? null : groundIn(date, false);
+    if (!planned && !ground) return null;
+    if (!ctx.hasExec || (earlier && !prior.hasExec)) return planned ?? { date, ground };
+    const flown = hit(date, execSpans, priorExec);
+    if (flown) return flown;
+    const g = groundIn(date, true);
     if (g) return { date, ground: g };
-    const cancelled = planSpans.find((s) => inShabbat(s, date) && cancelStatus(ctx, s.p) === 'company');
-    return cancelled ? { date, cancelled: cancelled.p } : null;
+    return planned?.pairing && cancelledByCompany(planned.pairing, earlier) ? { date, cancelled: planned.pairing } : null;
   };
 
   const saturdays = ctx.timeline.filter((d) => new Date(d.date).getUTCDay() === 6).map((d) => d.date);
