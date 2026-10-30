@@ -14,6 +14,11 @@ const base = process.env.ELAL_SAMPLES ?? path.join(os.homedir(), 'OneDrive/Code_
 const lockFile = path.join(path.dirname(base), 'locked-months.json');
 const rulesData = JSON.parse(fs.readFileSync(new URL('../rules.json', import.meta.url), 'utf8'));
 const clean = (s) => String(s ?? '').replace(/[⁦-⁩‏]/g, '');
+// התשובות השמורות באפליקציה: מהגיבוי האחרון, כי קובצי התשובות בתיקיית הדוגמאות חלקיים.
+const backupDir = path.join(path.dirname(base), 'גיבוי חודשים שמורים');
+const newest = fs.existsSync(backupDir) ? fs.readdirSync(backupDir).filter((f) => f.endsWith('.json')).sort().at(-1) : null;
+const saved = new Map((newest ? JSON.parse(fs.readFileSync(path.join(backupDir, newest), 'utf8')).months : [])
+  .map((m) => [`${m.period.year}-${String(m.period.month).padStart(2, '0')}`, m.answers ?? {}]));
 const prevKey = (k) => { let [y, m] = k.split('-').map(Number); if (--m === 0) { m = 12; y--; } return `${y}-${String(m).padStart(2, '0')}`; };
 
 const load = async (dir, planFile, execFile, answersFile) => ({
@@ -38,7 +43,10 @@ async function current() {
   const files = fs.readdirSync(base);
   const months = files.filter((f) => /^duty-plan-\d{4}-\d{2}\.pdf$/.test(f)).map((f) => f.slice(10, 17)).sort();
   const data = new Map();
-  for (const k of months) data.set(k, await load(base, `duty-plan-${k}.pdf`, files.find((f) => f.startsWith(`crewpay-${k}`)), `answers-${k}.json`));
+  for (const k of months) {
+    const m = await load(base, `duty-plan-${k}.pdf`, files.find((f) => f.startsWith(`crewpay-${k}`)), `answers-${k}.json`);
+    data.set(k, { ...m, answers: { ...m.answers, ...saved.get(k) } });
+  }
   for (const k of months) {
     const m = data.get(k);
     const p = data.get(prevKey(k));
