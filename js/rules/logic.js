@@ -951,8 +951,8 @@ function special_call(ctx, params, rule) {
     if (ctx.pairingHandledBy(match.exec, 'swap_conflict_void')) continue;
     const reported = ctx.reportedOn(match.exec, column);
     const answer = ctx.answerFor(match);
-    // הנחיתה של סבב מהחודש הקודם (`carried_in`): רק הקרדיט שלה (בעל המוצר, 30/10/2026; טיוטה 420).
-    if (match.how === 'carried_in') continue;
+    // הנחיתה של סבב מהחודש הקודם (`carried_in`): קרדיט, ורק היממה האחרונה של קריאה מיוחדת (טיוטות 420, 428).
+    if (match.how === 'carried_in') { carriedInCall(ctx, match.exec, params, rule, column); continue; }
     // סטיה לשדה משנה היא אותה טיסה, ולא קריאה מיוחדת, גם כשהרומה זיכתה S/C (`explainUnexplained`; בעל המוצר, 06/10/2026).
     if (ctx.pairingHandledBy(match.exec, 'diversion_assumed') || answer?.value === 'diversion') continue;
 
@@ -975,19 +975,26 @@ function special_call(ctx, params, rule) {
     const callId = `unplanned:${match.exec.id}`;
     const assumedCall = match.how === 'unplanned' && !answer && !because;
     if ((reported > 0 && !consented && !(assumedCall && ctx.assumeIgnored(callId))) || because) {
-      const stay = awayFromBase(match.exec, ctx.tz, ctx.timeline.at(-1).date);
+      const whole = wholePairing(match.exec, ctx.domicile);
+      const stay = awayFromBase(whole, ctx.tz, ctx.timeline.at(-1).date);
       if (stay.error) {
         ctx.markPairing(match.exec, 'special_call');
         ctx.review(`${describePairing(match.exec)}: ${stay.error} לא ניתן לספור יממות לקריאה המיוחדת. דורש בדיקה ידנית.`, rule);
         continue;
       }
-      const days = countSpecialCallDays(stay, params, match.exec, ctx.fdp);
+      const days = countSpecialCallDays(stay, params, whole, ctx.fdp);
+      // רק יממות החודש הזה: השאר ברומה של החודש השכן (טיוטה 428).
+      days.counted = days.counted.filter((d) => ctx.timeline.some((x) => x.date === d));
       // יום חופשה שנקראת ממנו (`vacation_recall`): הפיצוי עליו הוא על ביטול החופשה, ולא קריאה מיוחדת – גם מעל הסף
       // של היממה השנייה – ואין עליו הערה שאין קריאה מיוחדת (בעל המוצר, 21/10/2026, טיוטה 387; טל: ZRH נחתה ב-02/09).
       const recalled = (d) => ctx.pairingHandledBy(match.exec, `vacation_recall:${d}`);
       days.counted = days.counted.filter((d) => !recalled(d));
       if (days.skipped && recalled(days.skipped.date)) delete days.skipped;
-      if (!days.counted.length) continue;
+      if (!days.counted.length) {
+        // סבב שיצא בחודש הקודם: היממה היחידה בחודש לא עמדה בסף, והרומה רשמה עליה S/C (טיוטה 428).
+        if (days.skipped && ctx.reportedOnDate(days.skipped.date, column) > 0) ctx.note(days.skipped.date, `${flightsOf(match.exec)}: ${days.skipped.why}`, rule, { aside: true });
+        continue;
+      }
       // S/C ברומה שייך ליום שבו נרשם, ולא לסבב כולו (בעל המוצר, 08/10/2026): כשרק הוא הסיבה לקריאה המיוחדת,
       // יממה שתוכנן בה סבב (שלא בוטל ללא קרדיט) נספרת רק כשהרומה רשמה S/C עליה. בלי יממה כזאת – אין קריאה
       // מיוחדת, וה-S/C מוצג כפיצוי שאף חוק אינו מסביר (FRA ‏10–12/03/2026: S/C רק על 12/03).
@@ -1016,7 +1023,7 @@ function special_call(ctx, params, rule) {
       // סבב שיצא בחודש הקודם: קריאה מיוחדת רק על יממה שלא תוכנן בה סבב, כמו ברומה (28/02–08/03/2026, BUD:
       // S/C על 01, 06 ו-07/03, ולא על GVA ‏02–03, ‏FCO ‏04–05 ו-VCE ‏08; בעל המוצר, 08/10/2026). יום הנחיתה
       // של סבב מתוכנן שנוחת אחרי חצות (`shownTo`) הוא מימיו.
-      if (stay.cutAtStart) {
+      if (match.exec.cutAtStart) {
         const planned = new Set(ctx.planPairings.flatMap((p) => p.shownTo ? [...p.dates, p.shownTo] : p.dates));
         days.counted = days.counted.filter((d) => !planned.has(d));
       }
@@ -1227,6 +1234,44 @@ function awayFromBase(pairing, tz, monthEnd) {
   if (!home) return { first, start, end: (daysBetween(first, monthEnd) + 1) * 1440, cutAtEnd: true };
   if (span.end == null) return { error: 'חסרים שעת נחיתה בבסיס או משך הטיסה.' };
   return { first, start, end: span.end - at(first, 0) };
+}
+
+/**
+ * הסבב כולו, כולל מה שטס בחודש הקודם (`prevLegs`, והרגל שהרומה חוזרת עליה ב-1 לחודש), כשיש בו את היציאה
+ * מהבסיס. בלעדיה – הסבב כמו שהוא, מתחילת החודש (בעל המוצר, 30/10/2026, טיוטה 428).
+ */
+function wholePairing(pairing, domicile) {
+  if (!pairing.cutAtStart) return pairing;
+  const legs = [...(pairing.prevLegs ?? []), ...pairing.legs];
+  if (legs[0].org !== domicile) return pairing;
+  return { ...pairing, legs, cutAtStart: false, from: legs[0].prevMonth ? addDays(legs[0].date, -1) : legs[0].date };
+}
+
+/**
+ * הנחיתה של סבב מהחודש הקודם (`carried_in`): היממה האחרונה של קריאה מיוחדת שחוצה חודש נבדקת כאן, על השהייה כולה
+ * (ישן כ"ה ס' 12.יא; בעל המוצר, 30/10/2026, טיוטה 428). הסבב היה קריאה מיוחדת אם הרומה הקודמת רשמה S/C בימיו.
+ * בלעדיה אי אפשר לבדוק את הסף, וה-S/C ב-1 לחודש הוא ההכרעה. קריאה מיוחדת רק על יממה שלא תוכננה בה פעילות.
+ */
+function carriedInCall(ctx, pairing, params, rule, column) {
+  const date = pairing.legs.at(-1).date;
+  if (ctx.pairingHandledBy(pairing, `vacation_recall:${date}`)) return;
+  if (ctx.planPairings.some((p) => (p.shownTo ? [...p.dates, p.shownTo] : p.dates).includes(date))) return;
+  const paid = ctx.reportedOnDate(date, column) > 0;
+  const expect = (explain) => {
+    ctx.markPairing(pairing, 'special_call');
+    ctx.expectPairing(pairing, 'sc', H(params.hours), rule, `${flightsOf(pairing)}: יממה ${dayOf(date)}.`, { date, dates: [date], perDay: true, explain });
+  };
+  if (pairing.carriedSource !== 'exec') {
+    if (paid) expect('הרומה מזכה את הפיצוי. האפליקציה מניחה קריאה מיוחדת על היממה האחרונה של סבב מהחודש הקודם.');
+    return;
+  }
+  if (!paidEarlier(ctx, pairing, column, 1)) return;
+  const whole = wholePairing(pairing, ctx.domicile);
+  const stay = awayFromBase(whole, ctx.tz, ctx.timeline.at(-1).date);
+  if (stay.error) return;
+  const days = countSpecialCallDays(stay, params, whole, ctx.fdp);
+  if (days.counted.includes(date)) expect(days.lastWhy ?? '');
+  else if (paid && days.skipped) ctx.note(date, `${flightsOf(pairing)}: ${days.skipped.why}`, rule, { aside: true });
 }
 
 /**
