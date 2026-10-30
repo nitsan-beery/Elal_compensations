@@ -295,7 +295,7 @@ function second_unplanned_activity(ctx, params, rule) {
     const ext = extensionDays(ctx, m);
     if (!ext?.second.length) continue;
     const reason = `extended:${m.exec.id}`;
-    if (ctx.isAsked(reason) || ctx.answer(reason)?.value === 'agreed') continue;
+    if (ctx.isAsked(reason) || ['agreed', 'force_majeure'].includes(ctx.answer(reason)?.value)) continue;
     const span = ctx.duty.span(m.exec, { away: true });
     for (const d of ext.second) {
       const what = `${describePairing(m.exec)} התארך ל-${ddmm(d)}`;
@@ -1836,68 +1836,43 @@ function legal_crew_composition(ctx, params, rule) {
 // ---------- הארכת שהייה (ישן כ"ה ס' 10.א(5), 10.ב) ----------
 
 /**
- * סבב שחזר לבסיס יותר מ-`over_hours` אחרי הנחיתה המתוכננת. הסיבה אינה בקבצים, ולכן שואלים:
- * - `voluntary` – מרצון, אין פיצוי.
- * - `force_majeure` – אירוע שאינו בשליטת החברה (ס' 10.ב): קריאה מיוחדת ל-48 השעות הראשונות,
- *   כלומר `capped_days` יממות × `hours`. גם אש"ל לכל התקופה ובלי זיכוי שהייה – הערה בלבד.
- * - `company` – פיצוי על כל יממה לא מתוכננת (פרשנות בעל המוצר, 22/09/2026): מהיום שאחרי
- *   יום החזרה המתוכנן ועד יום החזרה בפועל, בשעון הבסיס, `hours` לכל יממה.
- * הסבב מסומן, כדי שחוק הקריאה המיוחדת לא יספור אותו כולו כקריאה מיוחדת.
+ * אותו סבב חזר לבסיס יותר מ-`over_hours` אחרי הנחיתה המתוכננת. סבב שהוחלף בסבב אחר אינו הארכה (טיוטה 449).
+ */
+export function overStay(ctx, match) {
+  const rule = ctx.rulesWithLogic('stay_extension')[0];
+  if (!rule || match.how !== 'exact') return null;
+  const planned = pairingTimes(match.plan, ctx.tz).end;
+  const actual = pairingTimes(match.exec, ctx.tz, { away: true }).end;
+  if (planned == null || actual == null || actual - planned <= H(rule.logic.params.over_hours)) return null;
+  const what = `${describePairing(match.exec)}: החזרה לבסיס ב-${ddmm(dateOf(actual))} ${hhmm(actual)}, ` +
+    `${minToHhmm(actual - planned)} אחרי המתוכנן (${ddmm(dateOf(planned))} ${hhmm(planned)})`;
+  return { planned, actual, what, ruleId: rule.id };
+}
+
+/**
+ * אירוע שאינו בשליטת החברה (ס' 10.ב), לפי התשובה על ההארכה (`extended:`, שנשאלת ב-`extendedPairing`): קריאה מיוחדת
+ * ל-48 השעות הראשונות, כלומר `capped_days` יממות × `hours` מהיום שאחרי יום החזרה המתוכנן, גם כשתוכננה בהן פעילות,
+ * וקריאה מיוחדת גם על יום החזרה, כשלא תוכנן בו כלום ("לפי הענין"; בעל המוצר, 30/10/2026, טיוטה 449). הימים שבאמצע
+ * בלי תשלום. הסבב מסומן, כדי שחוק הקריאה המיוחדת לא יספור אותו כולו כקריאה מיוחדת.
  */
 function stay_extension(ctx, params, rule) {
   if (!ctx.hasPlan || !ctx.hasExec) return;
   const key = keyFor(params.report_column);
   for (const m of ctx.matches) {
-    if (!m.plan || !m.exec) continue;
-    const planned = pairingTimes(m.plan, ctx.tz).end;
-    const actual = pairingTimes(m.exec, ctx.tz, { away: true }).end;
-    if (planned == null || actual == null || actual - planned <= H(params.over_hours)) continue;
-
+    if (!m.plan || !m.exec || ctx.answer(`extended:${m.exec.id}`)?.value !== 'force_majeure') continue;
+    const over = overStay(ctx, m);
+    if (!over) continue;
     ctx.markPairing(m.exec, 'stay_extension');
-    const what = `${describePairing(m.exec)}: החזרה לבסיס ב-${ddmm(dateOf(actual))} ${hhmm(actual)}, ` +
-      `${minToHhmm(actual - planned)} אחרי המתוכנן (${ddmm(dateOf(planned))} ${hhmm(planned)})`;
-    const unplanned = [];
-    for (let d = addDays(dateOf(planned), 1); d <= dateOf(actual); d = addDays(d, 1)) unplanned.push(d);
+    ctx.markPairing(m.exec, 'extended');
+    const landed = dateOf(over.actual);
+    const first = [];
+    for (let d = addDays(dateOf(over.planned), 1); d <= landed && first.length < params.capped_days; d = addDays(d, 1)) first.push(d);
+    const expect = (d, explain) => ctx.expectPairing(m.exec, key, H(params.hours), rule, `${over.what}. אירוע שלא בשליטת החברה.`,
+      { date: d, dates: [d], perDay: true, explain });
     // יממה בחודש הבא אינה ברומה של החודש הזה.
-    const inMonth = unplanned.filter((d) => ctx.timeline.some((x) => x.date === d));
-    const id = `stay_extension:${m.exec.id}`;
-    const answered = ctx.answer(id);
-    // הדוח כבר מזכה את הסכום הגבוה שאפשרי כאן: אין פער, ולא שואלים. לפי יום: על כל יממה לא מתוכננת, ולא
-    // הסכום על הסבב (בעל המוצר, 08/10/2026).
-    const a = answered ?? (inMonth.length && inMonth.every((d) => ctx.paidOnDate(d, params.report_column, key, H(params.hours)))
-      ? ctx.assume(id, 'company', 'מגיע פיצוי על כל הימים הלא מתוכננים') : null);
-    if (!a) {
-      ctx.ask({
-        id,
-        date: m.exec.from,
-        title: `חזרה מאוחרת לבסיס: ${describePairing(m.exec)}`,
-        body: `${what}. הרומה לא מזכה עליה, והפיצוי תלוי בסיבה, שאינה בקבצים. מה קרה?`,
-        options: [
-          { value: 'voluntary', label: 'החזרה המאוחרת מרצונך', hint: 'ללא פיצוי' },
-          { value: 'force_majeure', label: 'העיכוב מאירוע שלא בשליטת החברה', hint: `מגיע פיצוי רק על ${params.over_hours} שעות` },
-          { value: 'company', label: 'מגיע פיצוי על כל הימים הלא מתוכננים' },
-        ],
-        ruleId: rule.id,
-      });
-      continue;
-    }
-    if (a.value === 'voluntary') {
-      ctx.note(dateOf(actual), `${what}. מרצונך, לפי תשובתך: אין פיצוי.`, rule);
-    } else if (a.value === 'force_majeure') {
-      // כל יממה בשורה משלה, כמו בקריאה מיוחדת (`perDay`): היממות הראשונות שאחרי יום החזרה המתוכנן.
-      const why = `${what}. אירוע שלא בשליטת החברה, לפי תשובתך: קריאה מיוחדת על ${params.over_hours} השעות הראשונות ` +
-        `(${params.capped_days} יממות). מגיע גם אש"ל לכל התקופה, ובתקופה הזאת אין זיכוי שהייה בחו"ל.`;
-      for (const d of unplanned.slice(0, params.capped_days).filter((x) => inMonth.includes(x))) {
-        ctx.expectPairing(m.exec, key, H(params.hours), rule, why,
-          { date: d, dates: [d], perDay: true, explain: `אירוע שלא בשליטת החברה: ${params.over_hours} השעות הראשונות.` });
-      }
-    } else if (a.value === 'company') {
-      const why = `${what}. ${unplanned.length === 1 ? 'יממה לא מתוכננת' : `${unplanned.length} יממות לא מתוכננות`} ` +
-        `(${unplanned.map(ddmm).join(', ')}), ${answered ? 'לפי תשובתך' : `לפי מה שהרומה מזכה`}.`;
-      for (const d of inMonth) {
-        ctx.expectPairing(m.exec, key, H(params.hours), rule, why, { date: d, dates: [d], perDay: true, explain: 'יממה לא מתוכננת.' });
-      }
-    }
+    for (const d of first.filter((x) => ctx.timeline.some((y) => y.date === x))) expect(d, `אירוע שלא בשליטת החברה: ${params.over_hours} השעות הראשונות.`);
+    if (!first.includes(landed) && ctx.planFreeDay(landed)) expect(landed, 'יום החזרה לבסיס, שלא תוכנן בו כלום.');
+    ctx.note(landed, `${describePairing(m.exec)}: אירוע שלא בשליטת החברה. מגיע אש"ל לכל התקופה, ובתקופה הזאת אין זיכוי שהייה בחו"ל.`, rule, { aside: true });
   }
 }
 

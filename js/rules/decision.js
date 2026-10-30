@@ -18,7 +18,8 @@ export function pairingDecision(ctx, match) {
   const plan = match.plan;
   if (match.byLeave) return { reason: 'no', source: 'leave' }; // היעדרות ומחלה אינן ביוזמת החברה
   if (match.how === 'replaced_by_ground' || match.how === 'replaced_by_standby') return { reason: 'company', source: 'activity' }; // החברה הציבה אותו לפעילות קרקע או לכוננות
-  if (match.how === 'carried_over') return { reason: 'company', source: 'stay' }; // הצוות עוד היה בחו"ל, בסבב מהחודש הקודם (`explainByCarriedStay`)
+  // הצוות עוד היה בחו"ל, בסבב מהחודש הקודם או בסבב שהתארך (`explainByCarriedStay`); בהסכמה – לא ביוזמת החברה (טיוטה 449).
+  if (match.how === 'carried_over') return { reason: match.carriedBy && ctx.answer(`extended:${match.carriedBy.id}`)?.value === 'agreed' ? 'no' : 'company', source: 'stay' };
   const answer = ctx.answerFor(match);
   // שרשרת מהיומן: השלב הראשון, זה שהוציא את הסבב מהשיבוץ, קובע (`reduceChain`; בעל המוצר, 06/10/2026).
   const count = answer?.count;

@@ -1377,17 +1377,19 @@ function explainByActivity(matches, timeline, codes, isSick, isMovable, isReserv
 }
 
 /**
- * סבב מתוכנן שיוצא לפני שסבב מהחודש הקודם (`cutAtStart`) חזר לבסיס, או ביום הנחיתה בלי מנוחה חוקית אחריה:
+ * סבב מתוכנן שיוצא לפני שסבב מהחודש הקודם (`cutAtStart`), או סבב שהתארך מעבר לימיו בתכנון (טיוטה 449), חזר לבסיס, או ביום הנחיתה בלי מנוחה חוקית אחריה:
  * לא היה אפשר לבצע אותו, ולכן לא שואלים מה קרה בו (`carried_over`). אין עליו קרדיט, והקריאה המיוחדת רק
  * על הימים שלא תוכנן בהם סבב (`special_call`). כך גם כשהסבב מהחודש הקודם היה בתכנון (בעל המוצר,
  * 08/10/2026; 28/02–08/03/2026 BUD, ובימיו GVA, ‏FCO ו-VCE).
  */
 function explainByCarriedStay(matches, fdp) {
-  for (const stay of matches.map((m) => m.exec).filter((e) => e?.cutAtStart)) {
+  const stays = matches.filter((m) => m.exec?.cutAtStart || (m.how === 'exact' && (m.exec.shownTo ?? m.exec.to) > m.plan.to));
+  for (const { exec: stay, plan } of stays) {
     const landed = stay.closed ? stay.shownTo ?? stay.to : null;
     for (const m of matches) {
       const first = m.plan?.legs[0];
       if (m.how !== 'cancelled' || !first) continue;
+      if (!stay.cutAtStart && first.date < plan.to) continue;
       if (landed && first.date > landed) continue;
       if (landed && first.date === landed && !sameFdp(stay.legs.at(-1), first, fdp)) continue;
       m.how = 'carried_over';

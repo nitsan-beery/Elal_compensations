@@ -7,7 +7,7 @@
 import { hoursToMin, minToHhmm, MONTH_NAMES } from '../time.js';
 import { describePairing, describeRoute, fdpParts, wholePairing } from '../model.js';
 import { at, dateOf, legTimes, pairingTimes } from '../flight-times.js';
-import { DUTY_LOGIC, DUTY_PARAMS, execFdpGroups, amountWord, otherOption, applyOtherReason, extensionDays, dayActivity, keyFor, paidEarlier } from './duty.js';
+import { DUTY_LOGIC, DUTY_PARAMS, execFdpGroups, amountWord, otherOption, applyOtherReason, extensionDays, overStay, dayActivity, keyFor, paidEarlier } from './duty.js';
 import { overlapDays } from './journal.js';
 
 const H = (hours) => hoursToMin(hours) ?? 0;
@@ -1159,8 +1159,9 @@ function companySwapToFreeDay(match, answer) {
  * אותה טיסה, עם הפסקה בין הרגליים או נחיתה באיחור אחרי חצות, ולכן אין "הגבוה מבין השתיים" – הקרדיט הוא
  * אותו קרדיט. על כל יום שלא תוכנן בו כלום מגיעה קריאה מיוחדת, בלי הסף של היממה השנייה, ועל יום שתוכננו
  * בו טיסה או סימולטור – פעילות שנייה לא מתוכננת (`second_unplanned_activity`, שקוראת את התשובה כאן);
- * בשניהם רק אם ההארכה לא הייתה בהסכמה. מעל `over_hours` זו הארכת שהייה (`stay_extension`), שאינה מגיעה
- * לכאן. הסיבה אינה בקבצים, ולכן נשאלת כשהרומה לא זיכתה. סבב שהוחלף באותם ימים (`dates`) – רק אחרי
+ * בשניהם רק אם ההארכה לא הייתה בהסכמה. מעל `over_hours` זו הארכת שהייה (`overStay`): אותו חישוב, ותשובה שלישית,
+ * "אירוע שלא בשליטת החברה", ש-`stay_extension` מטפלת בה (טיוטה 449). הסיבה אינה בקבצים, ולכן נשאלת כשהרומה לא
+ * זיכתה. סבב שהוחלף באותם ימים (`dates`) – רק אחרי
  * התשובה עליו, וגם אז בנוסף לגבוה מבין השתיים. מחזירה true כשהסבב טופל כאן.
  */
 function extendedPairing(ctx, params, rule, match, answer) {
@@ -1173,12 +1174,13 @@ function extendedPairing(ctx, params, rule, match, answer) {
   if (answer?.value === 'added') return false;
   if (match.how === 'dates' && !answer) return false;
   const days = ext.free;
-  if (!days.length && !ext.second.length) return false;
+  const over = overStay(ctx, match);
+  if (!days.length && !ext.second.length && !over) return false;
   const id = `extended:${exec.id}`;
   const second = ctx.rulesWithLogic('second_unplanned_activity')[0]?.logic.params;
   // לפי יום: S/C על כל יממה פנויה שנוספה, ופעילות שנייה על כל יממה שתוכננה בה פעילות, ולא הסכום על הסבב
   // (בעל המוצר, 08/10/2026).
-  const paid = days.every((d) => ctx.paidOnDate(d, params.report_column ?? 'S/C', 'sc', H(params.hours))) &&
+  const paid = (days.length > 0 || ext.second.length > 0) && days.every((d) => ctx.paidOnDate(d, params.report_column ?? 'S/C', 'sc', H(params.hours))) &&
     ext.second.every((d) => ctx.paidOnDate(d, second.report_column ?? 'COM', keyFor(second.report_column ?? 'COM'), H(second.hours)));
   // סבב שהוחלף באותם ימים בשינוי ביוזמת החברה או בזכייה במכרז: התשובה עליו כבר אומרת שהימים הנוספים
   // אינם בהסכמה, ועל יום שלא תוכנן בו כלום מגיעה קריאה מיוחדת, כמו ב-`companySwapToFreeDay` (בעל המוצר,
@@ -1192,8 +1194,9 @@ function extendedPairing(ctx, params, rule, match, answer) {
     ctx.ask({
       id,
       date: exec.from,
-      title: `סבב שהתארך: ${describePairing(exec)}`,
-      body: ctx.calendarRun
+      title: `${over ? 'חזרה מאוחרת לבסיס' : 'סבב שהתארך'}: ${describePairing(exec)}`,
+      body: over ? `${over.what}. ${ctx.calendarRun ? '' : 'הרומה לא מזכה על כל הימים, ו'}הפיצוי תלוי בסיבה, שאינה בקבצים. מה קרה?`
+        : ctx.calendarRun
         ? `הסבב תוכנן ${describePairing(plan)}, וביומן התארך ל-${list}. ${due.join(' ו')} ` +
           `${due.length > 1 ? 'מגיעים' : days.length ? 'מגיעה' : 'מגיע'} רק כשההארכה לא הייתה בהסכמתך. מה קרה?`
         : own ? `הסבב ${describePairing(exec)}, שהחלפת אליו, התארך מעבר ללוח הזמנים שלו ל-${list}. הרומה לא מזכה ${due.join(' ו')}, ` +
@@ -1203,8 +1206,9 @@ function extendedPairing(ctx, params, rule, match, answer) {
       options: [
         { value: 'company', label: 'הסבב הוארך ביוזמת החברה' },
         { value: 'agreed', label: 'הסבב הוארך בהסכמתי' },
+        ...(over ? [{ value: 'force_majeure', label: 'אירוע שלא בשליטת החברה (שביתה, סגירת נמל תעופה, התנכלות או תאונת כלי טיס)' }] : []),
       ],
-      ruleId: rule.id,
+      ruleId: over?.ruleId ?? rule.id,
     });
     return true;
   }

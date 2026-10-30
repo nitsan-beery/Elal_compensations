@@ -14,6 +14,13 @@ test('היעדרות אינה ביוזמת החברה, גם כשיש תשובה'
   assert.deepEqual(decide({ byLeave: true }, { answer: { value: 'replaced' } }), { reason: 'no', source: 'leave' });
 });
 
+test('סבב שהתארך בהסכמה: מה שתוכנן בימיו אינו ביוזמת החברה', () => {
+  const ctx = (value) => ({ answer: () => ({ value }) });
+  const match = { how: 'carried_over', carriedBy: { id: 'x' } };
+  assert.equal(pairingDecision(ctx('agreed'), match).reason, 'no');
+  assert.equal(pairingDecision(ctx('company'), match).reason, 'company');
+});
+
 test('הוחלף בפעילות קרקע או בכוננות: ביוזמת החברה', () => {
   assert.equal(reason({ how: 'replaced_by_ground' }), 'company');
   assert.equal(reason({ how: 'replaced_by_standby' }), 'company');
