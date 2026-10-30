@@ -2398,10 +2398,11 @@ const EXPECTED_IN_COLUMN = { 'S/C': 'צפויה קריאה מיוחדת', COM: '
 /**
  * עמודת פיצוי חסרה אינה תקלה, אבל כשהאפליקציה מצפה לסכום בה, ייתכן שהיא נחתכה בהדפסה. רק כשאין שאלות
  * פתוחות: עד התשובות הציפייה עוד יכולה להשתנות (בעל המוצר, 22/10/2026; טיוטה 407; עד אז לפי הפער במשבצת
- * הסיכום, ומאז ש-S/C בתוך COM גם פער ב-COM הציג אזהרה על S/C).
+ * הסיכום, ומאז ש-S/C בתוך COM גם פער ב-COM הציג אזהרה על S/C). כש-PDFT ברומה – בלי אזהרה: עמודות הפיצוי
+ * תמיד לפניה, וההדפסה נחתכת מימין, ולכן עמודה שחסרה לא הייתה (33 רומות; בעל המוצר, 30/10/2026; טיוטה 421).
  */
 function warnMissingColumns(out, exec) {
-  if (out.questions.length) return;
+  if (out.questions.length || (exec.columns ?? []).includes('PDFT')) return;
   const missing = (exec.missingColumns ?? []).filter((c) => OPTIONAL_COLUMNS.includes(c));
   for (const column of missing) {
     if (!out.comparison.some((r) => r.column === column && r.expected > 0)) continue;
