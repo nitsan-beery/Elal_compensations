@@ -1484,7 +1484,7 @@ function lost_hours_credit(ctx, params, rule) {
     // בשרשרת מהיומן: השעות של הגבוה מבין הסבבים, ביום של הסבב שממנו הורד (`reduceChain`; בעל המוצר, 06/10/2026).
     const from = answer?.basis ?? match.plan;
     const removed = answer?.lostOn ?? match.plan;
-    const lost = lostHours(ctx, from, params);
+    const lost = lostHours(ctx, from, params, from === match.plan ? match.exec : null);
     if (lost == null) { ctx.review(`${describePairing(from)}: אין שעות מתוכננות, לא ניתן לחשב את השעות שהפסיד.`, rule); continue; }
     const key = params.credit_column === 'Rig' ? 'rig' : 'credit';
     const why = assumed
@@ -1497,7 +1497,7 @@ function lost_hours_credit(ctx, params, rule) {
     // אחרי תשובה: בלי הסבר, ועל טיסה שבוצעה במקום – של איזו טיסה השעות.
     const explain = assumed
       ? `הרומה מזכה את השעות והסיבה אינה בקבצים. האפליקציה מניחה${assumed.titles.length > 1 ? ` אחת מאלה: ${assumed.titles.join(' או ')}` : `: ${assumed.titles[0]}`}.`
-      : match.exec || from !== removed || performedOn(ctx, assumed?.date ?? removed.from) ? `השעות של ${describePairing(from)}.` : '';
+      : match.exec || from !== removed || performedOn(ctx, assumed?.date ?? removed.from) ? `השעות של ${unflownOf(from, match.exec)}.` : '';
     if (match.exec) ctx.expectPairing(match.exec, key, lost, rule, note, { explain });
     // בלי טיסה שבוצעה, שורת הפירוט מציגה את הטיסה שתוכננה (בעל המוצר, 29/09/2026).
     // `chainFor`: ביום של שלב אחר בשרשרת, אבל שייך לשינוי של הסבב המתוכנן (`explainChanges`).
@@ -1534,6 +1534,12 @@ function paidLostHours(ctx, planPairing) {
     titles: rules.map((r) => r.title), values: rules.map((r) => r.logic.params?.answer_value) } : null;
 }
 
+/** מה שלא בוצע מהסבב המתוכנן: כולו, או מספרי הטיסה של הרגליים שלא בוצעו. */
+function unflownOf(plan, exec) {
+  const flown = exec ? flownAsPlanned(plan, exec) : [];
+  return flown.length ? plan.legs.filter((l) => !flown.includes(l)).map((l) => l.flight).filter(Boolean).join('/') : describePairing(plan);
+}
+
 /** סוג המטוס כמשפחה: B789 → B787, ‏B738 → B737. */
 const acFamily = (ac) => ac?.replace(/^(B7[0-9])[0-9]$/, '$17') ?? null;
 
@@ -1548,12 +1554,23 @@ function lostHoursApplies(ctx, planPairing, params) {
   return true;
 }
 
-/** השעות שהפסיד על סבב מתוכנן: הקרדיט המתוכנן, כולל השלמה לסליפ קצר. */
-function lostHours(ctx, planPairing, params) {
+/**
+ * הרגליים של הסבב המתוכנן שבוצעו: אותה טיסה, מאותו שדה לאותו שדה, בהפרש של עד יום, כי התכנון לפי התאריך המקומי
+ * והרומה לפי שעון הבסיס (בעל המוצר, 30/10/2026, טיוטה 447).
+ */
+const flownAsPlanned = (plan, exec) => plan.legs.filter((l) => l.flight && exec.legs.some((x) => x.flight === l.flight &&
+  x.org === l.org && x.dst === l.dst && Math.abs(daysBetween(l.date, x.date)) <= 1));
+
+/** טיסה מתוכננת, שאינה DH, בוצעה: הסבב לא בוטל. */
+const partlyFlown = (plan, exec) => flownAsPlanned(plan, exec).some((l) => !l.dh);
+
+/** השעות שהפסיד על סבב מתוכנן: הקרדיט המתוכנן, כולל השלמה לסליפ קצר, פחות מה שבוצע ממנו ב-`exec`. */
+function lostHours(ctx, planPairing, params, exec = null) {
   const planned = ctx.plannedCredit(planPairing);
   if (planned == null) return null;
   const min = params.include_min_slip_credit ? ctx.minSlipMinutes() : null;
-  return min && planned < min ? min : planned;
+  const flown = exec ? flownAsPlanned(planPairing, exec) : [];
+  return (min && planned < min ? min : planned) - (flown.length ? ctx.plannedCredit({ legs: flown }) ?? 0 : 0);
 }
 
 /**
@@ -1562,11 +1579,11 @@ function lostHours(ctx, planPairing, params) {
  * 23/09/2026). כשיש טיסה כזאת, רק ס' 46 נותן קרדיט על שתיהן: `answer_label_with_flight` הוא הנוסח
  * אז, ו-`only_without_flight` – תשובה שאז אינה מוצעת (בעל המוצר, 30/10/2026, טיוטה 442).
  */
-function lostHoursOptions(ctx, planPairing, extra) {
+function lostHoursOptions(ctx, planPairing, extra, exec = null) {
   const offered = (p) => lostHoursApplies(ctx, planPairing, p) && !(extra && p.only_without_flight);
   return ctx.rulesWithLogic('lost_hours_credit').filter((r) => offered(r.logic.params ?? {})).map((r) => {
     const p = r.logic.params ?? {};
-    const lost = lostHours(ctx, planPairing, p);
+    const lost = lostHours(ctx, planPairing, p, exec);
     const word = amountWord(p.credit_column ?? 'Credit');
     const amount = lost == null ? `מגיע ${word}` : `מגיע ${word} של ${minToHhmm(lost)}`;
     return { value: p.answer_value, label: (extra && p.answer_label_with_flight) || p.answer_label, hint: extra ? `${amount} על הטיסה המקורית ${extra}` : amount };
@@ -1673,7 +1690,7 @@ function inheritAnswer(ctx, match, rule) {
 function wouldAssumeCancelled(ctx, match) {
   if (ctx.assumeIgnored(`cancelled:${match.plan.id}`)) return false;
   if (!match.exec) return !!paidLostHours(ctx, match.plan);
-  return paidCallOnPlanDays(ctx, match) > 0;
+  return !partlyFlown(match.plan, match.exec) && paidCallOnPlanDays(ctx, match) > 0;
 }
 
 /**
@@ -1804,6 +1821,7 @@ function claimLabel(ctx, entry, planLabel, execLabel, planMatch) {
  */
 function assumeCancelled(ctx, match, rule) {
   if (!match.exec) return !!paidLostHours(ctx, match.plan);
+  if (partlyFlown(match.plan, match.exec)) return false;
   if (!paidCallOnPlanDays(ctx, match) || !ctx.assume(`cancelled:${match.plan.id}`, 'cancelled', 'הטיסה המקורית בוטלה ללא קרדיט')) return false;
   noteCancelled(ctx, match, rule, `הרומה מזכה קריאה מיוחדת על ${describePairing(match.exec)}`);
   ctx.assumeAnswer(match.plan, 'cancelled');
@@ -1913,9 +1931,10 @@ function whatHappenedOptions(ctx, plan, exec, calendar = null) {
     { value: 'bid', label: 'זכייה במכרז', hint: other ? higher : `${later('הטיסה שזכית בה')} מגיע הגבוה מבין שתיהן`, needsLink: true },
     { value: 'voluntary_swap', label: 'החלפה מרצוני או בהסכמתי',
       hint: other ? `רק הקרדיט של ${performed}` : `${later('הטיסה שבאה במקומה, אם יש,')} רק הקרדיט שלה`, needsLink: true },
-    { value: 'cancelled', label: 'הטיסה המקורית בוטלה ללא קרדיט',
-      hint: other ? `מגיע פיצוי של קריאה מיוחדת על ${performed}` : 'לא מגיע כלום' },
-    ...lostHoursOptions(ctx, plan, other ? `בנוסף לקרדיט של ${performed}` : undefined),
+    // טיסה מתוכננת בוצעה: הסבב לא בוטל (בעל המוצר, 30/10/2026, טיוטה 447).
+    ...(other && partlyFlown(plan, other) ? [] : [{ value: 'cancelled', label: 'הטיסה המקורית בוטלה ללא קרדיט',
+      hint: other ? `מגיע פיצוי של קריאה מיוחדת על ${performed}` : 'לא מגיע כלום' }]),
+    ...lostHoursOptions(ctx, plan, other ? `בנוסף לקרדיט של ${performed}` : undefined, other),
   ];
 }
 

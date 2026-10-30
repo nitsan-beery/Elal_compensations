@@ -1,7 +1,7 @@
 // הורדה מהטיסה: 2024 ס' 46 (חניך), 2026 ס' 22.4 (מטוס חכור), 2026 ס' 23.4 (777), וישן כ"ה ס' 12.ו (החלפה מרצון). טיוטה 442.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { month, leg, run, expected, questions } from './helpers.mjs';
+import { month, leg, run, expected, questions, explains } from './helpers.mjs';
 
 const planned = (extra) => [leg('LY541', 'TLV', 'ATH', '10:00', '14:00', extra), leg('LY542', 'ATH', 'TLV', '15:00', '19:00', extra)]; // 08:00
 const flown = () => [leg('LY5', 'TLV', 'LCA', '10:00', '13:00'), leg('LY6', 'LCA', 'TLV', '14:00', '17:00')]; // 06:00
@@ -94,4 +94,42 @@ test('החלפה מרצון ליום פנוי: בלי קריאה מיוחדת, �
   const m = month(2026, 8, { plan: { '05': planned() }, exec: { '07': flown() }, values: { '07': { 'S/C': '02:30' } } });
   const r = run(m, { answers: { [idPlan]: { value: 'voluntary_swap', link: '2026-08-07..2026-08-07:LCA' } } });
   assert.equal(sum(r, 'S/C'), 0);
+});
+
+// סבב שחלק ממנו בוצע כמתוכנן: LY1 בוצעה, ובמקום LY2 בוצעה חזרה דרך לרנקה (טיוטה 447).
+const partPlan = () => ({ '05': [leg('LY1', 'TLV', 'ATH', '10:00', '14:00')], '06': [leg('LY2', 'ATH', 'TLV', '10:00', '14:00')] }); // 08:00
+const partExec = () => ({ '05': [leg('LY1', 'TLV', 'ATH', '10:00', '14:00')], '06': [leg('LY7', 'ATH', 'LCA', '10:00', '12:00'), leg('LY8', 'LCA', 'TLV', '13:00', '15:00')] }); // 08:00
+const partly = (values = {}) => month(2026, 8, { plan: partPlan(), exec: partExec(), values });
+const idPart = 'cancelled:2026-08-05..2026-08-06:ATH';
+const partOptions = (r) => r.questions.find((q) => q.id === idPart).options;
+
+test('טיסה מתוכננת בוצעה: אין אפשרות "בוטלה ללא קרדיט"', () => {
+  assert.ok(!partOptions(run(partly())).some((o) => o.value === 'cancelled'));
+});
+
+test('אף טיסה מתוכננת לא בוצעה: האפשרות נשארת', () => {
+  assert.ok(options(run(sameDay())).some((o) => o.value === 'cancelled'));
+});
+
+test('הרומה זיכתה קריאה מיוחדת, וטיסה מתוכננת בוצעה: לא מונח שבוטל', () => {
+  const r = run(partly({ '06': { 'S/C': '02:30' } }));
+  assert.ok(questions(r).includes(idPart));
+});
+
+test('הורדה עקב חניך, וחלק מהסבב בוצע: רק השעות של מה שלא בוצע', () => {
+  const r = run(partly(), { answers: { [idPart]: { value: 'trainee' } } });
+  assert.equal(sum(r, 'Rig'), 240);
+  assert.equal(sum(r, 'Credit'), 480);
+  assert.ok(explains(r.comparison.find((c) => c.column === 'Rig')).includes('LY2'));
+});
+
+test('הרמז בשאלה מראה את אותו סכום', () => {
+  const hint = partOptions(run(partly())).find((o) => o.value === 'trainee').hint;
+  assert.ok(hint.includes('04:00'));
+});
+
+test('שינוי ביוזמת החברה, וחלק מהסבב בוצע: הגבוה מבין השתיים על הסבב כולו', () => {
+  const m = month(2026, 8, { plan: partPlan(), exec: { '05': partExec()['05'], '06': [leg('LY7', 'ATH', 'LCA', '10:00', '11:00'), leg('LY8', 'LCA', 'TLV', '12:00', '13:00')] } });
+  const q = run(m).questions.find((x) => x.id === idPart);
+  assert.equal(sum(run(m, { answers: { [idPart]: { value: 'replaced', link: q.execId } } }), 'Rig'), 120);
 });
