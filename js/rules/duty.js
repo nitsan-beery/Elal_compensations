@@ -128,13 +128,17 @@ function same_fdp_rounds(ctx, params, rule) {
 export function extensionDays(ctx, match) {
   match = extensionMatch(ctx, match);
   if (!match) return null;
-  if (!match.plan || !match.exec || match.exec.cutAtStart || match.exec.cutAtEnd || match.plan.cutAtStart || match.plan.cutAtEnd) return null;
+  if (!match.plan || !match.exec || match.exec.cutAtEnd || match.plan.cutAtEnd) return null;
+  // סבב שיצא בחודש הקודם, בתכנון ובביצוע: מתחילת החודש (בעל המוצר, 30/10/2026, טיוטה 433).
+  const carried = !!match.exec.cutAtStart;
+  if (carried !== !!match.plan.cutAtStart) return null;
   const e = pairingTimes(match.exec, ctx.tz, { away: true });
   const p = pairingTimes(match.plan, ctx.tz);
-  if (e.start == null || e.end == null || p.start == null || p.end == null) return null;
+  if (e.end == null || p.end == null || (!carried && (e.start == null || p.start == null))) return null;
   const days = [];
-  for (let d = dateOf(e.start); at(d, 0) < e.end; d = addDays(d, 1)) {
-    if (p.start < at(d, 1440) && p.end > at(d, 0)) continue;
+  const planStart = carried ? -Infinity : p.start;
+  for (let d = carried ? ctx.monthFirst : dateOf(e.start); at(d, 0) < e.end; d = addDays(d, 1)) {
+    if (planStart < at(d, 1440) && p.end > at(d, 0)) continue;
     if (ctx.timeline.some((x) => x.date === d)) days.push(d);
   }
   if (!days.length) return null;

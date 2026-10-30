@@ -207,7 +207,7 @@ function evaluateFiles({ rulesData, plan = null, exec = null, answers = {}, hist
   // החודש הקודם, לרצף שחוצה חודש: שבתות וטיסות סבב לילה (טיוטה 431).
   if (prev) {
     const days = buildTimeline(prev.period, prev.plan, prev.exec);
-    ctx.prevMonth = { timeline: days, hasExec: !!prev.exec,
+    ctx.prevMonth = { timeline: days, hasExec: !!prev.exec, answers: prev.answers ?? null,
       planPairings: prev.plan ? buildPairings(days, domicile, planLegsWithCredit, fdp).map(ftOnLastDay) : [],
       execPairings: prev.exec ? buildPairings(days, domicile, (d) => d.exec?.legs, fdp) : [] };
   }

@@ -36,9 +36,12 @@ async function loadHistory() {
     const p = files.find((f) => f === `duty-plan-${key}.pdf`);
     const e = files.find((f) => f.startsWith(`crewpay-${key}`) && f.endsWith('.pdf'));
     if (!p && !e) break;
+    // כמו באפליקציה (`historyFor`): גם התכנון והתשובות של החודש, לרצף שחוצה חודש (טיוטות 431, 433).
+    const answersFile = path.join(dir, `answers-${key}.json`);
     out.push({ period: { year, month },
-      plan: p && !e ? await parsePlan(fs.readFileSync(path.join(dir, p))) : null,
-      exec: e ? await parseExec(fs.readFileSync(path.join(dir, e))) : null });
+      plan: p ? await parsePlan(fs.readFileSync(path.join(dir, p))) : null,
+      exec: e ? await parseExec(fs.readFileSync(path.join(dir, e))) : null,
+      answers: fs.existsSync(answersFile) ? JSON.parse(fs.readFileSync(answersFile, 'utf8')) : null });
   }
   return out;
 }

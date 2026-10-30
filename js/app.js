@@ -13,7 +13,7 @@ import * as store from './store.js';
 import * as calendar from './calendar.js';
 
 // מספר הגרסה של הקוד שרץ בדף. עולה יחד עם CACHE ב-sw.js, לאותו מספר (בעל המוצר, 15/10/2026).
-const APP_VERSION = 318;
+const APP_VERSION = 319;
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -857,7 +857,7 @@ function lastFleetAnswer(record, months) {
 
 function historyFor(record, months) {
   const key = store.monthKey(record.period);
-  return months.filter((m) => store.samePilot(m, record) && store.monthKey(m.period) < key && (m.plan || m.exec)).map((m) => ({ period: m.period, plan: m.plan ?? null, exec: m.exec ?? null }));
+  return months.filter((m) => store.samePilot(m, record) && store.monthKey(m.period) < key && (m.plan || m.exec)).map((m) => ({ period: m.period, plan: m.plan ?? null, exec: m.exec ?? null, answers: m.answers ?? null }));
 }
 
 /** שורות ההשוואה שמוצגות. FLT+DH חוזר על הקרדיט של אותן טיסות, ולכן לא מוצג ולא נספר. */

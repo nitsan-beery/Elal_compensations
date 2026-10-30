@@ -1353,6 +1353,8 @@ function higher_of_planned_performed(ctx, params, rule) {
     if (ctx.pairingHandledBy(match.plan, 'cancelled_no_compensation')) continue;
     // סתירה עם החלפה מרצון שנפתרה נגד הסבב הזה (`resolveLinkConflict`).
     if (ctx.pairingHandledBy(match.plan, 'swap_conflict_void')) continue;
+    // התשובה מהחודש הקודם: ההשוואה נעשתה שם (`inheritAnswer`).
+    if (ctx.pairingHandledBy(match.plan, 'inherited')) continue;
 
     // תשובה ישנה נשמרה בלי קישור, ואז ההחלפה היא הסבב שבוצע באותם ימים.
     const exec = answer && 'link' in answer ? (answer.link ? ctx.pairingById(answer.link) : null) : match.exec;
@@ -1399,6 +1401,8 @@ function higher_of_planned_performed(ctx, params, rule) {
     // שנייה – על הימים שהם מגיעים עליהם, לא "על הטיסה שבוצעה" (`DAY_DUES`; בעל המוצר, 21/10/2026; טיוטות 395, 398).
     // `pairingId`: רק בשורה של הסבב, ולא מתחת לטיסה אחרת שבוצעה באותם ימים.
     ctx.note(match.plan.from, `${swapWord(answer)}: קרדיט של הטיסה הארוכה מבין השתיים${which}${DAY_DUES}.`, rule, { pairingId: match.plan.id, callOf: exec.id });
+    // הרגל האחרונה של הסבב המתוכנן אינה ידועה בחודש ההמראה (בעל המוצר, 30/10/2026, טיוטה 433).
+    if (match.plan.cutAtEnd) ctx.note(match.plan.from, 'הסבב המתוכנן חוזר בחודש הבא, וההשוואה היא רק לחלק שבחודש הזה.', rule, { pairingId: match.plan.id });
     // ביום של הטיסה שבוצעה, כשהוא אחר ובשורה משלו.
     if (exec.from !== match.plan.from && match.exec !== exec) {
       ctx.note(exec.from, `${swapWord(answer)}: קרדיט על הטיסה שבוצעה${DAY_DUES}.`, rule, { pairingId: exec.id, callOf: exec.id });
@@ -1608,6 +1612,7 @@ function cancelled_no_compensation(ctx, params, rule) {
     if (ctx.pairingHandledBy(match.plan, 'swap_conflict_void')) continue;
     const answer = ctx.answerFor(match);
     if (!answer) {
+      if (inheritAnswer(ctx, match, rule)) continue;
       if (assumeDiversion(ctx, match, rule)) continue;
       if (!assumeCancelled(ctx, match, rule)) askWhatHappened(ctx, match, rule);
       continue;
@@ -1622,6 +1627,25 @@ function cancelled_no_compensation(ctx, params, rule) {
       ctx.review(`${describePairing(match.plan)}: ${answer.text || 'סיבה אחרת'}. דורש בדיקה ידנית.`, rule);
     }
   }
+}
+
+/**
+ * החלק בחודש הזה של סבב מתוכנן שיצא בחודש הקודם: התשובה על הסבב שם חלה גם עליו, ואינו נשאל שוב (אוגוסט–ספטמבר
+ * 2025: ATH ‏31/08–01/09 שהוחלף ב-MUC). הנחה שניתנת לשינוי. אין עליו קרדיט והפרש: ההשוואה בחודש ההמראה. "סיבה
+ * אחרת" אינה עוברת, כי היא נוגעת לסבב שבה נכתבה (בעל המוצר, 30/10/2026, טיוטה 433).
+ */
+function inheritAnswer(ctx, match, rule) {
+  const { plan } = match;
+  const last = ctx.prevMonth?.planPairings.at(-1);
+  if (!plan.cutAtStart || !last?.cutAtEnd || last.legs.at(-1).dst !== plan.legs[0].org) return false;
+  const before = ctx.prevMonth.answers?.[`cancelled:${last.id}`];
+  if (!before?.value || before.value === 'other') return false;
+  const label = before.label ?? 'התשובה על הסבב בחודש הקודם';
+  if (!ctx.assume(`cancelled:${plan.id}`, before.value, label, 'התשובה על הסבב בחודש הקודם')) return false;
+  ctx.assumeAnswer(plan, before.value);
+  ctx.markPairing(plan, 'inherited');
+  ctx.note(plan.from, 'המשך של סבב מהחודש הקודם, לפי התשובה שם: בלי קרדיט ובלי הפרש בחודש הזה.', rule, { pairingId: plan.id });
+  return true;
 }
 
 /**
