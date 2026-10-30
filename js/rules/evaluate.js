@@ -278,6 +278,12 @@ function evaluateFiles({ rulesData, plan = null, exec = null, answers = {}, hist
   }
   if (journal && mode === 'full') applyJournal(journal, { ctx, matches, execPairings, answers });
   if (mode === 'full') matches.splice(0, matches.length, ...splitSwappedElsewhere(matches, answers, dependentAnswers));
+  // סבב שכל הרגליים שלו בחודש המריאו בחודש הקודם (`prevMonth`) הוא הנחיתה של סבב מהחודש הקודם, ואינו בתכנון של
+  // החודש (שם היום מסומן X). הוא מופיע רק בקרדיט שבטבלת הפירוט: לא בשינויים, לא בשאלות ולא ברשימת הטיסות להחלפה
+  // (בעל המוצר, 30/10/2026; טיוטה 420; LY374 מ-OPO ב-01/10/2026).
+  for (const m of matches) {
+    if (m.how === 'unplanned' && m.exec.legs.every((l) => l.prevMonth)) { m.how = 'carried_in'; ctx.markPairing(m.exec, 'carried_in'); }
+  }
   explainByCarriedStay(matches, fdp);
   explainByActivity(matches, timeline, codes, sickCodeTest(supported), movableCodeTest(supported), reserveCodeTest(supported), ctx);
   out.changes = mergeCarriedStay(matches.map((m) => describeMatch(m, codes)), matches);
@@ -1381,7 +1387,8 @@ function explainByCarriedStay(matches, fdp) {
  */
 function mergeCarriedStay(changes, matches) {
   const over = matches.filter((m) => m.how === 'carried_over');
-  if (!over.length) return changes;
+  // הנחיתה של סבב מהחודש הקודם אינה שינוי (טיוטה 420).
+  if (!over.length) return changes.filter((c) => c.how !== 'carried_in');
   for (const c of changes) {
     const plans = over.filter((m) => m.carriedBy.id === c.execId).map((m) => m.plan);
     if (!plans.length) continue;
@@ -1390,7 +1397,7 @@ function mergeCarriedStay(changes, matches) {
     // הסבב מהחודש הקודם היה בתכנון: הוא התארך לימים של סבבים אחרים.
     if (c.how === 'exact') Object.assign(c, { how: 'extended', label: 'הסבב התארך' });
   }
-  return changes.filter((c) => c.how !== 'carried_over');
+  return changes.filter((c) => c.how !== 'carried_over' && c.how !== 'carried_in');
 }
 
 /** קוד כוננות: כל קוד שמתחיל ב-SBY. כוננות אינה פעילות קרקע, גם ש-SBY_S/SBY_L ברשימת הקודים ל-`ground_activity` (בעל המוצר, 27/09/2026). */

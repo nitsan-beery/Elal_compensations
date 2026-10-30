@@ -74,7 +74,12 @@ function credit_from_scheduled(ctx, params, rule) {
         if (split.error) { error = split.error; break; }
         const prev = split.before ?? dur; // נחתה לפני חצות: כולה זוכתה בחודש הקודם
         // הרומה של החודש הקודם שמורה וזוכה בה עודף: הקיזוז הצפוי הוא העודף שניתן בה בפועל (טיוטה 374).
-        const given = ctx.prevExec ? ctx.prevExec.days?.[addDays(leg.date, -1)]?.values?.Credit?.min ?? 0 : null;
+        // הקרדיט ביום האחרון שם, פחות שאר הרגליים באותו יום: רק החלק של הרגל הזאת (30/09/2026: ‏07:53, מתוכן LY373 ‏06:12
+        // ו-LY374 ‏01:41; בעל המוצר, 30/10/2026, טיוטה 420).
+        const last = ctx.prevExec?.days?.[addDays(leg.date, -1)];
+        const others = (last?.legs ?? []).filter((l) => !(l.flight === leg.flight && l.org === leg.org && l.dst === leg.dst))
+          .reduce((s, l) => s + (l.skdDur ?? 0), 0);
+        const given = ctx.prevExec ? Math.max(0, (last?.values?.Credit?.min ?? 0) - others) : null;
         const base = given != null && (prev > dur || given > dur) ? given : prev;
         add(leg.date, dur - base, note(`${leg.flight} יצאה בחודש הקודם, ושם זוכו ${minToHhmm(base)}. בחודש הזה ${minToHhmm(dur - base)} מתוך ${minToHhmm(dur)}`));
         if (base > dur || prev > dur) edges.push({ kind: 'carry', leg, date: leg.date, part: dur - base, dur, prev, given });
@@ -899,13 +904,8 @@ function special_call(ctx, params, rule) {
     if (ctx.pairingHandledBy(match.exec, 'swap_conflict_void')) continue;
     const reported = ctx.reportedOn(match.exec, column);
     const answer = ctx.answerFor(match);
-    // סבב שכל הרגליים שלו בחודש המריאו בחודש הקודם (`prevMonth`) הוא הנחיתה של סבב מהחודש הקודם, ואינו בתכנון של
-    // החודש (שם היום מסומן X): לא פעילות לא מתוכננת, ואין עליו שאלה (בעל המוצר, 29/10/2026; טיוטה 418; LY374 מ-OPO
-    // ב-01/10/2026). S/C ברומה או תשובה – כרגיל.
-    if (match.how === 'unplanned' && !answer && !reported && match.exec.legs.every((l) => l.prevMonth)) {
-      ctx.markPairing(match.exec, 'carried_in');
-      continue;
-    }
+    // הנחיתה של סבב מהחודש הקודם (`carried_in`): רק הקרדיט שלה (בעל המוצר, 30/10/2026; טיוטה 420).
+    if (match.how === 'carried_in') continue;
     // סטיה לשדה משנה היא אותה טיסה, ולא קריאה מיוחדת, גם כשהרומה זיכתה S/C (`explainUnexplained`; בעל המוצר, 06/10/2026).
     if (ctx.pairingHandledBy(match.exec, 'diversion_assumed') || answer?.value === 'diversion') continue;
 
