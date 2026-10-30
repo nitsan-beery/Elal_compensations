@@ -156,6 +156,18 @@ export function attachCarried(pairing, days, domicile, prev = null) {
 }
 
 /**
+ * הסבב כולו, כולל מה שטס בחודש הקודם (`prevLegs`, והרגל שהרומה חוזרת עליה ב-1 לחודש), כשיש בו את היציאה
+ * מהבסיס. בלעדיה – הסבב כמו שהוא, מתחילת החודש (בעל המוצר, 30/10/2026, טיוטה 428).
+ */
+export function wholePairing(pairing, domicile) {
+  if (!pairing.cutAtStart) return pairing;
+  const legs = [...(pairing.prevLegs ?? []), ...pairing.legs];
+  if (legs[0].org !== domicile) return pairing;
+  const from = legs[0].prevMonth ? new Date(Date.parse(legs[0].date) - 86400000).toISOString().slice(0, 10) : legs[0].date;
+  return { ...pairing, legs, cutAtStart: false, from };
+}
+
+/**
  * החלוקה של הרגל בחצות בשעון הבסיס: `before` מההמראה בפועל (ובלעדיה המתוכננת) עד חצות, ו-`after`
  * השאר מתוך הקרדיט שלה. false כשאינה חוצה חצות, לא לפי התכנון ולא בפועל (המריאה לפניו ונחתה אחריו בגלל איחור;
  * בעל המוצר, 30/10/2026, טיוטה 430), null כשאי אפשר לדעת.

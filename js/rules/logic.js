@@ -5,7 +5,7 @@
 // מזהה לוגיקה שאינו מופיע כאן נחשב "לא נתמך" ומוצג למשתמש.
 
 import { hoursToMin, minToHhmm, MONTH_NAMES } from '../time.js';
-import { describePairing, describeRoute, fdpParts } from '../model.js';
+import { describePairing, describeRoute, fdpParts, wholePairing } from '../model.js';
 import { at, dateOf, legTimes, pairingTimes } from '../flight-times.js';
 import { DUTY_LOGIC, DUTY_PARAMS, execFdpGroups, amountWord, otherOption, applyOtherReason, extensionDays, dayActivity, keyFor, paidEarlier } from './duty.js';
 import { overlapDays } from './journal.js';
@@ -1237,17 +1237,6 @@ function awayFromBase(pairing, tz, monthEnd) {
   if (!home) return { first, start, end: (daysBetween(first, monthEnd) + 1) * 1440, cutAtEnd: true };
   if (span.end == null) return { error: 'חסרים שעת נחיתה בבסיס או משך הטיסה.' };
   return { first, start, end: span.end - at(first, 0) };
-}
-
-/**
- * הסבב כולו, כולל מה שטס בחודש הקודם (`prevLegs`, והרגל שהרומה חוזרת עליה ב-1 לחודש), כשיש בו את היציאה
- * מהבסיס. בלעדיה – הסבב כמו שהוא, מתחילת החודש (בעל המוצר, 30/10/2026, טיוטה 428).
- */
-function wholePairing(pairing, domicile) {
-  if (!pairing.cutAtStart) return pairing;
-  const legs = [...(pairing.prevLegs ?? []), ...pairing.legs];
-  if (legs[0].org !== domicile) return pairing;
-  return { ...pairing, legs, cutAtStart: false, from: legs[0].prevMonth ? addDays(legs[0].date, -1) : legs[0].date };
 }
 
 /**

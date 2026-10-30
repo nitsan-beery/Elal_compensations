@@ -4,7 +4,7 @@
 // והסבבים – רק מ-js/flight-times.js (`legTimes`, ‏`pairingTimes`).
 
 import { hoursToMin, isoDate, minToHhmm } from '../time.js';
-import { describePairing, describeRoute } from '../model.js';
+import { describePairing, describeRoute, wholePairing } from '../model.js';
 import { at, dateOf, legTimes, pairingTimes } from '../flight-times.js';
 
 const H = (hours) => hoursToMin(hours) ?? 0;
@@ -1334,10 +1334,15 @@ function free_days_waived(ctx, params, rule) {
  * (בעל המוצר, 10/10/2026; לא אמורה להיות כזו). סימולטור עם שעות ברומה – כשהוא חופף לחלון (מוצ"ש אינו
  * נספר); פעילות קרקע בלי שעות – כל יום השבת. לפי הביצוע כשיש; סבב מתוכנן שבוטל ביוזמת החברה נחשב
  * ביצוע (ס' 40). רק לבקשת החברה: כשהרומה לא זיכתה, ובתכנון לבד תמיד, שואלים (`saturdays:`; בעל המוצר,
- * 16/10/2026; עד אז ההסכמה לא נבדקה). שלוש שבתות ברצף הן שני זוגות.
+ * 16/10/2026; עד אז ההסכמה לא נבדקה). שלוש שבתות ברצף הן שני זוגות. זוג שחוצה חודש נבדק בחודש של השבת
+ * השנייה, מול הרומה של החודש הקודם, ובלעדיה התכנון שלו (`ctx.prevMonth`; בעל המוצר, 30/10/2026, טיוטה 431).
  */
 function consecutive_saturdays(ctx, params, rule) {
   const key = keyFor(params.report_column);
+  const prior = ctx.prevMonth;
+  const priorSpans = !prior ? [] : prior.hasExec
+    ? spansOf(ctx, prior.execPairings, (p) => pairingTimes(p, ctx.tz, { away: true }))
+    : spansOf(ctx, prior.planPairings, (p) => pairingTimes(p, ctx.tz));
   const planSpans = ctx.hasPlan ? spansOf(ctx, ctx.planPairings, (p) => pairingTimes(p, ctx.tz)) : [];
   const execSpans = ctx.hasExec ? spansOf(ctx, ctx.execPairings, (p) => pairingTimes(p, ctx.tz, { away: true })) : [];
   const inShabbat = (sp, date) =>
@@ -1347,7 +1352,7 @@ function consecutive_saturdays(ctx, params, rule) {
   const groundIn = (date) => {
     const found = [];
     for (const d of [addDays(date, -1), date]) {
-      const day = ctx.timeline.find((x) => x.date === d);
+      const day = [...(prior?.timeline ?? []), ...ctx.timeline].find((x) => x.date === d);
       if (!day) continue;
       const timed = ctx.hasExec ? (day.exec?.sims ?? []).filter((s) => s.std != null && s.sta != null) : [];
       for (const s of timed) {
@@ -1361,15 +1366,24 @@ function consecutive_saturdays(ctx, params, rule) {
     }
     return found.length ? [...new Set(found)] : null;
   };
+  // סבב מהחודש הקודם בשבת של החודש הזה (חלון השבת מתחיל ביום האחרון שלו): הפיצוי לפי התאריך, ולא על הסבב.
+  const hit = (date, spans) => {
+    // סבב שחזר בחודש הזה נמצא גם ב-`spans`, ועד סופו (end אינסופי בחודש הקודם).
+    const before = date < ctx.monthFirst ? priorSpans : priorSpans.filter((s) => s.end !== Infinity);
+    const sp = [...before, ...spans].find((s) => inShabbat(s, date));
+    if (!sp) return null;
+    const own = spans.includes(sp) || date < ctx.monthFirst;
+    return own ? { pairing: sp.p } : { date, ground: [] };
+  };
   const active = (date) => {
     if (!ctx.hasExec) {
-      const sp = planSpans.find((s) => inShabbat(s, date));
-      if (sp) return { pairing: sp.p };
+      const sp = hit(date, planSpans);
+      if (sp) return sp;
       const g = groundIn(date);
       return g ? { date, ground: g } : null;
     }
-    const sp = execSpans.find((s) => inShabbat(s, date));
-    if (sp) return { pairing: sp.p };
+    const sp = hit(date, execSpans);
+    if (sp) return sp;
     const g = groundIn(date);
     if (g) return { date, ground: g };
     const cancelled = planSpans.find((s) => inShabbat(s, date) && cancelStatus(ctx, s.p) === 'company');
@@ -1377,6 +1391,7 @@ function consecutive_saturdays(ctx, params, rule) {
   };
 
   const saturdays = ctx.timeline.filter((d) => new Date(d.date).getUTCDay() === 6).map((d) => d.date);
+  if (prior) saturdays.unshift(addDays(saturdays[0], -7));
   for (let i = 1; i < saturdays.length; i++) {
     const [s1, s2] = [saturdays[i - 1], saturdays[i]];
     const [a1, a2] = [active(s1), active(s2)];
@@ -1429,7 +1444,8 @@ function consecutive_saturdays(ctx, params, rule) {
  *
  * לפי התכנון. עם דוח ביצוע, לילה מתוכנן נספר אם בוצעה בו טיסת סבב לילה (גם אחרת, כמו
  * זכייה במכרז על טיסה דומה) או שהסבב בוטל ביוזמת החברה (ס' 40). ההסכמה מונחת; שואלים
- * אם התכנון היה לבקשת החברה רק כשהדוח לא מזכה. רצף מהחודש הקודם אינו נראה ואינו נשאל.
+ * אם התכנון היה לבקשת החברה רק כשהדוח לא מזכה. רצף שחוצה חודש נבדק בחודש של הלילה שמזכה: לילה מהחודש
+ * הקודם (`ctx.prevMonth`) נספר כשבוצע ברומה שלו, ובלעדיה לפי התכנון (בעל המוצר, 30/10/2026, טיוטה 431).
  */
 function consecutive_night_rounds(ctx, params, rule) {
   if (!ctx.hasPlan) return;
@@ -1443,19 +1459,28 @@ function consecutive_night_rounds(ctx, params, rule) {
     return [d0, addDays(d0, 1)].filter((d) => s.report < at(d, to) && s.end > at(d, from));
   };
 
+  const nightsOfPairing = (p) => nightsOf(ctx.duty.span(wholePairing(p, ctx.domicile)));
+  const prior = ctx.prevMonth;
+  const earlier = new Set(); // סבבים מהחודש הקודם
   const planned = new Map(); // לילה → סבב מתוכנן
+  const flownBefore = new Set((prior?.execPairings ?? []).flatMap(nightsOfPairing));
+  for (const p of prior?.planPairings ?? []) {
+    for (const d of nightsOfPairing(p)) {
+      if (!prior.hasExec || flownBefore.has(d)) { planned.set(d, p); earlier.add(p); }
+    }
+  }
   for (const p of planPairingsSorted(ctx)) {
-    for (const d of nightsOf(ctx.duty.span(p))) if (!planned.has(d)) planned.set(d, p);
+    for (const d of nightsOfPairing(p)) if (!planned.has(d)) planned.set(d, p);
   }
   const performed = new Map(); // לילה → סבב ביצוע
   if (ctx.hasExec) {
     for (const e of ctx.execPairings) {
-      for (const d of nightsOf(ctx.duty.span(e))) if (!performed.has(d)) performed.set(d, e);
+      for (const d of nightsOfPairing(e)) if (!performed.has(d)) performed.set(d, e);
     }
   }
   // done / company / no / unknown
   const statusOf = (d) => {
-    if (!ctx.hasExec || performed.has(d)) return 'done';
+    if (!ctx.hasExec || performed.has(d) || earlier.has(planned.get(d))) return 'done';
     const st = cancelStatus(ctx, planned.get(d));
     // זכייה במכרז על טיסת סבב לילה כבר נספרת כבוצעה דרך `performed`; אחרת היא אינה נספרת (ס' 40).
     if (st === 'bid') return 'no';
@@ -1472,6 +1497,8 @@ function consecutive_night_rounds(ctx, params, rule) {
 
   for (const run of runs) {
     if (run.length <= params.more_than) continue;
+    // הלילה שמזכה בסבב של החודש הקודם: הרצף נבדק שם.
+    if (earlier.has(planned.get(run[params.more_than]))) continue;
     const list = run.map(ddmm).join(', ');
     const statuses = run.map(statusOf);
     const what = `${rule.title}: ${run.length} טיסות סבב לילה מתוכננות בלילות ${list}`;
