@@ -55,8 +55,8 @@ export async function parseExec(data) {
   const legColumns = new Set();
   let current = null;
   const unknownColumns = new Set();
-  // עמודה בכותרת של טבלת הימים שמתחילה ב-P (PDFT, ‏PICKUP, ‏Pay Queries, גם חתוכה – "PD"): היא תמיד אחרי עמודות
-  // הפיצוי, ולכן עמודה שחסרה לפניה לא נחתכה בהדפסה (טיוטה 422).
+  // כש-PDFT אינה בכותרת של טבלת הימים: עמודה אחרת בה שמתחילה ב-P (חתוכה – "PD", "P" – או PICKUP, ‏Pay Queries).
+  // היא תמיד אחרי עמודות הפיצוי, ולכן עמודה שחסרה לפניה לא נחתכה בהדפסה (טיוטות 422–423).
   let headerP = null;
 
   for (const page of pages) {
@@ -66,7 +66,7 @@ export async function parseExec(data) {
         const unknown = row.map((i) => i.s).filter((s) => isUnknownColumn(s));
         unknown.forEach((c) => unknownColumns.add(c));
         dayCols = buildColumnMap(row, [...KNOWN_DAY_COLUMNS, ...IGNORED_DAY_COLUMNS, ...unknown]);
-        headerP ??= row.find((i) => i.s.startsWith('P'))?.s ?? null;
+        if (!row.some((i) => i.s === 'PDFT')) headerP ??= row.find((i) => i.s.startsWith('P'))?.s ?? null;
         legCols = null;
         continue;
       }

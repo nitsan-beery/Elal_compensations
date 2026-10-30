@@ -2399,14 +2399,16 @@ const EXPECTED_IN_COLUMN = { 'S/C': 'צפויה קריאה מיוחדת', COM: '
 
 /**
  * עמודה חסרה אינה תקלה, אבל כשהאפליקציה מצפה לערך בה, ייתכן שהיא נחתכה בהדפסה – הודעה בכחול, רק כשאין שאלות
- * פתוחות (עד התשובות הציפייה עוד יכולה להשתנות; טיוטה 407) וכשאין בכותרת עמודה שמתחילה ב-P (`headerP`): PDFT,
- * ‏PICKUP ו-Pay Queries באות תמיד אחרי עמודות הפיצוי, וההדפסה נחתכת מימין, ולכן עמודה שחסרה לפניהן לא הייתה
- * (33 רומות; בעל המוצר, 30/10/2026; טיוטות 421–422). כל עמודה שהאפליקציה משווה, לא רק עמודות הפיצוי.
- * חודש שנקרא לפני `headerP` – לפי PDFT.
+ * פתוחות (עד התשובות הציפייה עוד יכולה להשתנות; טיוטה 407). קודם PDFT: כשהיא ברומה, בטוח שלא נחתכה עמודה שלפניה.
+ * רק בלעדיה – עמודה אחרת בכותרת שמתחילה ב-P (`headerP`; PICKUP, ‏Pay Queries, או PDFT חתוכה). כולן באות תמיד אחרי
+ * עמודות הפיצוי, וההדפסה נחתכת מימין (33 רומות; בעל המוצר, 30/10/2026; טיוטות 421–423). כל עמודה שהאפליקציה
+ * משווה, לא רק עמודות הפיצוי.
  */
 function warnMissingColumns(out, exec) {
   const present = new Set(exec.columns ?? []);
-  if (out.questions.length || exec.headerP || present.has('PDFT')) return;
+  if (out.questions.length) return;
+  if (present.has('PDFT')) return;
+  if (exec.headerP?.startsWith('P')) return;
   const seen = new Set();
   for (const r of out.comparison) {
     const columns = r.column === 'S/C' ? [r.column] : String(r.column).split(/[/+]/);
