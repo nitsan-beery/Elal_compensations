@@ -1961,6 +1961,17 @@ function stayPairs(p) {
 const landedBefore = (ctx, p, stations) =>
   ctx.hasExec && !!p.cutAtStart && !p.prevLegs?.length && !p.legs[0].prevMonth && stations.includes(p.legs[0].org);
 
+/**
+ * סבב שנחת ביעד וחוזר בחודש הבא: כאן אי אפשר לבדוק את המנוחה. פיצוי בסכום של קיצור המנוחה בימי הסבב מוסבר בהנחה,
+ * ובלעדיו אין מה לעשות כאן: הבדיקה בחודש החזרה (בעל המוצר, 30/10/2026, טיוטה 435).
+ */
+function leavesNextMonth(ctx, p, params, rule, stations, key, hours, own) {
+  if (!ctx.hasExec || !p.cutAtEnd || !stations.includes(p.legs.at(-1).dst)) return;
+  if (!ctx.paidOn(p, params.report_column, key, hours, own)) return;
+  ctx.expectPairing(p, key, hours, rule, `קיצור מנוחה ב${params.station_name}`,
+    { explain: 'האפליקציה מניחה שהפיצוי הוא על קיצור מנוחה שלא ניתן לבדוק כיוון שהטיסה חוזרת בחודש הבא.' });
+}
+
 /** הסכום רשום ברומה של החודש הקודם, מהרגל הראשונה של הסבב שם ועד סוף אותו חודש. */
 export function paidEarlier(ctx, p, column, min) {
   const from = p.prevLegs?.[0]?.date;
@@ -2044,6 +2055,7 @@ function short_rest_miami(ctx, params, rule) {
           title: `קיצור מנוחה ב${params.station_name}: האם שהית שם לילה אחד בלבד?`,
           no: () => `${rule.title}: ${describePairing(p)}. ${moreNights}` });
       }
+      leavesNextMonth(ctx, p, params, rule, [params.station], key, hours, own);
       continue;
     }
     const what = stayLine(p, stay, params);
@@ -2198,6 +2210,7 @@ function short_rest_las_vegas(ctx, params, rule) {
         unknownStay(ctx, p, params, rule, { id: `las_vegas_rest:${p.id}`, key, hours, own, options, yesLabel: 'כן, המנוחה קוצרה',
           title: `${rule.title}: האם מגיע פיצוי?`, no: (a) => `${rule.title}: ${describePairing(p)}. ${noPay(a)}` });
       }
+      leavesNextMonth(ctx, p, params, rule, [params.station], key, hours, own);
       continue;
     }
     const what = stayLine(p, stay, params);
@@ -2266,6 +2279,7 @@ function short_rest_new_york(ctx, params, rule) {
         no: (a) => `${rule.title}: ${describePairing(p)}. ${NY_NO_PAY[a.reason] ?? NY_NO_PAY.other}` });
       continue;
     }
+    leavesNextMonth(ctx, p, params, rule, params.stations, key, hours, own);
     let n = 0;
     for (const [inLeg, outLeg] of stayPairs(p)) {
       if (!params.stations.includes(inLeg.dst) || !params.stations.includes(outLeg.org)) continue;
