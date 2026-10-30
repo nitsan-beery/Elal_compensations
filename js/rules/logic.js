@@ -869,7 +869,7 @@ function long_flight_day(ctx, params, rule) {
   for (const pairing of ctx.execPairings) {
     const byDate = new Map();
     for (const leg of pairing.legs) {
-      if (leg.skdDur == null) continue;
+      if (leg.skdDur == null || leg.prevMonth) continue; // `prevMonth`: נבדקה בחודש ההמראה (טיוטה 426)
       const d = byDate.get(leg.date) ?? { legs: 0, min: 0 };
       byDate.set(leg.date, { legs: d.legs + 1, min: d.min + leg.skdDur });
     }

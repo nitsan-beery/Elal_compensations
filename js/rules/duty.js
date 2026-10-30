@@ -1545,7 +1545,7 @@ export function whiteFlightLegs(ctx, params) {
     for (const l of p.legs) {
       const dh = ctx.hasExec ? l.dhd || l.type === 'DHO' : l.dh;
       const t = legTimes(l, ctx.tz);
-      if (dh || l.org !== ctx.domicile || !t) continue;
+      if (dh || l.prevMonth || l.org !== ctx.domicile || !t) continue;
       const reportAt = t.std - ctx.duty.reportBefore(l);
       if (!inWindow(clockOf(reportAt))) continue;
       const block = legBlock(ctx, l);
@@ -1632,7 +1632,7 @@ function ulh_flight(ctx, params, rule) {
 
   for (const { pairing, plan } of entries) {
     for (const l of pairing.legs) {
-      if (ctx.hasExec ? l.dhd || l.type === 'DHO' : l.dh) continue;
+      if (l.prevMonth || (ctx.hasExec ? l.dhd || l.type === 'DHO' : l.dh)) continue; // `prevMonth`: נבדקה בחודש ההמראה (טיוטה 426)
       const block = legBlock(ctx, l);
       if (block == null || block <= min || block > max) continue;
 
@@ -1892,9 +1892,7 @@ function stay_extension(ctx, params, rule) {
  * בשעון התחנה, כי חלון הלילה של ס' 24.3 הוא מקומי. רגל DH נספרת גם היא: הצוות שוהה בתחנה בכל מקרה.
  */
 function stationStay(ctx, pairing, params, actual) {
-  const legs = pairing.legs;
-  for (let i = 0; i < legs.length - 1; i++) {
-    const [inLeg, outLeg] = [legs[i], legs[i + 1]];
+  for (const [inLeg, outLeg] of stayPairs(pairing)) {
     if (inLeg.dst !== params.station || outLeg.org !== params.station) continue;
     const [a, b] = [legTimes(inLeg, ctx.tz), legTimes(outLeg, ctx.tz)];
     const off = ctx.tz.offsetAt(params.station, inLeg.date);
@@ -1906,6 +1904,55 @@ function stationStay(ctx, pairing, params, actual) {
     return { inLeg, outLeg, arr, pickup, reportMin, localArr: arr + off, localPickup: pickup + off };
   }
   return null;
+}
+
+/**
+ * הרגליים העוקבות של הסבב, כולל מה שטס בחודש הקודם (`prevLegs`), כשההמראה מהיעד בחודש הזה. שהייה שההמראה ממנה
+ * בחודש הקודם, גם ברגל שהרומה חוזרת עליה ב-1 לחודש (`prevMonth`), נבדקה בו (בעל המוצר, 30/10/2026, טיוטה 426).
+ */
+function stayPairs(p) {
+  const legs = [...(p.prevLegs ?? []), ...p.legs];
+  return legs.slice(0, -1).map((l, i) => [l, legs[i + 1]]).filter(([, out]) => p.legs.includes(out) && !out.prevMonth);
+}
+
+/** סבב שיצא בחודש הקודם, בלי נתונים על הנחיתה ביעד: הרגל הראשונה שלו בחודש יוצאת מהיעד. */
+const landedBefore = (ctx, p, stations) =>
+  ctx.hasExec && !!p.cutAtStart && !p.prevLegs?.length && !p.legs[0].prevMonth && stations.includes(p.legs[0].org);
+
+/** הסכום רשום ברומה של החודש הקודם, מהרגל הראשונה של הסבב שם ועד סוף אותו חודש. */
+function paidEarlier(ctx, p, column, min) {
+  const from = p.prevLegs?.[0]?.date;
+  if (!from || !ctx.prevExec) return false;
+  return Object.values(ctx.prevExec.days).filter((d) => d.date >= from)
+    .reduce((s, d) => s + (d.values?.[column]?.min ?? 0), 0) >= min;
+}
+
+const paidThereNote = (ctx, date, params, rule) =>
+  ctx.note(date, `קיצור מנוחה ב${params.station_name}: הפיצוי רשום ברומה של החודש הקודם.`, rule);
+
+/**
+ * שהייה שהנחיתה בה הייתה בחודש הקודם, בלי נתונים עליה (`landedBefore`): הרומה זיכתה – הנחה, ולא זיכתה – השאלה של היעד
+ * (בעל המוצר, 30/10/2026, טיוטה 426). שם היעד ולא קוד השדה: לניו יורק נוחתים בשדה אחד וממריאים מהשני.
+ */
+function unknownStay(ctx, p, params, rule, { id, key, hours, own, title, yesLabel, options, no }) {
+  const name = params.station_name;
+  const answered = ctx.answer(id);
+  const here = ctx.paidOn(p, params.report_column, key, hours, own);
+  const a = answered ?? (here ? ctx.assume(id, 'yes', yesLabel) : null);
+  if (!a) {
+    ctx.ask({
+      id,
+      date: p.from,
+      title,
+      body: `הנחיתה ב${name} הייתה בחודש הקודם ללא נתונים על שעת הנחיתה, ולכן נבדק האם מגיע פיצוי על קיצור מנוחה ביעד. הרומה לא מזכה ${minToHhmm(hours)}.`,
+      options,
+      ruleId: rule.id,
+    });
+    return;
+  }
+  if (a.value !== 'yes') { ctx.note(p.from, no(a), rule); return; }
+  ctx.expectPairing(p, key, hours, rule, `קיצור מנוחה ב${name}`,
+    { explain: answered ? `קיצור מנוחה ב${name}.` : `הרומה מזכה את הפיצוי, ולכן האפליקציה מניחה שזה קיצור מנוחה ב${name}.` });
 }
 
 /**
@@ -1942,9 +1989,21 @@ function short_rest_miami(ctx, params, rule) {
   const to = parseClock(params.night_to);
   const own = ctx.rulesWithLogic('short_rest_miami').map((r) => r.id);
   const window = `בין ${params.night_from} ל-${params.night_to}`;
+  const options = [
+    { value: 'yes', label: 'כן, לילה אחד בלבד', hint: `${minToHhmm(hours)} – פער מול הרומה` },
+    { value: 'no', label: 'לא, יותר מלילה אחד', hint: 'אין פיצוי' },
+  ];
+  const moreNights = 'לפי תשובתך שהית שם יותר מלילה אחד, ולכן אין פיצוי.';
   for (const p of ctx.hasExec ? ctx.execPairings : ctx.planPairings) {
     const stay = stationStay(ctx, p, params, ctx.hasExec);
-    if (!stay) continue;
+    if (!stay) {
+      if (landedBefore(ctx, p, [params.station])) {
+        unknownStay(ctx, p, params, rule, { id: `miami_short_rest:${p.id}`, key, hours, own, options, yesLabel: 'כן, לילה אחד בלבד',
+          title: `קיצור מנוחה ב${params.station_name}: האם שהית שם לילה אחד בלבד?`,
+          no: () => `${rule.title}: ${describePairing(p)}. ${moreNights}` });
+      }
+      continue;
+    }
     const what = stayLine(p, stay, params);
     const nights = nightsIn(from, to, stay.localArr, stay.localPickup);
     if (nights !== params.max_nights) {
@@ -1961,9 +2020,11 @@ function short_rest_miami(ctx, params, rule) {
     }
     const id = `miami_short_rest:${p.id}`;
     const answered = ctx.answer(id);
-    const a = answered ?? (ctx.paidOn(p, params.report_column, key, hours, own) ? ctx.assume(id, 'yes', 'כן, לילה אחד בלבד') : null);
+    const here = ctx.paidOn(p, params.report_column, key, hours, own);
+    const before = !here && paidEarlier(ctx, p, params.report_column, hours);
+    const a = answered ?? (here || before ? ctx.assume(id, 'yes', 'כן, לילה אחד בלבד') : null);
     if (a?.value === 'no') {
-      ctx.note(p.from, `${rule.title}: ${what}. לפי תשובתך שהית שם יותר מלילה אחד, ולכן אין פיצוי.`, rule);
+      ctx.note(p.from, `${rule.title}: ${what}. ${moreNights}`, rule);
       continue;
     }
     if (!a) {
@@ -1972,15 +2033,13 @@ function short_rest_miami(ctx, params, rule) {
         date: p.from,
         title: `קיצור מנוחה ב-${params.station}: האם שהית שם לילה אחד בלבד?`,
         body: `${what}. לפי החישוב זה לילה אחד ${window}, והרומה לא מזכה ${minToHhmm(hours)}. ${derived}`,
-        options: [
-          { value: 'yes', label: 'כן, לילה אחד בלבד', hint: `${minToHhmm(hours)} – פער מול הרומה` },
-          { value: 'no', label: 'לא, יותר מלילה אחד', hint: 'אין פיצוי' },
-        ],
+        options,
         ruleId: rule.id,
       });
       continue;
     }
     ctx.markPairing(p, 'miami_one_night');
+    if (before) { paidThereNote(ctx, p.from, params, rule); continue; }
     ctx.expectPairing(p, key, hours, rule,
       `${why} (${answered ? 'לפי תשובתך' : `לפי מה שהרומה מזכה`})`);
   }
@@ -2082,9 +2141,23 @@ function short_rest_las_vegas(ctx, params, rule) {
   const own = ctx.rulesWithLogic('short_rest_las_vegas').map((r) => r.id);
   const deal = `המנוחה החוזית ב-${params.station} מקוצרת ל-${params.rest_hours} שעות בתמורה לפיצוי של ` +
     `${minToHhmm(hours)}, כל עוד החברה טסה לשם פעם בשבוע.`;
+  const options = [
+    { value: 'yes', label: 'כן, המנוחה קוצרה', hint: `${minToHhmm(hours)} – פער מול הרומה` },
+    { value: 'full_rest', label: 'לא, קיבלתי את המנוחה החוזית המלאה', hint: 'אין פיצוי' },
+    { value: 'not_weekly', label: `החברה אינה טסה ל-${params.station} פעם בשבוע`, hint: 'אין פיצוי' },
+  ];
+  const noPay = (a) => (a.value === 'full_rest'
+    ? 'לפי תשובתך המנוחה לא קוצרה, ולכן אין פיצוי.'
+    : `לפי תשובתך החברה אינה טסה ל-${params.station} פעם בשבוע, ולכן הקיצור אינו בתוקף ואין פיצוי.`);
   for (const p of ctx.hasExec ? ctx.execPairings : ctx.planPairings) {
     const stay = stationStay(ctx, p, params, ctx.hasExec);
-    if (!stay) continue;
+    if (!stay) {
+      if (landedBefore(ctx, p, [params.station])) {
+        unknownStay(ctx, p, params, rule, { id: `las_vegas_rest:${p.id}`, key, hours, own, options, yesLabel: 'כן, המנוחה קוצרה',
+          title: `${rule.title}: האם מגיע פיצוי?`, no: (a) => `${rule.title}: ${describePairing(p)}. ${noPay(a)}` });
+      }
+      continue;
+    }
     const what = stayLine(p, stay, params);
     const derived = derivedReport(stay);
     if (!ctx.hasExec) {
@@ -2093,28 +2166,25 @@ function short_rest_las_vegas(ctx, params, rule) {
     }
     const id = `las_vegas_rest:${p.id}`;
     const answered = ctx.answer(id);
-    const a = answered ?? (ctx.paidOn(p, params.report_column, key, hours, own) ? ctx.assume(id, 'yes', 'כן, המנוחה קוצרה') : null);
+    const here = ctx.paidOn(p, params.report_column, key, hours, own);
+    const before = !here && paidEarlier(ctx, p, params.report_column, hours);
+    const a = answered ?? (here || before ? ctx.assume(id, 'yes', 'כן, המנוחה קוצרה') : null);
     if (!a) {
       ctx.ask({
         id,
         date: p.from,
         title: `קיצור מנוחה ב-${params.station}: האם מגיע פיצוי?`,
         body: `${what}. ${deal} הרומה לא מזכה ${minToHhmm(hours)}, והסיבה אינה בקבצים. ${derived}`,
-        options: [
-          { value: 'yes', label: 'כן, המנוחה קוצרה', hint: `${minToHhmm(hours)} – פער מול הרומה` },
-          { value: 'full_rest', label: 'לא, קיבלתי את המנוחה החוזית המלאה', hint: 'אין פיצוי' },
-          { value: 'not_weekly', label: `החברה אינה טסה ל-${params.station} פעם בשבוע`, hint: 'אין פיצוי' },
-        ],
+        options,
         ruleId: rule.id,
       });
       continue;
     }
     if (a.value !== 'yes') {
-      ctx.note(p.from, `${rule.title}: ${what}. ` + (a.value === 'full_rest'
-        ? 'לפי תשובתך המנוחה לא קוצרה, ולכן אין פיצוי.'
-        : `לפי תשובתך החברה אינה טסה ל-${params.station} פעם בשבוע, ולכן הקיצור אינו בתוקף ואין פיצוי.`), rule);
+      ctx.note(p.from, `${rule.title}: ${what}. ${noPay(a)}`, rule);
       continue;
     }
+    if (before) { paidThereNote(ctx, p.from, params, rule); continue; }
     ctx.expectPairing(p, key, hours, rule, `${what}. ${deal} הפיצוי נרשם ` +
       `${answered ? 'לפי תשובתך' : `לפי מה שהרומה מזכה`}. ${derived}`);
   }
@@ -2128,31 +2198,42 @@ const NY_REASONS = [
   { value: 'peak_month', label: 'חודש עומס' },
   { value: 'other', label: 'סיבה אחרת' },
 ];
-const NY_NO_PAY = { voluntary: 'החלפה מרצוני – אין פיצוי.', peak_month: 'חודש עומס – הקיצור מותר בלי פיצוי.', other: 'סיבה אחרת – אין פיצוי.' };
+const NY_NO_PAY = { voluntary: 'החלפה מרצוני – אין פיצוי.', peak_month: 'חודש עומס – הקיצור מותר בלי פיצוי.', other: 'סיבה אחרת – אין פיצוי.',
+  full_rest: 'המנוחה לא קוצרה – אין פיצוי.' };
 
 /**
  * קיצור המנוחה בניו יורק: המנוחה במלון היא STD של הרגל שיוצאת מהשדה פחות STA של הרגל שנחתה בו (המתוכננים, גם
  * מול הרומה), פחות `transfer_minutes` לנסיעות ולקבלת החדר (בעל המוצר, 29/10/2026). מתחת ל-`rest_hours` מגיע פיצוי
  * (2018 ס' 27.3), אלא בחודש עומס, שבו החברה רשאית לקצר בלי פיצוי (ס' 143.1.1, 143.1.5). חודשי העומס אינם בקבצים:
- * כשהרומה זיכתה – הנחה; כשלא – שאלה, עם סיבה ליד "לא מגיע פיצוי". רגל DH נספרת גם היא.
+ * כשהרומה זיכתה – הנחה; כשלא – שאלה, עם סיבה ליד "לא מגיע פיצוי". רגל DH נספרת גם היא. נחיתה בשדה אחד והמראה
+ * מהשני – אותו חישוב, עם אותן 5:15 (בעל המוצר, 30/10/2026, טיוטה 426).
  */
 function short_rest_new_york(ctx, params, rule) {
   const key = keyFor(params.report_column);
   const hours = H(params.hours);
   const own = ctx.rulesWithLogic('short_rest_new_york').map((r) => r.id);
+  const options = (reasons) => [
+    { value: 'yes', label: 'מגיע פיצוי', hint: `${minToHhmm(hours)}, פער מול הרומה` },
+    { value: 'no', label: 'לא מגיע פיצוי', reasons },
+  ];
   for (const p of ctx.hasExec ? ctx.execPairings : ctx.planPairings) {
-    const legs = p.legs;
+    if (landedBefore(ctx, p, params.stations)) {
+      unknownStay(ctx, p, params, rule, { id: `new_york_rest:${p.id}`, key, hours, own, yesLabel: 'מגיע פיצוי',
+        title: `${rule.title}: האם מגיע פיצוי?`,
+        options: options([{ value: 'full_rest', label: 'המנוחה לא קוצרה' }, ...NY_REASONS]),
+        no: (a) => `${rule.title}: ${describePairing(p)}. ${NY_NO_PAY[a.reason] ?? NY_NO_PAY.other}` });
+      continue;
+    }
     let n = 0;
-    for (let i = 0; i < legs.length - 1; i++) {
-      const [inLeg, outLeg] = [legs[i], legs[i + 1]];
-      if (!params.stations.includes(inLeg.dst) || outLeg.org !== inLeg.dst) continue;
+    for (const [inLeg, outLeg] of stayPairs(p)) {
+      if (!params.stations.includes(inLeg.dst) || !params.stations.includes(outLeg.org)) continue;
       const [a, b] = [legTimes(inLeg, ctx.tz), legTimes(outLeg, ctx.tz)];
       if (a?.sta == null || b?.std == null) continue;
       const gap = b.std - a.sta;
       const rest = gap - params.transfer_minutes;
       if (rest >= H(params.rest_hours)) continue;
       const days = inLeg.date === outLeg.date ? ddmm(inLeg.date) : `${ddmm(inLeg.date)}–${ddmm(outLeg.date)}`;
-      const where = `⁦${days} ${inLeg.dst}⁩`;
+      const where = `⁦${days} ${inLeg.dst === outLeg.org ? inLeg.dst : `${inLeg.dst}/${outLeg.org}`}⁩`;
       const calc = `${minToHhmm(gap)} בין STA ל-STD`;
       const explain = `פחות מ-${params.rest_hours} שעות מנוחה במלון (${calc}, פחות ${minToHhmm(params.transfer_minutes)} זמן מנהלות = ${minToHhmm(rest)}).`;
       if (!ctx.hasExec) {
@@ -2161,7 +2242,9 @@ function short_rest_new_york(ctx, params, rule) {
       }
       const id = `new_york_rest:${p.id}${n++ ? `:${n}` : ''}`;
       const answered = ctx.answer(id);
-      const a2 = answered ?? (ctx.paidOn(p, params.report_column, key, hours, own) ? ctx.assume(id, 'yes', 'מגיע פיצוי') : null);
+      const here = ctx.paidOn(p, params.report_column, key, hours, own);
+      const before = !here && paidEarlier(ctx, p, params.report_column, hours);
+      const a2 = answered ?? (here || before ? ctx.assume(id, 'yes', 'מגיע פיצוי') : null);
       if (!a2) {
         ctx.ask({
           id,
@@ -2169,10 +2252,7 @@ function short_rest_new_york(ctx, params, rule) {
           title: `${rule.title}: האם מגיע פיצוי?`,
           body: `${where}: פחות מ-${params.rest_hours} שעות מנוחה במלון (${calc}, פחות ${minToHhmm(params.transfer_minutes)} זמן נסיעה והתארגנות במלון = ` +
             `${minToHhmm(rest)} שעות במלון). הרומה לא מזכה ${minToHhmm(hours)}.`,
-          options: [
-            { value: 'yes', label: 'מגיע פיצוי', hint: `${minToHhmm(hours)}, פער מול הרומה` },
-            { value: 'no', label: 'לא מגיע פיצוי', reasons: NY_REASONS },
-          ],
+          options: options(NY_REASONS),
           ruleId: rule.id,
         });
         continue;
@@ -2181,6 +2261,7 @@ function short_rest_new_york(ctx, params, rule) {
         ctx.note(inLeg.date, `${where}: ${minToHhmm(rest)} שעות מנוחה במלון. ${NY_NO_PAY[a2.reason] ?? NY_NO_PAY.other}`, rule);
         continue;
       }
+      if (before) { paidThereNote(ctx, p.from, params, rule); continue; }
       ctx.expectPairing(p, key, hours, rule, `${where}: ${explain}`,
         { explain: answered ? explain : `${explain} הרומה מזכה את הפיצוי.` });
     }
@@ -2354,10 +2435,10 @@ export const DUTY_PARAMS = {
   white_flight: ['hours', 'report_column', 'report_after', 'report_until', 'min_block_hours'],
   ulh_flight: ['hours', 'report_column', 'min_block_hours', 'max_block_hours'],
   stay_extension: ['over_hours', 'capped_days', 'hours', 'report_column'],
-  short_rest_miami: ['station', 'night_from', 'night_to', 'max_nights', 'hours', 'report_column'],
+  short_rest_miami: ['station', 'station_name', 'night_from', 'night_to', 'max_nights', 'hours', 'report_column'],
   miami_delay: ['station', 'phase', 'min_delay_hours', 'min_delay_exclusive', 'hours', 'report_column'],
-  short_rest_las_vegas: ['station', 'rest_hours', 'hours', 'report_column'],
-  short_rest_new_york: ['stations', 'rest_hours', 'transfer_minutes', 'hours', 'report_column'],
+  short_rest_las_vegas: ['station', 'station_name', 'rest_hours', 'hours', 'report_column'],
+  short_rest_new_york: ['stations', 'station_name', 'rest_hours', 'transfer_minutes', 'hours', 'report_column'],
   sim_night_session: ['hours', 'report_column', 'stations', 'night_from', 'night_to', 'start_after_std_minutes'],
   sim_friday_holiday_eve: ['hours', 'report_column', 'stations'],
   sim_extension: ['hours', 'report_column', 'stations', 'max_hours'],

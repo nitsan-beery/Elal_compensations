@@ -203,7 +203,7 @@ function execDuties(exec, o, planned = null, softStart = null, prevExec = null) 
   const out = [];
   const days = Object.values(exec.days).sort((a, b) => a.date.localeCompare(b.date));
   // ב-1 לחודש הרומה חוזרת על הרגל שיצאה ביום האחרון של החודש הקודם (`prevMonth`), גם בחודשים הקודמים.
-  if (days[0]?.date.endsWith('-01')) markCarryIn(days.map((d) => ({ exec: d })), domicile, prevExec);
+  if (days[0]?.date.endsWith('-01')) markCarryIn(days.map((d) => ({ exec: d })), domicile, prevExec && { exec: prevExec });
   for (const day of days) {
     const legs = [];
     for (const leg of day.legs ?? []) {

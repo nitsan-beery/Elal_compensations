@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "rules_version": "2026-10-29.3",
+  "rules_version": "2026-10-30.1",
   "updated": "2026-10-29",
   "source": "טבלת פיצויי אצ\"א אל על (Artifact), על בסיס ההסכם הישן (פרק כ\"ה), הסכם 2018, הסכם אצ\"א 2024 והסכם 2026",
   "precedence": "הסכם מאוחר גובר על מוקדם. סעיף שלא בוטל ולא שונה נשאר בתוקף. פיצויי 2018, 2024 ו‑2026 באים בנוסף לפיצויים מהסכמים אחרים.",
@@ -1540,6 +1540,7 @@
         "id": "short_rest_las_vegas",
         "supported": true,
         "params": {
+          "station_name": "לאס וגאס",
           "station": "LAS",
           "rest_hours": 27,
           "hours": 5,
@@ -1567,6 +1568,7 @@
         "id": "short_rest_new_york",
         "supported": true,
         "params": {
+          "station_name": "ניו יורק",
           "stations": [
             "JFK",
             "EWR"
@@ -1597,6 +1599,7 @@
         "id": "short_rest_miami",
         "supported": true,
         "params": {
+          "station_name": "מיאמי",
           "station": "MIA",
           "night_from": "23:00",
           "night_to": "05:00",

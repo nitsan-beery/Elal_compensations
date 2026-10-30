@@ -141,7 +141,7 @@ function evaluateFiles({ rulesData, plan = null, exec = null, answers = {}, hist
   const fdp = slip?.legal_rest_hours != null
     ? { legalRestMin: slip.legal_rest_hours * 60, reportBefore: duty.reportBefore, releaseAfter: duty.releaseAfter, tz } : null;
   const execPairings = exec ? buildPairings(timeline, domicile, (d) => d.exec?.legs, fdp) : [];
-  attachCarried(execPairings[0], timeline, domicile, prev);
+  attachCarried(exec ? execPairings[0] : planPairings[0], timeline, domicile, prev);
   const reportDays = exec ? attachReportTails(execPairings, timeline, tz, codes, answers) : [];
   markLandingDays(planPairings, execPairings, timeline, tz);
   const dependentAnswers = {};
