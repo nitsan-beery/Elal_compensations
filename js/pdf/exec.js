@@ -55,6 +55,9 @@ export async function parseExec(data) {
   const legColumns = new Set();
   let current = null;
   const unknownColumns = new Set();
+  // עמודה בכותרת של טבלת הימים שמתחילה ב-P (PDFT, ‏PICKUP, ‏Pay Queries, גם חתוכה – "PD"): היא תמיד אחרי עמודות
+  // הפיצוי, ולכן עמודה שחסרה לפניה לא נחתכה בהדפסה (טיוטה 422).
+  let headerP = null;
 
   for (const page of pages) {
     for (const row of toRows(page.items)) {
@@ -63,6 +66,7 @@ export async function parseExec(data) {
         const unknown = row.map((i) => i.s).filter((s) => isUnknownColumn(s));
         unknown.forEach((c) => unknownColumns.add(c));
         dayCols = buildColumnMap(row, [...KNOWN_DAY_COLUMNS, ...IGNORED_DAY_COLUMNS, ...unknown]);
+        headerP ??= row.find((i) => i.s.startsWith('P'))?.s ?? null;
         legCols = null;
         continue;
       }
@@ -108,6 +112,7 @@ export async function parseExec(data) {
     ...header,
     columns: present,
     missingColumns: missing,
+    headerP,
     // עמודות בטבלת הימים שהאפליקציה אינה מכירה: מוצגות למשתמש עם הקודים הלא מוכרים (`collectUnknownCodes`).
     unknownColumns: [...unknownColumns],
     legColumns: [...legColumns],

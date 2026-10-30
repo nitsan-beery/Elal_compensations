@@ -2392,21 +2392,27 @@ function compareTotals(out, exec) {
   });
 }
 
-/** מה צפוי בעמודה, באזהרה על עמודה חסרה. */
-const EXPECTED_IN_COLUMN = { 'S/C': 'צפויה קריאה מיוחדת', COM: 'צפוי פיצוי', Rig: 'צפוי Rig' };
+/** מה צפוי בעמודה, בהודעה על עמודה חסרה. */
+const EXPECTED_IN_COLUMN = { 'S/C': 'צפויה קריאה מיוחדת', COM: 'צפוי פיצוי', Rig: 'צפוי Rig', TAB: 'צפויות שעות שהייה',
+  MIL: 'צפוי סימון מילואים', SICK: 'צפוי סימון מחלה', SCKFM: 'צפוי סימון מחלת בן משפחה', VAC: 'צפוי סימון חופשה',
+  SIM: 'צפוי סימון סימולטור', CORS: 'צפוי סימון פעילות קרקע', SBY: 'צפוי סימון כוננות' };
 
 /**
- * עמודת פיצוי חסרה אינה תקלה, אבל כשהאפליקציה מצפה לסכום בה, ייתכן שהיא נחתכה בהדפסה. רק כשאין שאלות
- * פתוחות: עד התשובות הציפייה עוד יכולה להשתנות (בעל המוצר, 22/10/2026; טיוטה 407; עד אז לפי הפער במשבצת
- * הסיכום, ומאז ש-S/C בתוך COM גם פער ב-COM הציג אזהרה על S/C). כש-PDFT ברומה – בלי אזהרה: עמודות הפיצוי
- * תמיד לפניה, וההדפסה נחתכת מימין, ולכן עמודה שחסרה לא הייתה (33 רומות; בעל המוצר, 30/10/2026; טיוטה 421).
+ * עמודה חסרה אינה תקלה, אבל כשהאפליקציה מצפה לערך בה, ייתכן שהיא נחתכה בהדפסה – הודעה בכחול, רק כשאין שאלות
+ * פתוחות (עד התשובות הציפייה עוד יכולה להשתנות; טיוטה 407) וכשאין בכותרת עמודה שמתחילה ב-P (`headerP`): PDFT,
+ * ‏PICKUP ו-Pay Queries באות תמיד אחרי עמודות הפיצוי, וההדפסה נחתכת מימין, ולכן עמודה שחסרה לפניהן לא הייתה
+ * (33 רומות; בעל המוצר, 30/10/2026; טיוטות 421–422). כל עמודה שהאפליקציה משווה, לא רק עמודות הפיצוי.
+ * חודש שנקרא לפני `headerP` – לפי PDFT.
  */
 function warnMissingColumns(out, exec) {
-  if (out.questions.length || (exec.columns ?? []).includes('PDFT')) return;
-  const missing = (exec.missingColumns ?? []).filter((c) => OPTIONAL_COLUMNS.includes(c));
-  for (const column of missing) {
-    if (!out.comparison.some((r) => r.column === column && r.expected > 0)) continue;
-    out.warnings.push(`${EXPECTED_IN_COLUMN[column] ?? `צפוי ${column}`}, והעמודה ${column} לא מופיעה ברומה. ייתכן שהעמודה נחתכה בהדפסה.`);
+  const present = new Set(exec.columns ?? []);
+  if (out.questions.length || exec.headerP || present.has('PDFT')) return;
+  const seen = new Set();
+  for (const r of out.comparison) {
+    const columns = r.column === 'S/C' ? [r.column] : String(r.column).split(/[/+]/);
+    if (!(r.expected > 0) || columns.some((c) => present.has(c)) || seen.has(r.column)) continue;
+    seen.add(r.column);
+    out.infos.push(`${EXPECTED_IN_COLUMN[columns[0]] ?? `צפוי ${columns[0]}`}, והעמודה ${columns.join(' או ')} לא מופיעה ברומה. ייתכן שהעמודה נחתכה בהדפסה.`);
   }
 }
 
