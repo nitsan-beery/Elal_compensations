@@ -750,6 +750,9 @@ function legEndsFdp(ctx, legs, i, legal) {
   return b.std - a.sta - ctx.duty.releaseAfter(legs[i]) - ctx.duty.reportBefore(legs[i + 1]) >= legal;
 }
 
+/** רגלי הסבב, עם המשך שלו בחודש הבא, כשהוא שמור (`nextLegs`; טיוטה 438): ה-FDP יכול להימשך שם. */
+const withNext = (p) => [...p.legs, ...(p.nextLegs ?? [])];
+
 /** שעת הנחיתה המתוכננת של רגל בשעון הבסיס (`legTimes`), או null. */
 function arrivalClock(ctx, leg) {
   const t = legTimes(leg, ctx.tz);
@@ -765,7 +768,7 @@ function execNightLanding(ctx, pairing, params, inWindow, legal) {
   const dh = (l) => l.dhd || l.type === 'DHO' || l.type === 'DHX';
   for (let i = 0; i < pairing.legs.length; i++) {
     const l = pairing.legs[i];
-    if (dh(l) || !legEndsFdp(ctx, pairing.legs, i, legal)) continue;
+    if (dh(l) || !legEndsFdp(ctx, withNext(pairing), i, legal)) continue;
     if (params.base_landings_only && l.dst !== ctx.domicile) continue;
     if (params.fleet && (l.ac ?? ctx.fleet) !== params.fleet) continue;
     const clock = arrivalClock(ctx, l);
@@ -789,7 +792,7 @@ function night_landings(ctx, params, rule) {
   for (const p of ctx.planPairings) {
     p.legs.forEach((leg, i) => {
       if (leg.dh || !leg.arr) return;
-      if (!legEndsFdp(ctx, p.legs, i, legal)) return;
+      if (!legEndsFdp(ctx, withNext(p), i, legal)) return;
       if (params.base_landings_only && leg.dst !== ctx.domicile) return;
       if (params.fleet && (leg.ac ?? ctx.fleet) !== params.fleet) return;
       const clock = arrivalClock(ctx, leg);
@@ -1936,16 +1939,20 @@ function stay_extension(ctx, params, rule) {
 function stationStay(ctx, pairing, params, actual) {
   for (const [inLeg, outLeg] of stayPairs(pairing)) {
     if (inLeg.dst !== params.station || outLeg.org !== params.station) continue;
-    const [a, b] = [legTimes(inLeg, ctx.tz), legTimes(outLeg, ctx.tz)];
-    const off = ctx.tz.offsetAt(params.station, inLeg.date);
-    const arr = actual ? a?.ata ?? a?.sta : a?.sta;
-    if (arr == null || !b || off == null) return null;
-    const reportMin = ctx.duty.reportBefore(outLeg);
-    const pickup = b.std - reportMin;
-    if (pickup <= arr) return null;
-    return { inLeg, outLeg, arr, pickup, reportMin, localArr: arr + off, localPickup: pickup + off };
+    return stayTimes(ctx, inLeg, outLeg, params, actual);
   }
   return null;
+}
+
+function stayTimes(ctx, inLeg, outLeg, params, actual) {
+  const [a, b] = [legTimes(inLeg, ctx.tz), legTimes(outLeg, ctx.tz)];
+  const off = ctx.tz.offsetAt(params.station, inLeg.date);
+  const arr = actual ? a?.ata ?? a?.sta : a?.sta;
+  if (arr == null || !b || off == null) return null;
+  const reportMin = ctx.duty.reportBefore(outLeg);
+  const pickup = b.std - reportMin;
+  if (pickup <= arr) return null;
+  return { inLeg, outLeg, arr, pickup, reportMin, localArr: arr + off, localPickup: pickup + off };
 }
 
 /**
@@ -1962,14 +1969,17 @@ const landedBefore = (ctx, p, stations) =>
   ctx.hasExec && !!p.cutAtStart && !p.prevLegs?.length && !p.legs[0].prevMonth && stations.includes(p.legs[0].org);
 
 /**
- * סבב שנחת ביעד וחוזר בחודש הבא: כאן אי אפשר לבדוק את המנוחה. פיצוי בסכום של קיצור המנוחה בימי הסבב מוסבר בהנחה,
- * ובלעדיו אין מה לעשות כאן: הבדיקה בחודש החזרה (בעל המוצר, 30/10/2026, טיוטה 435).
+ * סבב שנחת ביעד וחוזר בחודש הבא, ובימיו פיצוי בסכום של קיצור המנוחה. כשהחודש הבא שמור (`nextLegs`) בודקים את המנוחה
+ * (`check`: ההסבר, או null כשאינה מקוצרת), ובלעדיו – הנחה. בלי פיצוי כאן אין מה לעשות: הבדיקה והשאלה בחודש החזרה
+ * (בעל המוצר, 30/10/2026, טיוטות 435, 438).
  */
-function leavesNextMonth(ctx, p, params, rule, stations, key, hours, own) {
+function leavesNextMonth(ctx, p, params, rule, stations, key, hours, own, check) {
   if (!ctx.hasExec || !p.cutAtEnd || !stations.includes(p.legs.at(-1).dst)) return;
   if (!ctx.paidOn(p, params.report_column, key, hours, own)) return;
-  ctx.expectPairing(p, key, hours, rule, `קיצור מנוחה ב${params.station_name}`,
-    { explain: 'האפליקציה מניחה שהפיצוי הוא על קיצור מנוחה שלא ניתן לבדוק כיוון שהטיסה חוזרת בחודש הבא.' });
+  const back = p.nextLegs?.[0];
+  const explain = !back ? 'האפליקציה מניחה שהפיצוי הוא על קיצור מנוחה שלא ניתן לבדוק כיוון שהטיסה חוזרת בחודש הבא.'
+    : stations.includes(back.org) ? check(p.legs.at(-1), back) : null;
+  if (explain) ctx.expectPairing(p, key, hours, rule, `קיצור מנוחה ב${params.station_name}`, { explain });
 }
 
 /** הסכום רשום ברומה של החודש הקודם, מהרגל הראשונה של הסבב שם ועד סוף אותו חודש. */
@@ -2055,7 +2065,10 @@ function short_rest_miami(ctx, params, rule) {
           title: `קיצור מנוחה ב${params.station_name}: האם שהית שם לילה אחד בלבד?`,
           no: () => `${rule.title}: ${describePairing(p)}. ${moreNights}` });
       }
-      leavesNextMonth(ctx, p, params, rule, [params.station], key, hours, own);
+      leavesNextMonth(ctx, p, params, rule, [params.station], key, hours, own, (a, b) => {
+        const s = stayTimes(ctx, a, b, params, true);
+        return s && nightsIn(from, to, s.localArr, s.localPickup) === params.max_nights ? `לילה אחד בלבד ${window}.` : null;
+      });
       continue;
     }
     const what = stayLine(p, stay, params);
@@ -2210,7 +2223,7 @@ function short_rest_las_vegas(ctx, params, rule) {
         unknownStay(ctx, p, params, rule, { id: `las_vegas_rest:${p.id}`, key, hours, own, options, yesLabel: 'כן, המנוחה קוצרה',
           title: `${rule.title}: האם מגיע פיצוי?`, no: (a) => `${rule.title}: ${describePairing(p)}. ${noPay(a)}` });
       }
-      leavesNextMonth(ctx, p, params, rule, [params.station], key, hours, own);
+      leavesNextMonth(ctx, p, params, rule, [params.station], key, hours, own, () => `${rule.title}.`);
       continue;
     }
     const what = stayLine(p, stay, params);
@@ -2267,6 +2280,15 @@ function short_rest_new_york(ctx, params, rule) {
   const key = keyFor(params.report_column);
   const hours = H(params.hours);
   const own = ctx.rulesWithLogic('short_rest_new_york').map((r) => r.id);
+  // המנוחה במלון בין שתי רגליים, כשהיא מקוצרת.
+  const restOf = (inLeg, outLeg) => {
+    const [a, b] = [legTimes(inLeg, ctx.tz), legTimes(outLeg, ctx.tz)];
+    if (a?.sta == null || b?.std == null) return null;
+    const gap = b.std - a.sta;
+    const rest = gap - params.transfer_minutes;
+    if (rest >= H(params.rest_hours)) return null;
+    return { gap, rest, explain: `פחות מ-${params.rest_hours} שעות מנוחה במלון (${minToHhmm(gap)} בין STA ל-STD, פחות ${minToHhmm(params.transfer_minutes)} זמן מנהלות = ${minToHhmm(rest)}).` };
+  };
   const options = (reasons) => [
     { value: 'yes', label: 'מגיע פיצוי', hint: `${minToHhmm(hours)}, פער מול הרומה` },
     { value: 'no', label: 'לא מגיע פיצוי', reasons },
@@ -2279,19 +2301,16 @@ function short_rest_new_york(ctx, params, rule) {
         no: (a) => `${rule.title}: ${describePairing(p)}. ${NY_NO_PAY[a.reason] ?? NY_NO_PAY.other}` });
       continue;
     }
-    leavesNextMonth(ctx, p, params, rule, params.stations, key, hours, own);
+    leavesNextMonth(ctx, p, params, rule, params.stations, key, hours, own, (a, b) => restOf(a, b)?.explain ?? null);
     let n = 0;
     for (const [inLeg, outLeg] of stayPairs(p)) {
       if (!params.stations.includes(inLeg.dst) || !params.stations.includes(outLeg.org)) continue;
-      const [a, b] = [legTimes(inLeg, ctx.tz), legTimes(outLeg, ctx.tz)];
-      if (a?.sta == null || b?.std == null) continue;
-      const gap = b.std - a.sta;
-      const rest = gap - params.transfer_minutes;
-      if (rest >= H(params.rest_hours)) continue;
+      const short = restOf(inLeg, outLeg);
+      if (!short) continue;
+      const { gap, rest, explain } = short;
       const days = inLeg.date === outLeg.date ? ddmm(inLeg.date) : `${ddmm(inLeg.date)}–${ddmm(outLeg.date)}`;
       const where = `⁦${days} ${inLeg.dst === outLeg.org ? inLeg.dst : `${inLeg.dst}/${outLeg.org}`}⁩`;
       const calc = `${minToHhmm(gap)} בין STA ל-STD`;
-      const explain = `פחות מ-${params.rest_hours} שעות מנוחה במלון (${calc}, פחות ${minToHhmm(params.transfer_minutes)} זמן מנהלות = ${minToHhmm(rest)}).`;
       if (!ctx.hasExec) {
         ctx.expectPairing(p, key, hours, rule, `${where}: ${explain}`, { explain: `${explain.replace(/\.$/, '')}, אלא אם זה חודש עומס.` });
         continue;

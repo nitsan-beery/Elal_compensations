@@ -46,7 +46,23 @@ async function loadHistory() {
   return out;
 }
 
-const r = evaluate({ rulesData, plan, exec, answers, history, calendar: calendar ?? calendarHistory?.at(-1) ?? null, calendarHistory, assumedIgnored });
+// החודש הבא, כשהוא באותה תיקייה (טיוטה 438). --no-history מבטל גם אותו.
+async function loadNext() {
+  const ref = arg('plan') ?? arg('exec');
+  const period = (plan ?? exec)?.period;
+  if (!ref || !period) return null;
+  const dir = path.dirname(ref);
+  const files = fs.readdirSync(dir);
+  const [year, month] = period.month === 12 ? [period.year + 1, 1] : [period.year, period.month + 1];
+  const key = `${year}-${String(month).padStart(2, '0')}`;
+  const p = files.find((f) => f === `duty-plan-${key}.pdf`);
+  const e = files.find((f) => f.startsWith(`crewpay-${key}`) && f.endsWith('.pdf'));
+  if (!p && !e) return null;
+  return { period: { year, month }, plan: p ? await parsePlan(fs.readFileSync(path.join(dir, p))) : null, exec: e ? await parseExec(fs.readFileSync(path.join(dir, e))) : null };
+}
+const next = process.argv.includes('--no-history') ? null : await loadNext();
+
+const r = evaluate({ rulesData, plan, exec, answers, history, next, calendar: calendar ?? calendarHistory?.at(-1) ?? null, calendarHistory, assumedIgnored });
 const hm = (v, unit) => (unit === 'count' ? String(v) : minToHhmm(v));
 
 console.log(`חודש ${r.period.month}/${r.period.year} · מצב ${r.mode} · בסיס ${r.domicile} · חוקים ${r.rulesVersion}`);

@@ -8,7 +8,7 @@
 
 import { LOGIC, LOGIC_ORDER, DAY_DUES } from './logic.js';
 import { rulesInEffect, partitionRules, rulesByLogic, classifyCode, codeLabel, codeName, codeNames } from './catalog.js';
-import { buildTimeline, buildPairings, markCarryIn, attachCarried, matchPairings, describePairing, describeRoute, pairingParts, fdpParts, sameFdp } from '../model.js';
+import { buildTimeline, buildPairings, markCarryIn, attachCarried, attachNext, matchPairings, describePairing, describeRoute, pairingParts, fdpParts, sameFdp } from '../model.js';
 import { hoursToMin, minToHhmm } from '../time.js';
 import { OPTIONAL_COLUMNS } from '../pdf/exec.js';
 import { checkLegalLimits, restDefinition, delayFitsFdp, baseReportMinutes, dutyTimes } from './legal.js';
@@ -41,6 +41,7 @@ const CREDIT_LABEL_COLUMNS = ['Credit', 'FLT+DH', 'Rig'];
  *        תשובות המשתמש לשאלות, לפי מזהה השאלה.
  * @param {Array<{period, plan, exec}>} [input.history]  חודשים קודמים מהחדש לישן, לחלונות של
  *        מגבלות החוק שמתחילים לפני החודש (168 שעות, 672 שעות, 365 ימים).
+ * @param {{period, plan, exec}|null} [input.next]  החודש הבא, כשהוא שמור: לסבב שלא חזר בסוף החודש (טיוטה 438).
  * @param {{flights: Array, standby: Array}|null} [input.calendar]  השלמות מהיומן, כשהמשתמש חיבר
  *        אותו (`parseEvents` ב-js/calendar.js): הרכב הצוות ושעות הכוננות. תשובה של המשתמש קודמת להן.
  * @param {string[]} [input.reopen]  שאלות שהיומן אינו עונה עליהן, כי המשתמש החליט בהן בעצמו
@@ -79,7 +80,7 @@ function evaluateOnce(input) {
  * `calendarRun`: הריצה מול הרומה שנבנתה מהיומן (`calendarExec`): השאלות בנוסח של היומן
  * (`ctx.calendarRun`), ומגבלות החוק לפי הזמנים שביומן, כמו בתכנון (`calendarRun.plan`).
  */
-function evaluateFiles({ rulesData, plan = null, exec = null, answers = {}, history = [], calendar = null, reopen = [], calendarHistory = null, assumedIgnored = [] },
+function evaluateFiles({ rulesData, plan = null, exec = null, answers = {}, history = [], next = null, calendar = null, reopen = [], calendarHistory = null, assumedIgnored = [] },
   { journal: useJournal = true, calendarRun = null } = {}) {
   calendar = withoutKept(calendar);
   // התשובות שהשרשרת מהיומן קובעת נוספות לכאן (`applyJournal`).
@@ -143,6 +144,11 @@ function evaluateFiles({ rulesData, plan = null, exec = null, answers = {}, hist
   const execPairings = exec ? buildPairings(timeline, domicile, (d) => d.exec?.legs, fdp) : [];
   attachCarried(execPairings[0], timeline, domicile, prev);
   attachCarried(planPairings[0], timeline, domicile, prev);
+  // החודש הבא, רק כשהוא באמת העוקב (טיוטה 438).
+  const following = period.month === 12 ? { year: period.year + 1, month: 1 } : { year: period.year, month: period.month + 1 };
+  const nextOne = next?.period?.year === following.year && next.period.month === following.month ? next : null;
+  attachNext(execPairings.at(-1), domicile, nextOne, 'exec');
+  attachNext(planPairings.at(-1), domicile, nextOne, 'plan');
   const reportDays = exec ? attachReportTails(execPairings, timeline, tz, codes, answers) : [];
   markLandingDays(planPairings, execPairings, timeline, tz);
   const dependentAnswers = {};

@@ -156,6 +156,23 @@ export function attachCarried(pairing, days, domicile, prev = null) {
 }
 
 /**
+ * סבב שלא חזר בסוף החודש מקבל את הרגליים שלו מהחודש הבא, כשהוא שמור: `nextLegs`, בלי הרגל שהרומה הבאה חוזרת עליה
+ * (היא כבר ב-`legs`), ו-`nextSource` – 'exec' או 'plan'. הרומה הבאה מכריעה, ובלעדיה התכנון הבא. `side`: 'plan' לסבב מתוכנן,
+ * שנשען רק על התכנון הבא (בעל המוצר, 30/10/2026, טיוטה 438).
+ */
+export function attachNext(pairing, domicile, next, side) {
+  if (!pairing?.cutAtEnd || !next) return;
+  const source = side === 'exec' && next.exec ? 'exec' : 'plan';
+  if (!next[source]) return;
+  const days = buildTimeline(next.period, next.plan, next.exec);
+  const first = buildPairings(days, domicile, (d) => d[source]?.legs)[0];
+  const last = pairing.legs.at(-1);
+  if (!first || !(sameLeg(first.legs[0], last) || first.legs[0].org === last.dst)) return;
+  pairing.nextLegs = first.legs.filter((l) => !sameLeg(l, last));
+  pairing.nextSource = source;
+}
+
+/**
  * הסבב כולו, כולל מה שטס בחודש הקודם (`prevLegs`, והרגל שהרומה חוזרת עליה ב-1 לחודש), כשיש בו את היציאה
  * מהבסיס. בלעדיה – הסבב כמו שהוא, מתחילת החודש (בעל המוצר, 30/10/2026, טיוטה 428).
  */

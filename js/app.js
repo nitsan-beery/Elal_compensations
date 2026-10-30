@@ -13,7 +13,7 @@ import * as store from './store.js';
 import * as calendar from './calendar.js';
 
 // מספר הגרסה של הקוד שרץ בדף. עולה יחד עם CACHE ב-sw.js, לאותו מספר (בעל המוצר, 15/10/2026).
-const APP_VERSION = 321;
+const APP_VERSION = 322;
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -494,7 +494,7 @@ async function runAndSave() {
     r.calendar = fresh;
   }
   state.fleetPreset = lastFleetAnswer(r, months);
-  state.result = evaluate({ rulesData: rulesFor([r, ...months]), plan: r.plan, exec: r.exec, answers: r.answers ?? {}, history: historyFor(r, months), calendar: r.calendar ?? null,
+  state.result = evaluate({ rulesData: rulesFor([r, ...months]), plan: r.plan, exec: r.exec, answers: r.answers ?? {}, history: historyFor(r, months), next: nextFor(r, months), calendar: r.calendar ?? null,
     reopen: r.calendarIgnored ?? [], calendarHistory: r.calendarHistory ?? null, assumedIgnored: r.assumedIgnored ?? [] });
   // שלב שחזר למצב שלפניו יוצא מהשרשרת, יחד עם התשובה עליו (בעל המוצר, 06/10/2026).
   for (const id of state.result.obsoleteAnswers ?? []) delete r.answers?.[id];
@@ -853,6 +853,14 @@ function lastFleetAnswer(record, months) {
     .sort((a, b) => store.monthKey(b.period).localeCompare(store.monthKey(a.period)))
     .map((m) => Object.entries(m.answers ?? {}).find(([id]) => id.startsWith('fleet:'))?.[1]?.value)
     .find(Boolean) ?? null;
+}
+
+/** החודש הבא של אותו טייס, כשהוא שמור (טיוטה 438). */
+function nextFor(record, months) {
+  const { year, month } = record.period;
+  const key = store.monthKey(month === 12 ? { year: year + 1, month: 1 } : { year, month: month + 1 });
+  const m = months.find((x) => store.samePilot(x, record) && store.monthKey(x.period) === key && (x.plan || x.exec));
+  return m ? { period: m.period, plan: m.plan ?? null, exec: m.exec ?? null } : null;
 }
 
 function historyFor(record, months) {
@@ -1608,7 +1616,7 @@ async function editAnswer(li, id, assumed) {
   const months = await safe(() => store.listMonths(), []);
   let trial = null;
   try {
-    trial = evaluate({ rulesData: rulesFor([r, ...months]), plan: r.plan, exec: r.exec, answers, history: historyFor(r, months), calendar: r.calendar ?? null,
+    trial = evaluate({ rulesData: rulesFor([r, ...months]), plan: r.plan, exec: r.exec, answers, history: historyFor(r, months), next: nextFor(r, months), calendar: r.calendar ?? null,
       reopen: [...(r.calendarIgnored ?? []), ...crewReopen(id)], calendarHistory: r.calendarHistory ?? null, assumedIgnored: assumed ? [...(r.assumedIgnored ?? []), id] : r.assumedIgnored ?? [] });
   } catch { /* כמו קודם, למטה */ }
   const q = trial?.questions.find((x) => x.id === id);
@@ -1731,7 +1739,7 @@ function currentSummary(m, months) {
   if (!state.rulesData || !(m.plan || m.exec)) return m.summary ?? {};
   const cal = calendarFor(m);
   try {
-    return summarize(evaluate({ rulesData: rulesFor(months), plan: m.plan, exec: m.exec, answers: m.answers ?? {}, history: historyFor(m, months), calendar: cal.saved ?? cal.fresh, reopen: m.calendarIgnored ?? [], calendarHistory: cal.saved ? m.calendarHistory ?? null : null, assumedIgnored: m.assumedIgnored ?? [] }));
+    return summarize(evaluate({ rulesData: rulesFor(months), plan: m.plan, exec: m.exec, answers: m.answers ?? {}, history: historyFor(m, months), next: nextFor(m, months), calendar: cal.saved ?? cal.fresh, reopen: m.calendarIgnored ?? [], calendarHistory: cal.saved ? m.calendarHistory ?? null : null, assumedIgnored: m.assumedIgnored ?? [] }));
   } catch {
     return m.summary ?? {};
   }

@@ -52,8 +52,11 @@ async function current() {
     const p = data.get(prevKey(k));
     const [y, mo] = prevKey(k).split('-').map(Number);
     const history = p ? [{ period: { year: y, month: mo }, plan: p.plan, exec: p.exec, answers: p.answers }] : [];
-    out[k] = snapshot(evaluate({ rulesData, plan: m.plan, exec: m.exec, answers: m.answers, history }));
-    out[`${k}-plan`] = snapshot(evaluate({ rulesData, plan: m.plan, exec: null, answers: {}, history }));
+    const [ny, nm] = mo === 11 ? [y + 1, 1] : mo === 12 ? [y + 1, 2] : [y, mo + 2];
+    const n = data.get(`${ny}-${String(nm).padStart(2, '0')}`);
+    const next = n ? { period: { year: ny, month: nm }, plan: n.plan, exec: n.exec } : null;
+    out[k] = snapshot(evaluate({ rulesData, plan: m.plan, exec: m.exec, answers: m.answers, history, next }));
+    out[`${k}-plan`] = snapshot(evaluate({ rulesData, plan: m.plan, exec: null, answers: {}, history, next }));
   }
   for (const name of files.filter((f) => fs.statSync(path.join(base, f)).isDirectory())) {
     const dir = path.join(base, name);
