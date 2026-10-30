@@ -7,7 +7,7 @@
 import { hoursToMin, minToHhmm, MONTH_NAMES } from '../time.js';
 import { describePairing, describeRoute, fdpParts } from '../model.js';
 import { at, dateOf, legTimes, pairingTimes } from '../flight-times.js';
-import { DUTY_LOGIC, DUTY_PARAMS, execFdpGroups, amountWord, otherOption, applyOtherReason, extensionDays, dayActivity, keyFor } from './duty.js';
+import { DUTY_LOGIC, DUTY_PARAMS, execFdpGroups, amountWord, otherOption, applyOtherReason, extensionDays, dayActivity, keyFor, paidEarlier } from './duty.js';
 import { overlapDays } from './journal.js';
 
 const H = (hours) => hoursToMin(hours) ?? 0;
@@ -225,11 +225,37 @@ const sumLegs = (pairing, domicile) => pairing.legs.reduce((acc, l) => {
 
 /**
  * סליפ שהקרדיט שלו קצר מהמינימום מקבל השלמה, וההפרש נרשם ב-Rig. סליפ שנחתך בגבול
- * החודש לא נבדק: ההשלמה נקבעת על הסליפ כולו (28/02/2026: BUD 03:35 בלי Rig).
+ * החודש נבדק על כולו (`cutSlip`; 28/02/2026: BUD 03:35 בלי Rig, כי הסבב כולו 06:55).
  */
 function min_slip_credit(ctx, params, rule) {
   const min = H(params.min_credit_hours);
   for (const group of minSlipGroups(ctx, params)) expectMinSlip(ctx, group, min, params, rule);
+  for (const p of ctx.execPairings) if (p.cutAtStart || p.cutAtEnd) cutSlip(ctx, p, min, params, rule);
+}
+
+/**
+ * סליפ שחוצה חודש (בעל המוצר, 30/10/2026, טיוטה 427). ההשלמה נקבעת על הסליפ כולו, ולכן היא נבדקת בחודש החזרה,
+ * כשהרומה של החודש הקודם שמורה (`prevLegs`). ברומות שבדקנו כולם מעל המינימום, ואין בהם Rig באף חודש; סליפ קצר
+ * לא נצפה, וחודש החזרה הוא בחירה. בלעדיה, או בחודש ההמראה: Rig ברומה שמשלים את הקרדיט בחודש עד המינימום – הנחה.
+ * סבב שנסגר אחרי חצות של היום האחרון נבדק בחודש ההמראה, שבו יש את כל הרגליים.
+ */
+function cutSlip(ctx, p, min, params, rule) {
+  if (ctx.pairingHandledBy(p, 'lost_hours_credit') || p.legs.every((l) => l.prevMonth)) return;
+  const note = `השלמה ל-${params.min_credit_hours} שעות`;
+  if (p.carriedSource === 'exec' && !p.cutAtEnd) {
+    const legs = [...p.prevLegs, ...p.legs];
+    const credit = sumLegs({ legs, destinations: [...new Set(legs.map((l) => l.dst).filter((d) => d !== ctx.domicile))] }, ctx.domicile);
+    const shortfall = credit ? Math.max(0, min - credit) : 0;
+    if (!shortfall) return;
+    if (paidEarlier(ctx, p, 'Rig', shortfall)) ctx.note(p.from, `ה${note} רשומה ברומה של החודש הקודם.`, rule);
+    else ctx.expectPairing(p, 'rig', shortfall, rule, note, { reason: note, explain: `${note}.` });
+    return;
+  }
+  const extra = ctx.reportDates(p).reduce((s, d) => s + ctx.reportedOnDate(d, 'Rig') - ctx.expectedOnDate(d, 'rig'), 0);
+  if (extra <= 0 || ctx.expectedOn(p, 'flight') + extra > min) return;
+  const side = p.cutAtEnd ? 'שחוזר בחודש הבא' : 'שהתחיל בחודש הקודם';
+  ctx.expectPairing(p, 'rig', extra, rule, note,
+    { reason: note, explain: `הרומה מזכה קרדיט נוסף. האפליקציה מניחה שזו ${note}, על סבב ${side}.` });
 }
 
 /** הקבוצות שההשלמה נבדקת עליהן: FDP שלם, או כל סבב בנפרד כשחלק מה-FDP אינו נבדק. */

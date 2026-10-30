@@ -1920,7 +1920,7 @@ const landedBefore = (ctx, p, stations) =>
   ctx.hasExec && !!p.cutAtStart && !p.prevLegs?.length && !p.legs[0].prevMonth && stations.includes(p.legs[0].org);
 
 /** הסכום רשום ברומה של החודש הקודם, מהרגל הראשונה של הסבב שם ועד סוף אותו חודש. */
-function paidEarlier(ctx, p, column, min) {
+export function paidEarlier(ctx, p, column, min) {
   const from = p.prevLegs?.[0]?.date;
   if (!from || !ctx.prevExec) return false;
   return Object.values(ctx.prevExec.days).filter((d) => d.date >= from)
