@@ -5,6 +5,7 @@
 
 import { hoursToMin, isoDate, minToHhmm } from '../time.js';
 import { describePairing, describeRoute, wholePairing } from '../model.js';
+import { COMPANY_CANCEL, pairingDecision } from './decision.js';
 import { at, dateOf, legTimes, pairingTimes } from '../flight-times.js';
 
 const H = (hours) => hoursToMin(hours) ?? 0;
@@ -1001,35 +1002,7 @@ function night_landings(ctx, params, rule) {
  * `bid` – זכייה במכרז: אינה "ביוזמת החברה" (ס' 40), ולכן אינה נספרת, אלא אם הטיסה שזכה בה
  * מאותו סוג (נחיתת לילה, שבת). את זה בודק החוק עצמו, לפי הטיסה שבקישור (`bidTarget`).
  */
-const COMPANY_CANCEL = ['cancelled', 'wet_lease', 'trainee', 'swap_777', 'replaced', 'diversion'];
-
-function cancelStatus(ctx, planPairing) {
-  const m = ctx.matches.find((x) => x.plan === planPairing);
-  if (!m) return 'unknown';
-  if (m.byLeave) return 'no'; // היעדרות ומחלה אינן ביוזמת החברה
-  if (m.how === 'replaced_by_ground' || m.how === 'replaced_by_standby') return 'company'; // החברה הציבה אותו לפעילות קרקע או לכוננות
-  if (m.how === 'carried_over') return 'company'; // הצוות עוד היה בחו"ל, בסבב מהחודש הקודם (`explainByCarriedStay`)
-  // שרשרת מהיומן: השלב הראשון, זה שהוציא את הסבב מהשיבוץ, קובע (`reduceChain`; בעל המוצר, 06/10/2026).
-  const count = ctx.answerFor(m)?.count;
-  if (count) {
-    if (count === 'voluntary_swap') return 'no';
-    if (count === 'bid') return 'bid';
-    if (count === 'other') return 'review';
-    if (count === 'chain_open') return 'unknown';
-    return 'company';
-  }
-  const by = (tag) => ctx.pairingHandledBy(planPairing, tag);
-  if (by('lost_hours_credit') || by('cancelled_no_compensation')) return 'company';
-  if (by('voluntary_swap')) return 'no';
-  if (by('diversion')) return 'company'; // סטיה לשדה משנה שהונחה מהקבצים (`assumeDiversion`)
-  // גם בלי סימון, כשהחוק שמסמן אינו בתוקף בחודש: התשובה עצמה.
-  const a = ctx.answerFor(m)?.value;
-  if (a === 'voluntary_swap') return 'no';
-  if (a === 'bid') return 'bid';
-  if (COMPANY_CANCEL.includes(a)) return 'company';
-  if (a === 'other') return 'review';
-  return 'unknown';
-}
+const cancelStatus = (ctx, planPairing) => pairingDecision(ctx, ctx.matches.find((x) => x.plan === planPairing)).reason;
 
 /**
  * הטיסה שזכה בה במכרז במקום הסבב המתוכנן: הקישור שבתשובה, או null (טיסה בחודש אחר). תשובה

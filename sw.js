@@ -4,7 +4,7 @@
 // ובלי חיבור האפליקציה נפתחת מהעותק האחרון. בכל שינוי בקובץ שברשימה, או ברשימה עצמה, מעלים את CACHE:
 // בלי זה האפליקציה המותקנת ב-iPad יכולה להמשיך להציג את הגרסה הקודמת.
 
-const CACHE = 'elal-compensations-v322';
+const CACHE = 'elal-compensations-v323';
 const SHELL = [
   './',
   'index.html',
@@ -27,6 +27,7 @@ const SHELL = [
   'js/rules/evaluate.js',
   'js/rules/logic.js',
   'js/rules/duty.js',
+  'js/rules/decision.js',
   'js/rules/legal.js',
   'js/rules/journal.js',
   'vendor/pdfjs/pdf.mjs',
