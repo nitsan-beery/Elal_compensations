@@ -1224,18 +1224,26 @@ function free_days_waived(ctx, params, rule) {
   // עם רומה אין מה לנחש ואין מה לשאול (בעל המוצר, 01/10/2026): היא חוזרת ביום 1 על סבב שיצא
   // בחודש הקודם, ולכן ידוע אם נחתת בו ומתי. בלי סבב כזה ה-X הוא יום פנוי, גם כשבוצעה בו
   // פעילות שלא תוכננה – עליה נשאלת השאלה על פעילות ביום לא מתוכנן. בתכנון לבד, כשהיומן מראה ביום
-  // הזה טיסה שיוצאת מהבסיס, גם הוא מראה שלא נחתת בו מסבב של החודש הקודם.
+  // הזה טיסה שיוצאת מהבסיס, גם הוא מראה שלא נחתת בו מסבב של החודש הקודם. בתכנון לבד, כשהרומה של החודש
+  // הקודם שמורה, היא מכריעה באותו אופן (`lastBefore`; בעל המוצר, 30/10/2026, טיוטה 432).
   const first = ctx.timeline.find((d) => d.date === ctx.monthFirst);
   let pendingFirst = false;
   const firstIsX = free.includes(ctx.monthFirst) && (first?.plan?.codes ?? []).includes('X');
   const carried = ctx.hasExec ? ctx.execPairings.find((p) => p.cutAtStart) : null;
   const landed = carried ? pairingTimes(carried, ctx.tz).end : null;
+  const lastBefore = !ctx.hasExec && ctx.prevMonth?.hasExec ? ctx.prevMonth.execPairings.at(-1) ?? null : null;
+  const priorEnd = !lastBefore ? null : lastBefore.cutAtEnd ? Infinity : pairingTimes(lastBefore, ctx.tz).end;
+  // הערה רק כשהיום מוריד את המספר מתחת למינימום (בעל המוצר, 04/10/2026).
+  const notFree = (pairing, end) => {
+    free.splice(free.indexOf(ctx.monthFirst), 1);
+    if (free.length >= due) return;
+    const when = end === Infinity ? 'ועוד לא חזרת' : `ב-${ddmm(dateOf(end))} ${hhmm(end)}, אחרי ${params.on_block_until}`;
+    ctx.note(ctx.monthFirst, `${rule.title}: ב-${ddmm(ctx.monthFirst)} מסומן X, אבל לפי הרומה נחתת מסבב של החודש הקודם (${describePairing(pairing)}) ${when}, ולכן היום אינו נספר.`, rule);
+  };
   if (firstIsX && ctx.hasExec && (!carried || landed != null)) {
-    if (carried && landed > at(ctx.monthFirst, onUntil)) {
-      free.splice(free.indexOf(ctx.monthFirst), 1);
-      // הערה רק כשהיום מוריד את המספר מתחת למינימום (בעל המוצר, 04/10/2026).
-      if (free.length < due) ctx.note(ctx.monthFirst, `${rule.title}: ב-${ddmm(ctx.monthFirst)} מסומן X, אבל לפי הרומה נחתת מסבב של החודש הקודם (${describePairing(carried)}) ב-${ddmm(dateOf(landed))} ${hhmm(landed)}, אחרי ${params.on_block_until}, ולכן היום אינו נספר.`, rule);
-    }
+    if (carried && landed > at(ctx.monthFirst, onUntil)) notFree(carried, landed);
+  } else if (firstIsX && ctx.prevMonth?.hasExec && !ctx.hasExec && (!lastBefore || priorEnd != null)) {
+    if (lastBefore && priorEnd > at(ctx.monthFirst, onUntil)) notFree(lastBefore, priorEnd);
   } else if (firstIsX && ctx.calendarFirstDay(ctx.monthFirst)?.carried === false) {
     // היומן מראה טיסה ב-1 לחודש שיוצאת מהבסיס, ולא סבב מהחודש הקודם: לא נחתת בו מסבב כזה, וה-X
     // הוא יום פנוי לפי התכנון, כמו עם רומה (בעל המוצר, 04/10/2026). הטיסה עצמה בשינויים.
