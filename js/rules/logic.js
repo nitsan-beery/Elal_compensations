@@ -1370,9 +1370,20 @@ function higher_of_planned_performed(ctx, params, rule) {
     const alsoSc = !!answer?.alsoSpecialCall || (['replaced', 'bid'].includes(answer?.value) && execMatch?.how === 'unplanned');
     if (params.excluded_when_special_call && !alsoSc && ctx.pairingHandledBy(exec, 'special_call')) continue;
 
+    // כמה סבבים שהוחלפו בטיסה אחת: הקרדיט של כולם יחד מול הטיסה, פעם אחת (בעל המוצר, 30/10/2026, טיוטה 440).
+    const group = ctx.matches.filter((x) => {
+      const a = x.plan ? ctx.answer(`cancelled:${x.plan.id}`) : null;
+      return a?.link === exec.id && COMPANY_PAID_SWAPS.includes(a.value);
+    });
+    if (group.length > 1 && !group.includes(match)) continue;
+    if (group.length > 1 && group[0] !== match) {
+      ctx.note(match.plan.from, `${swapWord(answer)}: קרדיט של הטיסות שהוחלפו יחד, מול הטיסה שבוצעה${DAY_DUES}.`, rule, { pairingId: match.plan.id, callOf: exec.id });
+      continue;
+    }
     // בשרשרת מהיומן: הגבוה מבין הסבבים שלא בוצעו (`reduceChain`; בעל המוצר, 06/10/2026).
     const planned0 = answer?.basis ?? match.plan;
-    const diff = plannedMinusPerformed(ctx, planned0, exec);
+    const together = group.length > 1 ? group.reduce((s, x) => s + (ctx.plannedCredit(x.plan) ?? 0), 0) : null;
+    const diff = together == null ? plannedMinusPerformed(ctx, planned0, exec) : together - sumLegs(exec, ctx.domicile);
     if (diff == null) continue;
 
     // "הגבוה מבין השתיים" הוא סך הכול, לא תוספת על ההשלמה למינימום שהסבב שבוצע מקבל בזכות
@@ -1383,7 +1394,7 @@ function higher_of_planned_performed(ctx, params, rule) {
     const extra = diff - alreadyMinSlip;
 
     // הערה בכל החלפה ביוזמת החברה, גם כשהטיסה שבוצעה ארוכה יותר ואין הפרש (בעל המוצר, 29/09/2026).
-    const planned = ctx.plannedCredit(planned0);
+    const planned = together ?? ctx.plannedCredit(planned0);
     const performed = planned - diff;
     // ההערה היא כותרת בלבד, בלי סכומים: ההשוואה והתוספת בטבלת הפירוט, בשורה של התוספת. רק כשאין
     // שורה כזאת ההערה אומרת למה: הטיסה שבוצעה היא הארוכה, או שההפרש כבר בהשלמה לסליפ קצר
@@ -1614,6 +1625,7 @@ function cancelled_no_compensation(ctx, params, rule) {
     if (!answer) {
       if (inheritAnswer(ctx, match, rule)) continue;
       if (assumeDiversion(ctx, match, rule)) continue;
+      if (assumeLegOmitted(ctx, match, rule)) continue;
       if (!assumeCancelled(ctx, match, rule)) askWhatHappened(ctx, match, rule);
       continue;
     }
@@ -1822,6 +1834,22 @@ function assumeDiversion(ctx, match, rule) {
   // גם כשהרומה זיכתה קריאה מיוחדת: אותם מספרי טיסה הם אותה טיסה (`explainUnexplained`; בעל המוצר, 06/10/2026).
   ctx.markPairing(match.exec, 'diversion_assumed');
   ctx.assumeAnswer(match.plan, 'diversion');
+  return true;
+}
+
+/**
+ * גריעת קטע טיסה אינה שינוי (ישן כ"ה ס' 9.ב(2)): כל מה שבוצע הוא מספרי הטיסה המתוכננים, בלי יעד חדש, ופחות רגליים.
+ * לא נשאל, ואין עליו הגבוה מבין השתיים. הנחה שניתנת לשינוי: הסעיף מסויג ב"אם לא דרוש שינוי במבנה הצוות", שאינו בקבצים
+ * (בעל המוצר, 30/10/2026, טיוטה 440).
+ */
+function assumeLegOmitted(ctx, match, rule) {
+  const { plan, exec } = match;
+  if (!exec || exec.legs.length >= plan.legs.length) return false;
+  const flights = new Set(plan.legs.map((l) => l.flight).filter(Boolean));
+  if (!exec.legs.every((l) => flights.has(l.flight)) || !exec.destinations.every((d) => plan.destinations.includes(d))) return false;
+  if (!ctx.assume(`cancelled:${plan.id}`, 'leg_omitted', 'נגרע קטע טיסה')) return false;
+  ctx.markPairing(plan, 'leg_omitted');
+  ctx.note(plan.from, 'נגרע קטע טיסה: אין זה שינוי בתכנית, והקרדיט לפי מה שבוצע.', rule, { pairingId: plan.id });
   return true;
 }
 

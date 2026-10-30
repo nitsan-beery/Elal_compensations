@@ -87,5 +87,7 @@ export const expected = (r, column, text) => { const c = row(r, column, text); r
 export const questions = (r) => r.questions.map((q) => q.id);
 export const asked = (r, prefix) => r.questions.some((q) => q.id.startsWith(prefix));
 export const notes = (r) => r.notes.map((n) => clean(n.message));
+/** מה שכתוב מתחת לשינויים בטבלה: הערה שחוק רשם על שינוי עוברת לשם מההערות. */
+export const changeNotes = (r) => (r.changes ?? []).flatMap((c) => c.notes ?? []).map((n) => clean(n.message ?? n));
 export const explains = (c) => (c?.items ?? []).map((i) => clean(i.explain)).join(' ');
 export const reviews = (r) => r.reviews.map((n) => clean(n.message));

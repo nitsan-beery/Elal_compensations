@@ -30,6 +30,7 @@ export function pairingDecision(ctx, match) {
   if (by('lost_hours_credit') || by('cancelled_no_compensation')) return { reason: 'company', source: 'rule' };
   if (by('voluntary_swap')) return { reason: 'no', source: 'rule' };
   if (by('diversion')) return { reason: 'company', source: 'rule' }; // סטיה לשדה משנה שהונחה מהקבצים (`assumeDiversion`)
+  if (by('leg_omitted')) return { reason: 'company', source: 'rule' }; // גריעת קטע אינה שינוי, והסבב בוצע (`assumeLegOmitted`)
   // גם בלי סימון, כשהחוק שמסמן אינו בתוקף בחודש: התשובה עצמה.
   const value = answer?.value;
   if (value === 'voluntary_swap') return { reason: 'no', source: 'answer' };
