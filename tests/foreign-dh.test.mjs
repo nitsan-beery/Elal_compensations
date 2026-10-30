@@ -30,6 +30,11 @@ test('חזרה מלוס אנג\'לס דרך ניו יורק: לא נשאל', () 
   assert.equal(asked(run(both({ '05': [leg('LY5', 'TLV', 'LAX', '10:00', '22:00')], '07': [back], '08': [home()] })), NY), false);
 });
 
+test('הנחיתה בניו יורק בחודש הקודם שלא שמור, והרגל ממשיכה ב-DH: לא נשאל', () => {
+  const days = { '01': [toLax()], '03': [home('LAX')] };
+  assert.equal(asked(run(month(2026, 9, { plan: days, exec: days })), NY), false);
+});
+
 test('בתכנון לבד: 5 שעות רק על סליפ לניו יורק', () => {
   const com = (r) => (r.expectations ?? []).filter((e) => e.key === 'com').length;
   assert.equal(com(run(both({ '05': [out()], '06': [home()] }), { planOnly: true })), 1);

@@ -2269,7 +2269,7 @@ function short_rest_new_york(ctx, params, rule) {
     { value: 'no', label: 'לא מגיע פיצוי', reasons },
   ];
   for (const p of ctx.hasExec ? ctx.execPairings : ctx.planPairings) {
-    if (landedBefore(ctx, p, params.stations)) {
+    if (landedBefore(ctx, p, params.stations) && p.legs[0].dst === ctx.domicile) { // רק "הסליפים לניו יורק" (טיוטה 448)
       unknownStay(ctx, p, params, rule, { id: `new_york_rest:${p.id}`, key, hours, own, yesLabel: 'מגיע פיצוי',
         title: `${rule.title}: האם מגיע פיצוי?`,
         options: options([{ value: 'full_rest', label: 'המנוחה לא קוצרה' }, ...NY_REASONS]),
