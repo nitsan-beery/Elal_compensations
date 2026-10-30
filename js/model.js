@@ -84,15 +84,18 @@ export function buildPairings(days, domicile, getLegs, fdp = null) {
  *    או רגל מחו"ל לבסיס שחוצה חצות עם TAB קטן מ-24:00 (נחתת בבית ב-1 לחודש).
  * 3. רגל מחו"ל לחו"ל שחוצה חצות (TAB של 24:00 בשני המקרים): הקרדיט ביום 1 ברומה – החלק שאחרי חצות,
  *    ועוד הרגליים שאחריה באותו יום, או החלק שלפני חצות.
- * 4. בלי הכרעה – `carryUnknown`, לבדיקה ידנית (`credit_from_scheduled`).
+ * 4. התכנון של החודש הקודם (`prev.plan`): אותה רגל ביום האחרון שלו (טיוטה 425).
+ * 5. בלי הכרעה – `carryUnknown`, לבדיקה ידנית (`credit_from_scheduled`).
+ *
+ * @param {{period, plan, exec}|null} prev  החודש הקודם, אם הוא בחודשים השמורים.
  */
-export function markCarryIn(days, domicile, prevExec = null) {
+export function markCarryIn(days, domicile, prev = null) {
   const day = days[0];
   const exec = day?.exec;
   const leg = exec?.legs?.[0];
   const date = day?.date ?? exec?.date;
   if (!leg || !date?.endsWith('-01')) return;
-  const carried = carriedIn(leg, exec, date, domicile, prevExec);
+  const carried = carriedIn(leg, exec, date, domicile, prev?.exec ?? null) ?? (plannedInto(prev, days, domicile, leg) || null);
   if (carried) leg.prevMonth = true;
   else if (carried == null) leg.carryUnknown = true;
 }
@@ -112,6 +115,44 @@ function carriedIn(leg, exec, date, domicile, prevExec) {
   const after = near(credit, split.after + others);
   const before = near(credit, split.before);
   return after === before ? null : after;
+}
+
+const sameLeg = (a, b) => a.flight === b.flight && a.org === b.org && a.dst === b.dst;
+
+/** הסבב האחרון בקובץ של החודש הקודם, והאם הרגל האחרונה שלו ביום האחרון של אותו חודש. */
+function lastPairingOf(monthDays, domicile, getLegs, firstOfMonth) {
+  const pairing = buildPairings(monthDays, domicile, getLegs).at(-1) ?? null;
+  const lastDay = new Date(Date.parse(firstOfMonth) - 86400000).toISOString().slice(0, 10);
+  return pairing ? { pairing, onLastDay: pairing.legs.at(-1).date === lastDay } : null;
+}
+
+const prevPlanLast = (prev, days, domicile) => (prev?.plan && days[0]?.date
+  ? lastPairingOf(buildTimeline(prev.period, prev.plan, null), domicile, (d) => d.plan?.legs, days[0].date) : null);
+
+/** בתכנון של החודש הקודם הרגל הזאת היא האחרונה ביום האחרון שלו. */
+function plannedInto(prev, days, domicile, leg) {
+  const last = prevPlanLast(prev, days, domicile);
+  return !!last?.onLastDay && sameLeg(last.pairing.legs.at(-1), leg);
+}
+
+/**
+ * הסבב הראשון בחודש שהתחיל בחודש הקודם מקבל את הרגליים שלו משם: `prevLegs`, בלי הרגל שהרומה חוזרת עליה
+ * ביום 1 (היא כבר ב-`legs`), ו-`carriedSource` – 'exec' או 'plan'. הרומה של החודש הקודם מכריעה. התכנון רק רמז:
+ * הוא שונה לא פעם ממה שבוצע (03/2026 BUD לא תוכנן; 09/2025 ATH ו-05/2026 BUD שונו), ולכן הוא נלקח רק
+ * כשהוא מתאים לרגל הראשונה בחודש. בלי שניהם השדות חסרים (בעל המוצר, 30/10/2026, טיוטה 425).
+ */
+export function attachCarried(pairing, days, domicile, prev = null) {
+  if (!pairing?.cutAtStart || !days[0]?.date) return;
+  const first = pairing.legs[0];
+  const fits = ({ pairing: last, onLastDay }, strict) => onLastDay &&
+    (sameLeg(last.legs.at(-1), first) || (last.cutAtEnd && (!strict || last.legs.at(-1).dst === first.org)));
+  const rome = prev?.exec
+    ? lastPairingOf(Object.values(prev.exec.days).sort((a, b) => a.date.localeCompare(b.date)), domicile, (d) => d.legs, days[0].date) : null;
+  const planned = prev?.exec ? null : prevPlanLast(prev, days, domicile);
+  const found = rome ? (fits(rome, false) ? rome : null) : planned && fits(planned, true) ? planned : null;
+  if (!found) return;
+  pairing.prevLegs = found.pairing.legs.filter((l) => !sameLeg(l, first));
+  pairing.carriedSource = rome ? 'exec' : 'plan';
 }
 
 /**

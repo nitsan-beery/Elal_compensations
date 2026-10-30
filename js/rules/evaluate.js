@@ -8,7 +8,7 @@
 
 import { LOGIC, LOGIC_ORDER, DAY_DUES } from './logic.js';
 import { rulesInEffect, partitionRules, rulesByLogic, classifyCode, codeLabel, codeName, codeNames } from './catalog.js';
-import { buildTimeline, buildPairings, markCarryIn, matchPairings, describePairing, describeRoute, pairingParts, fdpParts, sameFdp } from '../model.js';
+import { buildTimeline, buildPairings, markCarryIn, attachCarried, matchPairings, describePairing, describeRoute, pairingParts, fdpParts, sameFdp } from '../model.js';
 import { hoursToMin, minToHhmm } from '../time.js';
 import { OPTIONAL_COLUMNS } from '../pdf/exec.js';
 import { checkLegalLimits, restDefinition, delayFitsFdp, baseReportMinutes, dutyTimes } from './legal.js';
@@ -124,11 +124,11 @@ function evaluateFiles({ rulesData, plan = null, exec = null, answers = {}, hist
   const cal = calendarFacts(calendar, domicile);
 
   const planPairings = plan ? buildPairings(timeline, domicile, planLegsWithCredit).map(ftOnLastDay) : [];
-  // הרומה של החודש הקודם, אם היא בחודשים השמורים: לזיהוי הרגל שיצאה בו ולקיזוז בגבול החודש (טיוטות 373, 417).
-  const prev = history[0];
-  const prevExec = prev?.exec && (period.month === 1 ? prev.period.year === period.year - 1 && prev.period.month === 12
-    : prev.period.year === period.year && prev.period.month === period.month - 1) ? prev.exec : null;
-  if (exec) markCarryIn(timeline, domicile, prevExec);
+  // החודש הקודם, אם הוא בחודשים השמורים: לזיהוי הסבב שהתחיל בו ולקיזוז בגבול החודש (טיוטות 373, 417, 425).
+  const prev = history[0]?.period && (period.month === 1 ? history[0].period.year === period.year - 1 && history[0].period.month === 12
+    : history[0].period.year === period.year && history[0].period.month === period.month - 1) ? history[0] : null;
+  const prevExec = prev?.exec ?? null;
+  if (exec) markCarryIn(timeline, domicile, prev);
   // אזורי הזמן של החודש, לזמני הרגליים והסבבים (js/flight-times.js).
   const tz = timeZones(domicile, plan?.stationOffsets ?? null, timeline);
   // חזרה לבסיס אחרי המראה מצטרפת לטיסה שיוצאת אחריה באותו FDP, לפי הגדרת ה-FDP של הסליפ הקצר.
@@ -141,6 +141,7 @@ function evaluateFiles({ rulesData, plan = null, exec = null, answers = {}, hist
   const fdp = slip?.legal_rest_hours != null
     ? { legalRestMin: slip.legal_rest_hours * 60, reportBefore: duty.reportBefore, releaseAfter: duty.releaseAfter, tz } : null;
   const execPairings = exec ? buildPairings(timeline, domicile, (d) => d.exec?.legs, fdp) : [];
+  attachCarried(execPairings[0], timeline, domicile, prev);
   const reportDays = exec ? attachReportTails(execPairings, timeline, tz, codes, answers) : [];
   markLandingDays(planPairings, execPairings, timeline, tz);
   const dependentAnswers = {};
