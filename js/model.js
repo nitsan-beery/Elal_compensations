@@ -157,7 +157,8 @@ export function attachCarried(pairing, days, domicile, prev = null) {
 
 /**
  * החלוקה של הרגל בחצות בשעון הבסיס: `before` מההמראה בפועל (ובלעדיה המתוכננת) עד חצות, ו-`after`
- * השאר מתוך הקרדיט שלה. false כשאינה חוצה חצות, null כשאי אפשר לדעת.
+ * השאר מתוך הקרדיט שלה. false כשאינה חוצה חצות, לא לפי התכנון ולא בפועל (המריאה לפניו ונחתה אחריו בגלל איחור;
+ * בעל המוצר, 30/10/2026, טיוטה 430), null כשאי אפשר לדעת.
  */
 function midnightSplit(leg, date, domicile) {
   if (leg.std == null || leg.skdDur == null) return null;
@@ -170,9 +171,9 @@ function midnightSplit(leg, date, domicile) {
     if (off == null) return null;
     depBase = mod(leg.std - off, 1440);
   }
-  if (depBase + leg.skdDur <= 1440) return false;
   const dur = leg.dst === domicile ? leg.skdDur : leg.actDur ?? leg.skdDur;
   const dep = leg.atd != null ? depBase + nearest(leg.atd - leg.std) : depBase;
+  if (depBase + leg.skdDur <= 1440 && (dep >= 1440 || dep + (leg.actDur ?? dur) <= 1440)) return false;
   const before = Math.min(dur, Math.max(0, 1440 - dep));
   return { before, after: dur - before };
 }
