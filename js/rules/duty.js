@@ -2247,7 +2247,8 @@ const NY_NO_PAY = { voluntary: 'החלפה מרצוני – אין פיצוי.',
  * מול הרומה), פחות `transfer_minutes` לנסיעות ולקבלת החדר (בעל המוצר, 29/10/2026). מתחת ל-`rest_hours` מגיע פיצוי
  * (2018 ס' 27.3), אלא בחודש עומס, שבו החברה רשאית לקצר בלי פיצוי (ס' 143.1.1, 143.1.5). חודשי העומס אינם בקבצים:
  * כשהרומה זיכתה – הנחה; כשלא – שאלה, עם סיבה ליד "לא מגיע פיצוי". רגל DH נספרת גם היא. נחיתה בשדה אחד והמראה
- * מהשני – אותו חישוב, עם אותן 5:15 (בעל המוצר, 30/10/2026, טיוטה 426).
+ * מהשני – אותו חישוב, עם אותן 5:15 (בעל המוצר, 30/10/2026, טיוטה 426). רק על סליפ לניו יורק: קישור בלי לינה, או
+ * סבב שממשיך ב-DH ללוס אנג'לס, אינם נבדקים (טיוטה 446).
  */
 function short_rest_new_york(ctx, params, rule) {
   const key = keyFor(params.report_column);
@@ -2255,6 +2256,7 @@ function short_rest_new_york(ctx, params, rule) {
   const own = ctx.rulesWithLogic('short_rest_new_york').map((r) => r.id);
   // המנוחה במלון בין שתי רגליים, כשהיא מקוצרת.
   const restOf = (inLeg, outLeg) => {
+    if (inLeg.org !== ctx.domicile || outLeg.dst !== ctx.domicile) return null; // רק "הסליפים לניו יורק" (ס' 143.1.1; טיוטה 446)
     const [a, b] = [legTimes(inLeg, ctx.tz), legTimes(outLeg, ctx.tz)];
     if (a?.sta == null || b?.std == null) return null;
     const gap = b.std - a.sta;

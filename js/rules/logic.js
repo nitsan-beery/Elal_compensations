@@ -890,15 +890,18 @@ function diversionOf(flat, i, tz) {
 /**
  * טיסה ארוכה עם נחיתת ביניים (ישן כ"ה ס' 12.יב, בפרשנות בעל המוצר): הרגליים שהמריאו
  * באותו יום בשעון הבסיס הן יותר מרגל אחת, וסכום הקרדיט המתוכנן שלהן (STA − STD, כולל
- * DH) עולה על `over_flight_hours`. הפיצוי נרשם ב-COM.
+ * DH) עולה על `over_flight_hours`. הפיצוי נרשם ב-COM. DH בחברה זרה אינו נספר: זו טיסה אחרת ולא נחיתת ביניים
+ * (בעל המוצר, 30/10/2026, טיוטה 446).
  * אומת: DME הלוך-חזור 12:45 → COM 02:30 (18/01, 09/02, 17/05, 03/06/2026).
  */
+const foreignDh = (l) => l.type === 'DHX' || (!!(l.dh || l.dhd || l.type === 'DHO') && !/^LY/.test(l.flight ?? ''));
+
 function long_flight_day(ctx, params, rule) {
   const over = H(params.over_flight_hours);
   for (const pairing of ctx.execPairings) {
     const byDate = new Map();
     for (const leg of pairing.legs) {
-      if (leg.skdDur == null || leg.prevMonth) continue; // `prevMonth`: נבדקה בחודש ההמראה (טיוטה 426)
+      if (leg.skdDur == null || leg.prevMonth || foreignDh(leg)) continue; // `prevMonth`: נבדקה בחודש ההמראה (טיוטה 426)
       const d = byDate.get(leg.date) ?? { legs: 0, min: 0 };
       byDate.set(leg.date, { legs: d.legs + 1, min: d.min + leg.skdDur });
     }
