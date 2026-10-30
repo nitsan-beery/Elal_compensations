@@ -848,10 +848,13 @@ function late_landing_home(ctx, params, rule) {
       }
     }
     if (delay <= grace) {
-      if (delay >= noteFrom) ctx.note(date, `${leg.flight} נחתה באיחור של ${delayText(delay)}, לא מעבר לסף של ${grace} דק'. אין פיצוי.`, rule);
+      if (delay >= noteFrom && !leg.prevMonth) ctx.note(date, `${leg.flight} נחתה באיחור של ${delayText(delay)}, לא מעבר לסף של ${grace} דק'. אין פיצוי.`, rule);
       continue;
     }
     const steps = Math.ceil((delay - grace) / step);
+    // רגל שהרומה חוזרת עליה ב-1 לחודש נבדקה בחודש ההמראה: נחיתה אחרי חצות נרשמת ביום הרגל (LY374 ‏03/08/2026,
+    // ‏LY860 ‏11/03/2026). רק כשהרומה רשמה עליה ב-1 לחודש בדיוק את הסכום הוא מוסבר כאן (בעל המוצר, 30/10/2026, טיוטה 429).
+    if (leg.prevMonth && ctx.reportedOnDate(date, 'COM') - ctx.expectedOnDate(date, 'com') !== steps * perStep) continue;
     const stepsWord = steps === 1 ? 'מדרגה אחת' : `${steps} מדרגות`;
     // ההסבר מוצג מתחת לטיסה בטבלת הפירוט, ולא בהערות (בעל המוצר, 01/10/2026). מספר הטיסה
     // נכתב רק כשהיא אינה לבדה בשורה: הפיצוי נרשם לכל FDP, ושורה של רגל אחת כבר נושאת אותו.
