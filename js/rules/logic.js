@@ -77,9 +77,7 @@ function credit_from_scheduled(ctx, params, rule) {
         // הקרדיט ביום האחרון שם, פחות שאר הרגליים באותו יום: רק החלק של הרגל הזאת (30/09/2026: ‏07:53, מתוכן LY373 ‏06:12
         // ו-LY374 ‏01:41; בעל המוצר, 30/10/2026, טיוטה 420).
         const last = ctx.prevExec?.days?.[addDays(leg.date, -1)];
-        const others = (last?.legs ?? []).filter((l) => !(l.flight === leg.flight && l.org === leg.org && l.dst === leg.dst))
-          .reduce((s, l) => s + (l.skdDur ?? 0), 0);
-        const given = ctx.prevExec ? Math.max(0, (last?.values?.Credit?.min ?? 0) - others) : null;
+        const given = ctx.prevExec ? Math.max(0, (last?.values?.Credit?.min ?? 0) - otherCreditOn(ctx, addDays(leg.date, -1), leg)) : null;
         const base = given != null && (prev > dur || given > dur) ? given : prev;
         add(leg.date, dur - base, note(`${leg.flight} יצאה בחודש הקודם, ושם זוכו ${minToHhmm(base)}. בחודש הזה ${minToHhmm(dur - base)} מתוך ${minToHhmm(dur)}`));
         if (base > dur || prev > dur) edges.push({ kind: 'carry', leg, date: leg.date, part: dur - base, dur, prev, given });
@@ -111,7 +109,8 @@ function credit_from_scheduled(ctx, params, rule) {
     // ההסבר גם מתחת לשורת הקרדיט בטבלת הפירוט (`creditNote`; טיוטה 376).
     const extras = new Map();
     for (const e of edges) {
-      const actual = ctx.reportedOnDate(e.date, 'Credit') - (days.get(e.date).min - e.part);
+      // הסבבים שלפני הסבב הזה כבר רשמו מה שצפוי באותו יום: רגל שנחתה בו אחרי חצות (טיוטה 424).
+      const actual = ctx.reportedOnDate(e.date, 'Credit') - ctx.expectedOnDate(e.date, 'flight') - (days.get(e.date).min - e.part);
       if (e.kind === 'carry') carryOffset(ctx, e, actual, rule, extras);
       else if (actual > e.dur) {
         ctx.note(e.date, `${e.leg.flight} זוכתה בקרדיט של ${minToHhmm(actual)} לעומת בלוק מקובע של ${minToHhmm(e.dur)}. ` +
@@ -132,6 +131,28 @@ function credit_from_scheduled(ctx, params, rule) {
  */
 const legCreditDur = (leg, pairing, domicile) =>
   (isAirReturn(leg) || (pairing.destinations.length > 1 && leg.org !== domicile && leg.dst !== domicile) ? leg.actDur : null) ?? leg.skdDur;
+
+/**
+ * מה שהרומה של החודש הקודם זיכתה ביום `date` על טיסות אחרות מלבד `leg`: הרגליים שרשומות בו, והחלק שאחרי חצות של
+ * רגל מהיום שלפניו, שנחתה בו בלי שורת רגל (בעל המוצר, 30/10/2026, טיוטה 424).
+ */
+function otherCreditOn(ctx, date, leg) {
+  const before = addDays(date, -1);
+  let sum = 0;
+  for (const d of [before, date]) {
+    for (const raw of ctx.prevExec.days?.[d]?.legs ?? []) {
+      if (raw.flight === leg.flight && raw.org === leg.org && raw.dst === leg.dst) continue;
+      const l = { ...raw, date: d };
+      const dur = (l.org === ctx.domicile || l.dst === ctx.domicile ? l.skdDur : l.actDur ?? l.skdDur) ?? 0;
+      const split = splitAtMidnight(l, ctx.tz);
+      if (split.error) { if (d === date) sum += dur; continue; }
+      const dep = addDays(d, split.shift);
+      if (dep === date) sum += split.before ?? dur;
+      else if (dep === before && split.before != null) sum += dur - split.before;
+    }
+  }
+  return sum;
+}
 
 /** קיזוז בגבול החודש: בדקות עד שעה, ומעבר לשעה ב-H:MM. */
 const offsetText = (min) => (min === 1 ? 'דקה אחת' : min < 60 ? `${min} דקות` : minToHhmm(min));
