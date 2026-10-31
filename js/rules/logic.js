@@ -723,25 +723,26 @@ function per_diem_estimate(ctx, params, rule) {
   if (!stay && !flight && !waivedDays.length) return;
   const hours = (min) => Math.round((min / 60) * 100) / 100;
   const cents = (usd) => Math.round(usd * 100) / 100;
-  const [stayH, flightH] = [hours(stay), hours(flight)];
+  const flightH = hours(flight);
   const waivedH = hotel.as_stay_hours ? hours(column(params.hotel_waiver_column)) : 0;
   const hotelUsd = hotel.as_stay_hours ? cents(waivedH * stayRate) : waivedDays.length * (hotel.usd_per_day ?? 0);
-  const total = cents(stayH * stayRate) + cents(flightH * rate.flight_usd) + hotelUsd
-    - cents((stayH + waivedH) * params.stay_deduction_usd);
+  const totalFor = (min) => cents(cents(hours(min) * stayRate) + cents(flightH * rate.flight_usd) + hotelUsd
+    - cents((hours(min) + waivedH) * params.stay_deduction_usd));
   // הרומה רושמת את השעות לפעמים על טיסה סמוכה (10/06/2026), ולכן ההשוואה על כל החודש (טיוטה 464).
   const gaps = [];
+  let due = stay;
   let paid = Math.max(0, romeStay - computed.stay);
   for (const c of romeStay ? planned : []) {
     const missing = c.extra - Math.min(paid, c.extra);
     paid -= c.extra - missing;
     if (missing <= params.higher_stay_tolerance_minutes) continue;
-    const usd = cents(hours(missing) * (stayRate - params.stay_deduction_usd)).toFixed(2);
-    gaps.push(`${describePairing(c.plans[0])}: מגיע אש"ל לפי הטיסה ${c.word}, שהייה של ${minToHhmm(c.stay)}. ברומה חסרה שהייה של ${minToHhmm(missing)}, ${usd}$.`);
+    due += missing;
+    gaps.push(`על ${describePairing(c.plans[0])} מגיע אש"ל לפי הטיסה ${c.word}, שהייה של ${minToHhmm(c.stay)}, וברומה חסרה שהייה של ${minToHhmm(missing)}.`);
   }
   // `rateFrom`/`rateSource`: התקופה של התעריף, ו-'slip' כשהוא מתלוש האש"ל במכשיר הזה ולא מ-rules.json (בעל המוצר, 18/10/2026).
-  ctx.setPerDiem({ flightHours: flightH, stayHours: stayH, hotelDays: waivedDays.length, usd: cents(total), position,
+  ctx.setPerDiem({ flightHours: flightH, stayHours: hours(due), hotelDays: waivedDays.length, usd: totalFor(due), position,
     rateFrom: rate.from, ...(rate.source && { rateSource: rate.source }),
-    ...(position !== ctx.position && { positionAssumed: true }), ...(gaps.length && { gaps }) });
+    ...(position !== ctx.position && { positionAssumed: true }), ...(gaps.length && { gaps, rome: { stayHours: hours(stay), usd: totalFor(stay) } }) });
 }
 
 /**

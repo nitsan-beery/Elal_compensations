@@ -16,16 +16,19 @@ test('הרומה שילמה את השהייה של הטיסה המתוכננת: 
   const r = run(swapped({ 10: { ABR: '28:00', PDFT: '05:00' } }), { answers: answers('replaced') });
   assert.equal(shortNote(r), undefined);
   assert.equal(r.perDiem.stayHours, 28);
+  assert.equal(r.perDiem.rome, undefined);
 });
 
-test('הרומה לא שילמה: מתחת לשורת האש"ל מה שחסר, ולא בהערות, והשורה לפי הרומה', () => {
+test('הרומה לא שילמה: השורה לפי מה שמגיע, ולידה מה שברומה ומה שחסר, ולא בהערות', () => {
   const r = run(swapped({ 10: { ABR: '03:00', PDFT: '05:00' } }), { answers: answers('replaced') });
   const n = shortNote(r);
   assert.ok(n);
   assert.ok(n.includes('28:00') && n.includes('25:00'));
   assert.ok(!n.includes('שעות'));
   assert.ok(!notes(r).some((x) => x.includes('אש"ל לפי הטיסה')));
-  assert.equal(r.perDiem.stayHours, 3);
+  assert.equal(r.perDiem.stayHours, 28);
+  assert.equal(r.perDiem.rome.stayHours, 3);
+  assert.ok(Math.abs(r.perDiem.usd - r.perDiem.rome.usd - 169.5) < 0.02);
 });
 
 test('הרומה רשמה את השעות על טיסה סמוכה: בלי הערה', () => {
