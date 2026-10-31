@@ -1084,7 +1084,7 @@ function special_call(ctx, params, rule) {
         const asSc = ctx.paidOnDate(d, column, 'sc', H(second.logic.params.hours));
         ctx.expectPairing(match.exec, asSc ? 'sc' : keyFor(second.logic.params.report_column), H(second.logic.params.hours), second,
           `${flightOf(match.exec)} לא הייתה בתכנון, ובאותה יממה ${other} עם מנוחה חוקית ביניהן`,
-          { date: d, dates: [d], perDay: asSc, explain: `פעילות שנייה ביממה: ${other} ביממה הזאת.${asSc ? ' הרומה רשמה אותה כקריאה מיוחדת, באותו סכום.' : ''}` });
+          { date: d, dates: [d], perDay: asSc, explain: act.pairing.broken ? 'שתי פעילויות עם מנוחה לא חוקית ביניהן.' : `פעילות שנייה ביממה: ${other} ביממה הזאת.${asSc ? ' הרומה רשמה אותה כקריאה מיוחדת, באותו סכום.' : ''}` });
       }
       // קריאה מיוחדת אחת ליממה: שני סבבים לא מתוכננים באותו FDP ביממה אחת (בעל המוצר, 09/10/2026).
       for (const d of days.counted.filter((x) => !moved.has(x) && !ctx.expectedOnDate(x, 'sc'))) {
@@ -1109,7 +1109,7 @@ function special_call(ctx, params, rule) {
     const flightDays = match.exec.shownTo ? [...match.exec.dates, match.exec.shownTo] : match.exec.dates;
     const allRecalled = flightDays.every((d) => ctx.pairingHandledBy(match.exec, `vacation_recall:${d}`));
     if (match.how === 'unplanned' && params.ask_user_if_no_sc && !answer && !allRecalled &&
-      !ctx.pairingHandledBy(match.exec, 'standby_bid_pending') && !secondPaid && !(secondOnly && !act.pairing && !act.sim)) {
+      !ctx.pairingHandledBy(match.exec, 'standby_bid_pending') && !secondPaid && !(secondOnly && !act.pairing && !act.sim) && !act?.pairing?.broken) {
       ctx.ask({
         id: `unplanned:${match.exec.id}`,
         date: match.exec.from,

@@ -112,13 +112,15 @@ export function checkLegalLimits(o) {
   }
   items.sort((a, b) => a.start - b.start || (b.kind === 'rap') - (a.kind === 'rap'));
 
-  const chains = buildChains(items, H(limits.rest_hours));
+  const chains = buildChains(items, H(limits.rest_hours), limits.sim_rest_tolerance_minutes ?? 0);
   const inMonth = (t) => t >= monthStart && t < monthEnd;
   const flag = (date, message) => result.violations.push({ date, message });
   // בביצוע: FDP שהארכה מותרת יכולה להסביר (7.2.10).
   const extend = o.exec ? (date, message) => result.extensions.push({ date, message }) : flag;
 
   // ---- כל FDP: זמן טיסה, משך ה-FDP ומספר הרגליים, לפי הרכב הצוות ----
+  // פעילויות שמנוחה לא חוקית מחברת, כשה-FDP המשותף חורג: הן אינן זמן תפקיד אחד (`brokenRest`; טיוטה 457).
+  const broken = [];
   acclimatize(chains, o);
   for (const ch of chains) {
     if (!ch.flights.length) continue;
@@ -126,7 +128,7 @@ export function checkLegalLimits(o) {
     const id = `crew:${first.date}:${first.flight}`;
     for (const f of ch.flights) crewIdOf.set(`${f.date}:${f.flight}`, id);
     if (!inMonth(ch.fdpStart)) continue;
-    checkFdp(ch, id, o, flag, extend, (need) => result.crewNeeded.push(need));
+    checkFdp(ch, id, { ...o, broken }, flag, extend, (need) => result.crewNeeded.push(need));
     fdps.push(plannedFdp(ch, id, o));
   }
   checkReserve(chains, limits, inMonth, flag);
@@ -138,7 +140,7 @@ export function checkLegalLimits(o) {
 
   result.violations.sort((a, b) => a.date.localeCompare(b.date));
   result.extensions.sort((a, b) => a.date.localeCompare(b.date));
-  return { result, crewIdOf, fdps };
+  return { result, crewIdOf, fdps, broken };
 }
 
 // ---------- התפקידים מהקבצים ----------
@@ -311,13 +313,15 @@ function reportMinutes(it, o) {
 }
 
 /** תקופות תפקיד: תפקידים שאין ביניהם מנוחה חוקית. `gaps`: המנוחות הקצרות שבתוכן. */
-function buildChains(items, restMin) {
+function buildChains(items, restMin, simTolerance = 0) {
+  // שעות הסימולטור ברומה יכולות להיות רחבות ברבע שעה מכל צד, ולכן מנוחה לפניו ואחריו נבדקת בהתאם (בעל המוצר, 31/10/2026, טיוטה 457).
+  const isSim = (it) => /^SIM/.test(it?.code ?? '');
   const chains = [];
   let cur = null;
   let release = -Infinity;
   let last = null;
   for (const it of items) {
-    if (cur && it.start - release < restMin) {
+    if (cur && it.start - release + (isSim(it) || isSim(last) ? simTolerance : 0) < restMin) {
       cur.gaps.push({ prev: last, next: it, rest: it.start - release });
       cur.items.push(it);
     } else {
@@ -522,6 +526,7 @@ function checkFdp(ch, id, o, flag, extend, needCrew) {
   const report = (l, crew, tail = '') => {
     const g = grade(l);
     if (g) (g === 1 ? extend : flag)(date, `${describeChain(ch)}: ${why}${over(l, crew)}.${tail}`);
+    if (g === 2 && why) o.broken?.push(new Set(ch.items.map((i) => `${i.date}:${i.flight ?? i.code}`)));
   };
   // צוות גדול רשאי לבצע FDP שעומד במגבלות של צוות קטן ממנו: מגבלות המוגבר והכפול (כמו 3 רגליים
   // לכל היותר) חלות רק על ההארכה שהן מתירות (30/12/2025: BUS ו-LCA, 4 רגליים, 3 טייסים).

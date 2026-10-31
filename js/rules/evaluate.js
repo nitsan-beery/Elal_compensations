@@ -280,6 +280,8 @@ function evaluateFiles({ rulesData, plan = null, exec = null, answers = {}, hist
     out.crewIdOf = Object.fromEntries(crewIdOf);
     // ה-FDP בזמנים המתוכננים, לצוות החוזי (`legal_crew_composition`).
     ctx.legalFdps = legal.fdps;
+    ctx.brokenRests = legal.broken; // לפעילות שנייה (`brokenRest`; טיוטה 457)
+    ctx.simRestTolerance = rulesData.legal_limits?.sim_rest_tolerance_minutes ?? 0;
     // ה-FDP של התכנון, גם כשיש רומה: לצוות החוזי של טיסה שלא בוצעה (נחיתות לילה; בעל המוצר, 06/10/2026).
     let planFdps = exec ? null : legal.fdps;
     ctx.planFdps = () => (plan ? planFdps ??= checkLegalLimits({ ...common, exec: null, answer: () => null, ask: () => {} }).fdps : null);

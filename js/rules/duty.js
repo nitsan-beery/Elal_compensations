@@ -82,6 +82,32 @@ const isTurnaround = (span, legalRest, ctx) =>
  */
 const legalRestBetween = (a, b) => b.report - a.release;
 
+/** הרגליים של סבב, כמו ב-`broken` של `checkLegalLimits`. */
+const legKeys = (p) => p.legs.map((l) => `${l.date}:${l.flight}`);
+
+/**
+ * שתי פעילויות עם מנוחה לא חוקית ביניהן: כ-FDP אחד הן חורגות מהחוק, ולכן הן אינן "אותו זמן תפקיד" (2024 ס' 42.7) אלא שתי
+ * פעילויות, בלי שאלה. ההודעה האדומה במגבלות החוק נשארת (בעל המוצר, 31/10/2026, טיוטה 457).
+ */
+const brokenRest = (ctx, a, b) => (ctx.brokenRests ?? []).some((set) => a.some((k) => set.has(k)) && b.some((k) => set.has(k)));
+const ILLEGAL_REST = 'שתי פעילויות עם מנוחה לא חוקית ביניהן.';
+
+/**
+ * הסימולטור ביום `d` מול הסבב, לפי השעות ברומה: `separate` – מנוחה חוקית, או לא חוקית (`illegal`) ועם FDP משותף שחורג;
+ * `same_fdp` – אותו FDP. null – בלי שעות, ואז שואלים. מנוחה בתוך רבע שעה מהסף היא חוקית (`simRestTolerance`; טיוטה 457).
+ */
+function simRest(ctx, pairing, d, legal) {
+  const sims = (ctx.timeline.find((x) => x.date === d)?.exec?.sims ?? []).filter((s) => s.std != null && s.sta != null && (s.org ?? ctx.domicile) === ctx.domicile);
+  const span = ctx.duty.span(pairing, { away: true });
+  if (!sims.length || span.report == null || span.release == null) return null;
+  const rests = sims.map((s) => {
+    const start = at(d, s.std);
+    return start < span.report ? span.report - (start + mod(s.sta - s.std, 1440)) : start - span.release;
+  });
+  if (Math.min(...rests) + (ctx.simRestTolerance ?? 0) >= legal) return { value: 'separate', auto: true };
+  return brokenRest(ctx, legKeys(pairing), [`${d}:SIM`]) ? { value: 'separate', auto: true, illegal: true } : { value: 'same_fdp', auto: true };
+}
+
 function planPairingsSorted(ctx) {
   return [...ctx.planPairings].sort((a, b) => a.from.localeCompare(b.from));
 }
@@ -248,7 +274,8 @@ export function dayActivity(ctx, exec, d) {
     const planned = plannedPairing(o);
     if (!planned && so.start >= span.start) continue;
     const [first, second] = so.start < span.start ? [so, span] : [span, so];
-    pairings.push({ o, planned, separate: legalRestBetween(first, second) >= legal });
+    const broken = brokenRest(ctx, legKeys(o), legKeys(exec));
+    pairings.push({ o, planned, broken, separate: legalRestBetween(first, second) >= legal || broken });
   }
   const separate = pairings.filter((x) => x.separate).sort((a, b) => b.planned - a.planned);
   const day = ctx.timeline.find((x) => x.date === d);
@@ -260,7 +287,7 @@ export function dayActivity(ctx, exec, d) {
   const sim = simDay && (simPlanned || simEarlier) ? { planned: simPlanned } : null;
   return {
     planned: pairings.some((x) => x.planned) || simPlanned,
-    pairing: separate[0] ? { pairing: separate[0].o, planned: separate[0].planned } : null,
+    pairing: separate[0] ? { pairing: separate[0].o, planned: separate[0].planned, broken: separate[0].broken } : null,
     sameFdp: pairings.filter((x) => !x.separate).map((x) => x.o),
     sim,
   };
@@ -321,7 +348,8 @@ function second_unplanned_activity(ctx, params, rule) {
         const asSc = ctx.paidOnDate(day, scColumn, 'sc', H(params.hours));
         ctx.expectPairing(u, asSc ? 'sc' : key, H(params.hours), rule,
           `${describePairing(u)} לא הייתה בתכנון, ובאותה יממה בוצעה גם ${describePairing(act.pairing.pairing)} עם מנוחה חוקית ביניהן`,
-          { date: day, dates: [day], ...(asSc && { perDay: true, explain: 'פעילות שנייה ביממה. הרומה רשמה אותה כקריאה מיוחדת, באותו סכום.' }) });
+          { date: day, dates: [day], ...(asSc && { perDay: true, explain: 'פעילות שנייה ביממה. הרומה רשמה אותה כקריאה מיוחדת, באותו סכום.' }),
+            ...(act.pairing.broken && { explain: ILLEGAL_REST }) });
       }
       continue;
     }
@@ -332,10 +360,11 @@ function second_unplanned_activity(ctx, params, rule) {
     if (!act.sim) continue;
     const id = `second_activity:${u.id}`;
     const answered = ctx.answer(id);
-    const a = answered ?? (ctx.paidOnDate(day, params.report_column, key, H(params.hours)) ? ctx.assume(id, 'separate', restLabel) : null);
+    const a = answered ?? (ctx.paidOnDate(day, params.report_column, key, H(params.hours)) ? ctx.assume(id, 'separate', restLabel) : null) ?? simRest(ctx, u, day, legal);
     if (!a) askRest(id, day, `${describePairing(u)} לא הייתה בתכנון, ובאותה יממה היה סימולטור. האם הייתה מנוחה ביניהם?`);
     else if (a.value === 'separate') ctx.expectPairing(u, key, H(params.hours), rule, `${describePairing(u)} לא הייתה בתכנון, ובאותה יממה היה סימולטור ` +
-      `(${answered ? 'לפי תשובתך, עם מנוחה חוקית ביניהם' : `הרומה מזכה את הפיצוי`})`, { date: day, dates: [day] });
+      `(${answered ? 'לפי תשובתך, עם מנוחה חוקית ביניהם' : `הרומה מזכה את הפיצוי`})`, { date: day, dates: [day], ...(a.illegal && { explain: ILLEGAL_REST }) });
+    else if (a.auto) ctx.note(day, `${describePairing(u)} לא הייתה בתכנון, אבל היא באותו FDP עם הסימולטור. אין פיצוי על פעילות שנייה (2024 ס' 42.7).`, rule);
   }
 
   // סבב מתוכנן שהתארך ליום שתוכננו בו טיסה או סימולטור (`extensionDays`; בעל המוצר, 06/10/2026): ההארכה
@@ -356,7 +385,7 @@ function second_unplanned_activity(ctx, params, rule) {
       const separate = others.find((o) => {
         const so = ctx.duty.span(o, { away: true });
         const [first, second] = (so.start ?? 0) < span.start ? [so, span] : [span, so];
-        return first.end != null && second.start != null && legalRestBetween(first, second) >= legal;
+        return first.end != null && second.start != null && (legalRestBetween(first, second) >= legal || brokenRest(ctx, legKeys(o), legKeys(m.exec)));
       });
       if (separate) {
         ctx.expectPairing(m.exec, key, H(params.hours), rule, `${what}, ובאותה יממה בוצעה גם ${describePairing(separate)} עם מנוחה חוקית ביניהן`,
@@ -369,10 +398,11 @@ function second_unplanned_activity(ctx, params, rule) {
       }
       const id = `second_activity:${m.exec.id}:${d}`;
       const answered = ctx.answer(id);
-      const a = answered ?? (ctx.paidOnDate(d, params.report_column, key, H(params.hours)) ? ctx.assume(id, 'separate', restLabel) : null);
+      const a = answered ?? (ctx.paidOnDate(d, params.report_column, key, H(params.hours)) ? ctx.assume(id, 'separate', restLabel) : null) ?? simRest(ctx, m.exec, d, legal);
       if (!a) askRest(id, d, `${what}, ובאותה יממה היה סימולטור. האם הייתה מנוחה ביניהם?`);
       else if (a.value === 'separate') ctx.expectPairing(m.exec, key, H(params.hours), rule, `${what}, ובאותה יממה היה סימולטור ` +
-        `(${answered ? 'לפי תשובתך, עם מנוחה חוקית ביניהם' : 'הרומה מזכה את הפיצוי'})`, { date: d, dates: [d], explain: `הסבב התארך ל-${ddmm(d)}, ובאותה יממה היה סימולטור.` });
+        `(${answered ? 'לפי תשובתך, עם מנוחה חוקית ביניהם' : 'הרומה מזכה את הפיצוי'})`, { date: d, dates: [d], explain: a.illegal ? ILLEGAL_REST : `הסבב התארך ל-${ddmm(d)}, ובאותה יממה היה סימולטור.` });
+      else if (a.auto) ctx.note(d, `${what}, באותו FDP עם הסימולטור. אין פיצוי על פעילות שנייה (2024 ס' 42.7).`, rule, { pairingId: m.exec.id });
     }
   }
 
@@ -387,10 +417,11 @@ function second_unplanned_activity(ctx, params, rule) {
     if (!flights.length) continue;
     const id = `second_activity:sim:${day.date}`;
     const answered = ctx.answer(id);
-    const a = answered ?? (ctx.paidOnDate(day.date, params.report_column, key, H(params.hours)) ? ctx.assume(id, 'separate', restLabel) : null);
+    const a = answered ?? (ctx.paidOnDate(day.date, params.report_column, key, H(params.hours)) ? ctx.assume(id, 'separate', restLabel) : null) ?? simRest(ctx, flights[0], day.date, legal);
     if (!a) askRest(id, day.date, `סימולטור ב-${ddmm(day.date)} לא היה בתכנון, ובאותה יממה בוצעה ${flights.map(describePairing).join(', ')}. האם הייתה מנוחה ביניהם?`);
     else if (a.value === 'separate') ctx.expect(day.date, key, H(params.hours), rule,
-      `סימולטור לא מתוכנן ביממה עם טיסה (${answered ? 'לפי תשובתך, עם מנוחה חוקית ביניהם' : `הרומה מזכה את הפיצוי`})`);
+      `סימולטור לא מתוכנן ביממה עם טיסה (${answered ? 'לפי תשובתך, עם מנוחה חוקית ביניהם' : `הרומה מזכה את הפיצוי`})`, a.illegal ? { explain: ILLEGAL_REST } : undefined);
+    else if (a.auto) ctx.note(day.date, `סימולטור ב-${ddmm(day.date)} לא היה בתכנון, והוא באותו FDP עם ${flights.map(describePairing).join(', ')}. אין פיצוי על פעילות שנייה (2024 ס' 42.7).`, rule);
   }
 }
 
