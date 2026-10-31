@@ -10,7 +10,7 @@ const stayPlan = { 10: [out()], 11: [back()] };
 const ID = 'cancelled:2026-08-10..2026-08-11:ATH';
 const swapped = (values, extra = {}) => month(2026, 8, { plan: stayPlan, exec: { 10: turn(), ...extra }, values });
 const answers = (value) => ({ [ID]: { value } });
-const shortNote = (r) => r.notes.find((n) => n.message.includes('אש"ל לפי הטיסה'));
+const shortNote = (r) => r.perDiem?.gaps?.[0];
 
 test('הרומה שילמה את השהייה של הטיסה המתוכננת: בלי הערה', () => {
   const r = run(swapped({ 10: { ABR: '28:00', PDFT: '05:00' } }), { answers: answers('replaced') });
@@ -18,13 +18,13 @@ test('הרומה שילמה את השהייה של הטיסה המתוכננת: 
   assert.equal(r.perDiem.stayHours, 28);
 });
 
-test('הרומה לא שילמה: הערה בצהוב עם מה שחסר, ושורת האש"ל לפי הרומה', () => {
+test('הרומה לא שילמה: מתחת לשורת האש"ל מה שחסר, ולא בהערות, והשורה לפי הרומה', () => {
   const r = run(swapped({ 10: { ABR: '03:00', PDFT: '05:00' } }), { answers: answers('replaced') });
   const n = shortNote(r);
   assert.ok(n);
-  assert.equal(n.severity, 'warn');
-  assert.ok(n.message.includes('28:00') && n.message.includes('25:00'));
-  assert.ok(!n.message.includes('שעות'));
+  assert.ok(n.includes('28:00') && n.includes('25:00'));
+  assert.ok(!n.includes('שעות'));
+  assert.ok(!notes(r).some((x) => x.includes('אש"ל לפי הטיסה')));
   assert.equal(r.perDiem.stayHours, 3);
 });
 
@@ -63,8 +63,7 @@ test('תעודת 777: לפי הטיסה שבוטלה, גם בלי טיסה במ�
   const wide = (l) => ({ ...l, ac: 'B789' });
   const m = month(2026, 8, { plan: { 10: [wide(out())], 11: [wide(back())], 20: turn().map(wide) }, exec: { 20: turn().map(wide) }, values: { 20: { ABR: '03:00' } } });
   const r = run(m, { answers: answers('swap_777') });
-  assert.ok(shortNote(r));
-  assert.ok(notes(r).some((n) => n.includes('שבוטלה')));
+  assert.ok(shortNote(r).includes('שבוטלה'));
 });
 
 test('הטיסה בוטלה ללא קרדיט: בלי בדיקה', () => {

@@ -729,19 +729,19 @@ function per_diem_estimate(ctx, params, rule) {
   const total = cents(stayH * stayRate) + cents(flightH * rate.flight_usd) + hotelUsd
     - cents((stayH + waivedH) * params.stay_deduction_usd);
   // הרומה רושמת את השעות לפעמים על טיסה סמוכה (10/06/2026), ולכן ההשוואה על כל החודש (טיוטה 464).
+  const gaps = [];
   let paid = Math.max(0, romeStay - computed.stay);
   for (const c of romeStay ? planned : []) {
     const missing = c.extra - Math.min(paid, c.extra);
     paid -= c.extra - missing;
     if (missing <= params.higher_stay_tolerance_minutes) continue;
     const usd = cents(hours(missing) * (stayRate - params.stay_deduction_usd)).toFixed(2);
-    ctx.note(c.plans[0].from, `${describePairing(c.plans[0])}: מגיע אש"ל לפי הטיסה ${c.word}, שהייה של ${minToHhmm(c.stay)}. ברומה חסרה שהייה של ${minToHhmm(missing)}, ${usd}$.`,
-      rule, { severity: 'warn', aside: true });
+    gaps.push(`${describePairing(c.plans[0])}: מגיע אש"ל לפי הטיסה ${c.word}, שהייה של ${minToHhmm(c.stay)}. ברומה חסרה שהייה של ${minToHhmm(missing)}, ${usd}$.`);
   }
   // `rateFrom`/`rateSource`: התקופה של התעריף, ו-'slip' כשהוא מתלוש האש"ל במכשיר הזה ולא מ-rules.json (בעל המוצר, 18/10/2026).
   ctx.setPerDiem({ flightHours: flightH, stayHours: stayH, hotelDays: waivedDays.length, usd: cents(total), position,
     rateFrom: rate.from, ...(rate.source && { rateSource: rate.source }),
-    ...(position !== ctx.position && { positionAssumed: true }) });
+    ...(position !== ctx.position && { positionAssumed: true }), ...(gaps.length && { gaps }) });
 }
 
 /**

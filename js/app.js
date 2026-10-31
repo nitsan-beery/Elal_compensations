@@ -13,7 +13,7 @@ import * as store from './store.js';
 import * as calendar from './calendar.js';
 
 // מספר הגרסה של הקוד שרץ בדף. עולה יחד עם CACHE ב-sw.js, לאותו מספר (בעל המוצר, 15/10/2026).
-const APP_VERSION = 346;
+const APP_VERSION = 347;
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -1236,7 +1236,9 @@ function perDiemLine(pd) {
   const source = !slipSlotOpen(state.record) || !pd.rateFrom ? ''
     : pd.rateSource === 'slip' ? ` · תעריף ${ratePeriod(pd.rateFrom)}, מתלוש האש"ל של ${MONTH_NAMES[Number(pd.rateFrom.slice(5, 7)) - 1]}`
       : ` · לפי התעריף האחרון הידוע (${ratePeriod(pd.rateFrom)})`;
-  return `<p class="small">אש"ל צפוי: ${parts.join(' · ')} · סה"כ לתשלום ${num(`${usd(pd.usd)}$`)}${assumed}${source}</p>`;
+  // שהייה שמגיעה לפי הטיסה המתוכננת וחסרה ברומה (בעל המוצר, 31/10/2026, טיוטה 465).
+  const gaps = (pd.gaps ?? []).map((g) => `<p class="small per-diem-gap">${esc(g)}</p>`).join('');
+  return `<p class="small">אש"ל צפוי: ${parts.join(' · ')} · סה"כ לתשלום ${num(`${usd(pd.usd)}$`)}${assumed}${source}</p>${gaps}`;
 }
 
 /** בתכנון לבד: הקרדיט, ה-Rig וה-COM הצפויים לפי התכנון, בלי השוואה (בעל המוצר, 10/10/2026). S/C נספר עם COM. */

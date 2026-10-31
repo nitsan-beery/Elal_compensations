@@ -35,7 +35,7 @@ const snapshot = (r) => ({
   notes: r.notes.map((n) => clean(n.message)),
   reviews: r.reviews.map((n) => clean(n.message)),
   freeDays: r.freeDays ? `${r.freeDays.free}/${r.freeDays.due}` : null,
-  perDiem: r.perDiem ? `${r.perDiem.flightHours}/${r.perDiem.stayHours}/${r.perDiem.usd}` : null,
+  perDiem: r.perDiem ? `${r.perDiem.flightHours}/${r.perDiem.stayHours}/${r.perDiem.usd}${(r.perDiem.gaps ?? []).map((g) => ` | ${clean(g)}`).join('')}` : null,
 });
 
 async function current() {
