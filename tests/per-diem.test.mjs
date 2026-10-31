@@ -56,6 +56,13 @@ test('הטיסה שבוצעה גבוהה יותר: בלי בדיקה', () => {
   assert.equal(shortNote(r), undefined);
 });
 
+test('הגבוה נקבע לפי הקרדיט: קרדיט גבוה יותר למה שבוצע, גם כשהשהייה המתוכננת ארוכה יותר', () => {
+  const long = [leg('LY5', 'TLV', 'ATH', '10:00', '12:30'), leg('LY6', 'ATH', 'TLV', '13:00', '15:30')];
+  const r = run(month(2026, 8, { plan: stayPlan, exec: { 10: long }, values: { 10: { ABR: '05:30' } } }), { answers: answers('bid') });
+  assert.equal(shortNote(r), undefined);
+  assert.equal(r.perDiem.stayHours, 5.5);
+});
+
 test('חודש בלי עמודת ABR: השעות החסרות בשורת האש"ל', () => {
   const r = run(swapped({}), { answers: answers('replaced') });
   assert.equal(shortNote(r), undefined);

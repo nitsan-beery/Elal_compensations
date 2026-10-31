@@ -711,7 +711,7 @@ function per_diem_estimate(ctx, params, rule) {
   const stayRate = rate.stay_usd[position];
   const column = (c) => ctx.timeline.reduce((s, d) => s + (d.exec?.values?.[c]?.min ?? 0), 0);
   const computed = perDiemHours(ctx);
-  const planned = plannedPerDiem(ctx, rate, stayRate);
+  const planned = plannedPerDiem(ctx);
   const romeStay = column(params.stay_column);
   // עמודה שאין בה ערך באף יום אינה ברומה של החודש (הרומה מציגה רק עמודות שיש בהן ערך).
   const stay = romeStay || computed.stay + planned.reduce((s, c) => s + c.extra, 0);
@@ -775,16 +775,14 @@ function stayOfGroup(ctx, group, first, last) {
 
 /**
  * טיסות שמגיע עליהן אש"ל לפי טיסה שלא בוצעה, ומה שנוסף בגללן בשעות שהייה: "[לרבות אש"ל] בגין הטיסה שביצע או בגין הטיסה
- * שהצבתו אליה בוטלה – לפי הגבוה" (2018 ס' 127, 91.1), וכשהועבר ל-777 – הטיסה שבוטלה (2026 ס' 23.4). הגבוה הוא הטיסה, ולכן
- * ההשוואה בדולרים, שעות שהייה ושעות טיסה יחד (בעל המוצר, 31/10/2026, טיוטה 464).
+ * שהצבתו אליה בוטלה – לפי הגבוה" (2018 ס' 127, 91.1), וכשהועבר ל-777 – הטיסה שבוטלה (2026 ס' 23.4). הגבוה נקבע לפי הקרדיט,
+ * כמו ב-`higher_of_planned_performed`, ולא לפי סכום האש"ל (בעל המוצר, 31/10/2026, טיוטה 467).
  */
-function plannedPerDiem(ctx, rate, stayRate) {
+function plannedPerDiem(ctx) {
   const first = at(ctx.monthFirst, 0);
   const last = at(ctx.timeline.at(-1).date, 1440);
   const stayOf = (list) => list.reduce((s, p) => s + stayOfGroup(ctx, [p], first, last), 0);
-  const flightOf = (list) => list.reduce((s, p) => s + p.legs.reduce((t, l) => t + (l.skdDur ?? 0), 0), 0);
-  const value = (list) => stayOf(list) * stayRate + flightOf(list) * rate.flight_usd;
-  const swaps = ctx.higherPairs.filter(({ plans, exec }) => value(plans) > value([exec]))
+  const swaps = ctx.higherPairs.filter(({ diff }) => diff > 0)
     .map(({ plans, exec }) => ({ plans, stay: stayOf(plans), extra: stayOf(plans) - stayOf([exec]), word: 'המתוכננת' }));
   const moved = ctx.matches.filter((m) => m.plan && ctx.answerFor(m)?.value === 'swap_777')
     .map((m) => ({ plans: [m.plan], stay: stayOf([m.plan]), extra: stayOf([m.plan]), word: 'שבוטלה' }));
@@ -1465,7 +1463,7 @@ function higher_of_planned_performed(ctx, params, rule) {
     const together = group.length > 1 ? group.reduce((s, x) => s + (ctx.plannedCredit(x.plan) ?? 0), 0) : null;
     const diff = together == null ? plannedMinusPerformed(ctx, planned0, exec) : together - sumLegs(exec, ctx.domicile);
     if (diff == null) continue;
-    ctx.higherPairs.push({ plans: group.length > 1 ? group.map((x) => x.plan) : [planned0], exec });
+    ctx.higherPairs.push({ plans: group.length > 1 ? group.map((x) => x.plan) : [planned0], exec, diff });
 
     // "הגבוה מבין השתיים" הוא סך הכול, לא תוספת על ההשלמה למינימום שהסבב שבוצע מקבל בזכות
     // עצמו: כשהמתוכנן גבוה גם מהמינימום, הנוסף הוא רק ההפרש שמעבר להשלמה שכבר צפויה
