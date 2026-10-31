@@ -907,8 +907,11 @@ function night_landings(ctx, params, rule) {
   // במקום אחד בלבד, בשאלה על הסבב שלא בוצע, וכאן רק קוראים מה יצא ממנה.
   if (ctx.hasExec) {
     for (const n of night) {
-      n.target = ctx.execPairings.find((e) => e.legs.some((l) => l.flight === n.leg.flight && l.type !== 'DHO' &&
-        Math.abs(Date.parse(l.date) - Date.parse(n.leg.date)) <= dayMs)) ?? null;
+      // קודם אותו תאריך. היום הסמוך רק כשאין לאותו מספר טיסה רגל מתוכננת בו: בלילות עוקבים זו טיסה אחרת (טיוטה 460).
+      const flown = (test) => ctx.execPairings.find((e) => e.legs.some((l) => l.flight === n.leg.flight && l.type !== 'DHO' && test(l)));
+      const plannedOn = (date) => ctx.planPairings.some((p) => p.legs.some((l) => l.flight === n.leg.flight && l.date === date));
+      n.target = flown((l) => l.date === n.leg.date) ??
+        flown((l) => Math.abs(Date.parse(l.date) - Date.parse(n.leg.date)) <= dayMs && !plannedOn(l.date)) ?? null;
       if (n.target) { n.status = 'done'; continue; }
       n.status = cancelStatus(ctx, n.pairing);
       // זכייה במכרז אינה "ביוזמת החברה", אבל זכייה בטיסה עם נחיתת לילה אינה פוגעת בזכאות (ס' 40;
