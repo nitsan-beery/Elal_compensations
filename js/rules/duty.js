@@ -1086,6 +1086,10 @@ function night_landings(ctx, params, rule) {
  */
 const cancelStatus = (ctx, planPairing) => pairingDecision(ctx, ctx.matches.find((x) => x.plan === planPairing)).reason;
 
+/** ביטול ביוזמת החברה בחודש הקודם (2024 ס' 40): לפי התשובה שם. */
+const cancelledBefore = (prior, p) =>
+  COMPANY_CANCEL.includes(prior.answers?.[`cancelled:${p.id}`]?.value) || prior.answers?.[`other_company:${p.id}`]?.value === 'yes';
+
 /**
  * הטיסה שזכה בה במכרז במקום הסבב המתוכנן: הקישור שבתשובה, או null (טיסה בחודש אחר). תשובה
  * שהגיעה דרך הסבב שבוצע באותם ימים (`via`) או שנשמרה בלי קישור – הסבב שבוצע באותם ימים,
@@ -1448,9 +1452,7 @@ function consecutive_saturdays(ctx, params, rule) {
     return earlier || spans.includes(sp) ? { pairing: sp.p } : { date, ground: [] };
   };
   // ביטול ביוזמת החברה (ס' 40): בחודש הזה לפי השאלה על הסבב, ובחודש הקודם לפי התשובה שם.
-  const cancelledByCompany = (p, earlier) => (earlier
-    ? COMPANY_CANCEL.includes(prior.answers?.[`cancelled:${p.id}`]?.value) || prior.answers?.[`other_company:${p.id}`]?.value === 'yes'
-    : cancelStatus(ctx, p) === 'company');
+  const cancelledByCompany = (p, earlier) => (earlier ? cancelledBefore(prior, p) : cancelStatus(ctx, p) === 'company');
   // שבת מתוכננת עם "סיבה אחרת": אי אפשר לדעת אם היא נספרת, עד התשובה (`askCompanyCancel`; טיוטה 454).
   const awaiting = (date) => {
     if (!ctx.hasExec || date < ctx.monthFirst || hit(date, execSpans, priorExec) || groundIn(date, true)) return null;
@@ -1552,7 +1554,7 @@ function consecutive_night_rounds(ctx, params, rule) {
   const flownBefore = new Set((prior?.execPairings ?? []).flatMap(nightsOfPairing));
   for (const p of prior?.planPairings ?? []) {
     for (const d of nightsOfPairing(p)) {
-      if (!prior.hasExec || flownBefore.has(d)) { planned.set(d, p); earlier.add(p); }
+      if (!prior.hasExec || flownBefore.has(d) || cancelledBefore(prior, p)) { planned.set(d, p); earlier.add(p); }
     }
   }
   for (const p of planPairingsSorted(ctx)) {
@@ -1645,8 +1647,10 @@ function consecutive_night_rounds(ctx, params, rule) {
         }
       }
     }
-    if (target) ctx.expectPairing(target, key, H(params.hours), rule, why);
-    else ctx.expect(payNight, key, H(params.hours), rule, `${why} (הסבב בלילה ${ddmm(payNight)} בוטל ביוזמת החברה)`);
+    // מגיע לפי התשובה, והרומה רשמה אותו על יום אחר: משויך אחרי כל החוקים (`floating`; טיוטה 462).
+    const extra = ctx.hasExec && !paid ? { floating: `${rule.title} (${list})` } : {};
+    if (target) ctx.expectPairing(target, key, H(params.hours), rule, why, extra);
+    else ctx.expect(payNight, key, H(params.hours), rule, `${why} (הסבב בלילה ${ddmm(payNight)} בוטל ביוזמת החברה)`, extra);
   }
 }
 

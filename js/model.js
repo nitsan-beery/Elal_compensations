@@ -105,8 +105,10 @@ export function markCarryIn(days, domicile, prev = null, answers = {}) {
 }
 
 function carriedIn(leg, exec, date, domicile, prevExec) {
-  const last = prevExec?.days?.[new Date(Date.parse(date) - 86400000).toISOString().slice(0, 10)];
-  if (last) return (last.legs ?? []).some((l) => l.flight === leg.flight && l.org === leg.org && l.dst === leg.dst);
+  const lastDate = new Date(Date.parse(date) - 86400000).toISOString().slice(0, 10);
+  const last = prevExec?.days?.[lastDate];
+  // רגל שנחתה לפני חצות אינה חוזרת: אותה טיסה בלילה הבא היא טיסה חדשה (טיוטה 462).
+  if (last) return (last.legs ?? []).some((l) => sameLeg(l, leg) && midnightSplit(l, lastDate, domicile) !== false);
   const tab = exec.values?.TAB?.min;
   if (leg.org === domicile) return (tab ?? 0) >= 1440;
   const split = midnightSplit(leg, date, domicile);
