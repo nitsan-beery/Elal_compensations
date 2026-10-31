@@ -982,6 +982,7 @@ function makeContext({ out, timeline, domicile, codes, holidays, answers, stale,
   const reviewKeys = new Set();
   const ruleRef = (rule) => ({ ruleId: rule.id, ruleTitle: rule.title, ...(rule.short_title && { shortTitle: rule.short_title }),
     ...(rule.short_title_plural && { shortTitlePlural: rule.short_title_plural }) });
+  const unpaidLeave = supported.find((r) => r.id === 'vacation_base_credit')?.logic.params?.exclude_codes ?? [];
   const linkedSwap = (prefix, pairingId) => {
     const hit = Object.entries(answers).find(([id, a]) =>
       id.startsWith(prefix) && LINKED_VALUES.includes(a.value) && a.link === pairingId);
@@ -1136,6 +1137,8 @@ function makeContext({ out, timeline, domicile, codes, holidays, answers, stale,
       let unknown = false;
       for (const code of day?.codes ?? []) {
         if (activityCodes.has(code)) return true;
+        // יום שתוכננו בו חופשה בתשלום או מחלה מזכה במחלה (ישן כ"ה ס' 15.ב; בעל המוצר, 31/10/2026, טיוטה 459).
+        if (isLeaveCode(code, leave, codes) && !unpaidLeave.includes(code)) return true;
         if (isLeaveCode(code, leave, codes) || isIgnoredPlanCode(code, codes)) continue;
         unknown = true;
       }
@@ -1275,11 +1278,19 @@ function makeContext({ out, timeline, domicile, codes, holidays, answers, stale,
       return reported - explained >= min;
     },
 
+    /** חודש שכל ימיו היעדרות: הזיכויים עד התקרה, והעודף יורד מהימים האחרונים (2024 ס' 61; טיוטה 459). */
     capAbsenceTotal(capMin, rule) {
-      const total = out.expectations.filter((e) => e.key === 'absence').reduce((s, e) => s + e.min, 0);
-      if (total > capMin) {
-        this.note(null, `סך הזיכויים בחודש של היעדרות מלאה (${fmt(total)}) עובר את התקרה של ${fmt(capMin)}. הצפוי הוא התקרה.`, rule);
+      const all = out.expectations.filter((e) => e.key === 'absence');
+      if (!timeline.every((d) => all.some((e) => e.date === d.date))) return;
+      const total = all.reduce((s, e) => s + e.min, 0);
+      if (total <= capMin) return;
+      let excess = total - capMin;
+      for (const e of all.reverse()) {
+        const cut = Math.min(e.min, excess);
+        e.min -= cut;
+        excess -= cut;
       }
+      this.note(null, `סך הזיכויים בחודש של היעדרות מלאה (${fmt(total)}) עובר את התקרה של ${fmt(capMin)}. הצפוי הוא התקרה.`, rule);
     },
   };
 }

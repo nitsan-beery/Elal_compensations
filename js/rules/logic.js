@@ -630,6 +630,9 @@ const codeIn = (code, list = [], prefixes = []) => list.includes(code) || prefix
  * בודד, ואין טעם להעיר על כך בכל בדיקה (החלטת בעל המוצר, 23/09/2026).
  * העיגול לדקות נעשה על הסכום ולא על כל יום, כדי לא לצבור שגיאת עיגול.
  */
+/** השורה של `n` ימים, ומעבר לטבלה שבהסכם – השורה האחרונה בה (טיוטה 459). */
+const lastRow = (table, n) => String(Math.min(n, Math.max(...Object.keys(table).map(Number))));
+
 function vacation_credit_balance(ctx, params, rule) {
   const days = ctx.timeline.filter((d) => ctx.isAbsenceBy(d.date, 'vacation_base_credit'));
   if (!days.length) return;
@@ -639,8 +642,8 @@ function vacation_credit_balance(ctx, params, rule) {
   let rate;
   if (n <= full) {
     rate = params.per_day_hours;
-  } else if (params.taper_table_complete && params.taper_table?.[String(n)] != null) {
-    rate = params.taper_table[String(n)];
+  } else if (params.taper_table_complete && params.taper_table?.[lastRow(params.taper_table, n)] != null) {
+    rate = params.taper_table[lastRow(params.taper_table, n)];
   } else {
     ctx.review(`בחודש ${n} ימי חופשה, ואין לכך מדרגה בטבלת איזון החופשה ב-rules.json.`, rule);
     return;
@@ -774,8 +777,6 @@ function perDiemHours(ctx) {
 
 /** בחודש שכולו היעדרות, סך הזיכויים מוגבל. */
 function absence_month_cap(ctx, params, rule) {
-  const hasFlights = ctx.timeline.some((d) => (d.exec?.legs?.length ?? 0) > 0 || (d.plan?.legs?.length ?? 0) > 0);
-  if (hasFlights) return;
   ctx.capAbsenceTotal(H(params.cap_hours), rule);
 }
 
