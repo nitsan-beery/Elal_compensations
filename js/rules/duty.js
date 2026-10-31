@@ -1484,8 +1484,11 @@ function consecutive_saturdays(ctx, params, rule) {
     // הפיצוי רק לבקשת החברה (ס' 34); ויתור בבקשות (2018 ס' 61.2) אינו מזכה. כשהרומה זיכתה – מניחים
     // לבקשת החברה; אחרת, ובתכנון לבד תמיד, שואלים (בעל המוצר, 16/10/2026).
     const id = `saturdays:${s1}`;
-    const paid = ctx.hasExec && (a2.pairing ? ctx.paidOn(a2.pairing, params.report_column, key, H(params.hours))
-      : ctx.paidOnDate(s2, params.report_column, key, H(params.hours))) && !!ctx.assume(id, 'company', 'לבקשת החברה');
+    // הרומה רושמת את הפיצוי על אחת משתי השבתות (טיוטה 461).
+    const paidThere = (act, date) => (act.pairing ? ctx.paidOn(act.pairing, params.report_column, key, H(params.hours))
+      : ctx.paidOnDate(date, params.report_column, key, H(params.hours)));
+    const target = !ctx.hasExec ? null : paidThere(a2, s2) ? { act: a2, date: s2 } : s1 >= ctx.monthFirst && paidThere(a1, s1) ? { act: a1, date: s1 } : null;
+    const paid = !!target && !!ctx.assume(id, 'company', 'לבקשת החברה');
     if (!paid) {
       const a = ctx.answer(id);
       if (!a) {
@@ -1511,8 +1514,9 @@ function consecutive_saturdays(ctx, params, rule) {
     // הרומה לא רשמה את הפיצוי על השבת השנייה: אחרי כל החוקים הוא משויך לשורה עם פיצוי לא מוסבר
     // בסכום תואם (`floating`; בעל המוצר, 17/10/2026).
     const extra = ctx.hasExec && !paid ? { floating: `${rule.title} (${ddmm(s1)}, ${ddmm(s2)})` } : {};
-    if (a2.pairing) ctx.expectPairing(a2.pairing, key, H(params.hours), rule, why, extra);
-    else ctx.expect(s2, key, H(params.hours), rule, why, extra);
+    const on = paid ? target : { act: a2, date: s2 };
+    if (on.act.pairing) ctx.expectPairing(on.act.pairing, key, H(params.hours), rule, why, extra);
+    else ctx.expect(on.date, key, H(params.hours), rule, why, extra);
   }
 }
 
