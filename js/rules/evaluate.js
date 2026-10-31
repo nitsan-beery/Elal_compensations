@@ -1107,6 +1107,8 @@ function makeContext({ out, timeline, domicile, codes, holidays, answers, stale,
     setPerDiem(v) { out.perDiem = v; },
     /** קודים בתכנון שאינם היעדרות, הערה או DUM: פעילות, וגם קוד לא מוכר (לא מניחים שהוא יום פנוי). */
     planActivityCodes: (day) => (day.plan?.codes ?? []).filter((c) => !isLeaveCode(c, leave, codes) && !isIgnoredPlanCode(c, codes)),
+    // יום הדרכה (2018 ס' 71.1): פעילות קרקע כולל HOME_RGT, בלי כוננות שברשימה ובלי סימולטור (בעל המוצר, 31/10/2026).
+    isTrainingCode: (c) => (codes.ground_activity ?? []).includes(c) && !isStandbyCode(c),
     /**
      * יום שלא תוכנן בו כלום: בלי פעילות, היעדרות או סבב – גם לא יום שהייה באמצע סבב, או נחיתה מתוכננת
      * אחרי חצות (03/08/2026 OPO, נחיתה מתוכננת 03:32 ב-04/08).

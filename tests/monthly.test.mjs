@@ -99,7 +99,7 @@ const strict = (days) => {
   for (const k of Object.keys(r.logic.params.min_free_days)) r.logic.params.min_free_days[k] = r.logic.params.min_free_days[k].map((x) => ({ ...x, days }));
   return c;
 };
-const busy = (from = 2, to = 30) => Object.fromEntries(Array.from({ length: to - from + 1 }, (_, i) => [String(from + i).padStart(2, '0'), 'HOME_RGT']));
+const busy = (from = 2, to = 30) => Object.fromEntries(Array.from({ length: to - from + 1 }, (_, i) => [String(from + i).padStart(2, '0'), 'SIM']));
 // טיסה אחת לפחות: מהרגליים האפליקציה לומדת את הבסיס ואת הצי.
 const onlyX = () => month(2026, 10, { plan: { '01': 'X', ...busy(2, 14), 15: sat(), ...busy(16, 30) } });
 const freeOf = (r) => r.freeDays?.dates ?? [];
