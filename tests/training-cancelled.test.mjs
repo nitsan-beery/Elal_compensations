@@ -27,6 +27,14 @@ test('יום ההדרכה ויום פנוי אחריו: קריאה מיוחדת 
   assert.deepEqual(sc(run(month(2026, 8, { plan: { 10: 'CPT_BAS' }, exec: { 10: [out()], 11: [back()] } }))), ['10/08', '11/08']);
 });
 
+test('RGT הוא קורס קרקע: בוטל והוצבת לטיסה – קריאה מיוחדת (טיוטה 468)', () => {
+  assert.deepEqual(sc(run(month(2026, 8, { plan: { 10: 'RGT' }, exec: { 10: turn() } }))), ['10/08']);
+});
+
+test('HOME_RGT נשאר מחוץ לס\' 17.ג', () => {
+  assert.deepEqual(sc(run(month(2026, 8, { plan: { 10: 'HOME_RGT' }, exec: { 10: turn() } }))), []);
+});
+
 test('סימולטור שבוטל והוצבת לטיסה: קריאה מיוחדת גם כשהרומה לא רשמה', () => {
   assert.deepEqual(sc(run(month(2026, 8, { plan: { 10: 'SIM' }, exec: { 10: turn() } }))), ['10/08']);
 });
