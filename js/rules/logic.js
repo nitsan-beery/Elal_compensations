@@ -711,8 +711,10 @@ function per_diem_estimate(ctx, params, rule) {
   const stayRate = rate.stay_usd[position];
   const column = (c) => ctx.timeline.reduce((s, d) => s + (d.exec?.values?.[c]?.min ?? 0), 0);
   const computed = perDiemHours(ctx);
+  const planned = plannedPerDiem(ctx, rate, stayRate);
+  const romeStay = column(params.stay_column);
   // עמודה שאין בה ערך באף יום אינה ברומה של החודש (הרומה מציגה רק עמודות שיש בהן ערך).
-  const stay = column(params.stay_column) || computed.stay;
+  const stay = romeStay || computed.stay + planned.reduce((s, c) => s + c.extra, 0);
   const flight = column(params.flight_column) || computed.flight;
   const waivedDays = ctx.timeline.filter((d) => {
     const v = d.exec?.values?.[params.hotel_waiver_column];
@@ -726,6 +728,16 @@ function per_diem_estimate(ctx, params, rule) {
   const hotelUsd = hotel.as_stay_hours ? cents(waivedH * stayRate) : waivedDays.length * (hotel.usd_per_day ?? 0);
   const total = cents(stayH * stayRate) + cents(flightH * rate.flight_usd) + hotelUsd
     - cents((stayH + waivedH) * params.stay_deduction_usd);
+  // הרומה רושמת את השעות לפעמים על טיסה סמוכה (10/06/2026), ולכן ההשוואה על כל החודש (טיוטה 464).
+  let paid = Math.max(0, romeStay - computed.stay);
+  for (const c of romeStay ? planned : []) {
+    const missing = c.extra - Math.min(paid, c.extra);
+    paid -= c.extra - missing;
+    if (missing <= params.higher_stay_tolerance_minutes) continue;
+    const usd = cents(hours(missing) * (stayRate - params.stay_deduction_usd)).toFixed(2);
+    ctx.note(c.plans[0].from, `${describePairing(c.plans[0])}: מגיע אש"ל לפי הטיסה ${c.word}, שהייה של ${minToHhmm(c.stay)}. ברומה חסרה שהייה של ${minToHhmm(missing)}, ${usd}$.`,
+      rule, { severity: 'warn', aside: true });
+  }
   // `rateFrom`/`rateSource`: התקופה של התעריף, ו-'slip' כשהוא מתלוש האש"ל במכשיר הזה ולא מ-rules.json (בעל המוצר, 18/10/2026).
   ctx.setPerDiem({ flightHours: flightH, stayHours: stayH, hotelDays: waivedDays.length, usd: cents(total), position,
     rateFrom: rate.from, ...(rate.source && { rateSource: rate.source }),
@@ -744,6 +756,40 @@ function per_diem_estimate(ctx, params, rule) {
  *   ‏07:19, בלי ה-Rig ‏02:41). Rig על סבב שלא בוצע (הורדה מהטיסה, 28/07/2026) אינו נכלל, וגם קרדיט של
  *   היעדרות ביום שנחת בו סבב (SICK ב-14/08/2026).
  */
+/** השהייה בתוך החודש של סבבים באותו FDP, כולל הזמן בבסיס ביניהם. */
+function stayOfGroup(ctx, group, first, last) {
+  // לא `pairingTimes` עם `away`: הוא מסיים לפי ה-TAB של היום האחרון, שכולל גם היעדרות באותו יום.
+  const legs = group.flatMap((p) => p.legs);
+  const abroad = legs.find((l) => l.org === ctx.domicile && l.dst !== ctx.domicile);
+  const out = abroad ?? legs.find((l) => l.org === ctx.domicile);
+  const home = legs.findLast((l) => l.dst === ctx.domicile);
+  const a = out ? legTimes(out, ctx.tz) : null;
+  const b = home ? legTimes(home, ctx.tz) : null;
+  const start = group[0].cutAtStart ? first : (a?.atd ?? a?.std);
+  // ATA ברומה בנחיתה בבסיס הוא כבר שעון הבסיס, ומדויק יותר מ-ATD + ActDur (09/09/2024 TIV-TLV: ‏22:07, ‏ABR 10:07).
+  const landed = b?.ata != null && home.ata != null ? b.ata + ((((home.ata - b.ata) % 1440) + 2160) % 1440) - 720 : b?.ata;
+  const end = group.at(-1).cutAtEnd ? last : (landed ?? b?.sta);
+  return start != null && end != null ? Math.max(0, Math.min(end, last) - Math.max(start, first)) : 0;
+}
+
+/**
+ * טיסות שמגיע עליהן אש"ל לפי טיסה שלא בוצעה, ומה שנוסף בגללן בשעות שהייה: "[לרבות אש"ל] בגין הטיסה שביצע או בגין הטיסה
+ * שהצבתו אליה בוטלה – לפי הגבוה" (2018 ס' 127, 91.1), וכשהועבר ל-777 – הטיסה שבוטלה (2026 ס' 23.4). הגבוה הוא הטיסה, ולכן
+ * ההשוואה בדולרים, שעות שהייה ושעות טיסה יחד (בעל המוצר, 31/10/2026, טיוטה 464).
+ */
+function plannedPerDiem(ctx, rate, stayRate) {
+  const first = at(ctx.monthFirst, 0);
+  const last = at(ctx.timeline.at(-1).date, 1440);
+  const stayOf = (list) => list.reduce((s, p) => s + stayOfGroup(ctx, [p], first, last), 0);
+  const flightOf = (list) => list.reduce((s, p) => s + p.legs.reduce((t, l) => t + (l.skdDur ?? 0), 0), 0);
+  const value = (list) => stayOf(list) * stayRate + flightOf(list) * rate.flight_usd;
+  const swaps = ctx.higherPairs.filter(({ plans, exec }) => value(plans) > value([exec]))
+    .map(({ plans, exec }) => ({ plans, stay: stayOf(plans), extra: stayOf(plans) - stayOf([exec]), word: 'המתוכננת' }));
+  const moved = ctx.matches.filter((m) => m.plan && ctx.answerFor(m)?.value === 'swap_777')
+    .map((m) => ({ plans: [m.plan], stay: stayOf([m.plan]), extra: stayOf([m.plan]), word: 'שבוטלה' }));
+  return [...swaps, ...moved].filter((c) => c.extra > 0);
+}
+
 function perDiemHours(ctx) {
   const first = at(ctx.monthFirst, 0);
   const last = at(ctx.timeline.at(-1).date, 1440);
@@ -755,18 +801,7 @@ function perDiemHours(ctx) {
   let stay = 0;
   let flight = 0;
   for (const group of groups) {
-    // לא `pairingTimes` עם `away`: הוא מסיים לפי ה-TAB של היום האחרון, שכולל גם היעדרות באותו יום.
-    const legs = group.flatMap((p) => p.legs);
-    const abroad = legs.find((l) => l.org === ctx.domicile && l.dst !== ctx.domicile);
-    const out = abroad ?? legs.find((l) => l.org === ctx.domicile);
-    const home = legs.findLast((l) => l.dst === ctx.domicile);
-    const a = out ? legTimes(out, ctx.tz) : null;
-    const b = home ? legTimes(home, ctx.tz) : null;
-    const start = group[0].cutAtStart ? first : (a?.atd ?? a?.std);
-    // ATA ברומה בנחיתה בבסיס הוא כבר שעון הבסיס, ומדויק יותר מ-ATD + ActDur (09/09/2024 TIV-TLV: ‏22:07, ‏ABR 10:07).
-    const landed = b?.ata != null && home.ata != null ? b.ata + ((((home.ata - b.ata) % 1440) + 2160) % 1440) - 720 : b?.ata;
-    const end = group.at(-1).cutAtEnd ? last : (landed ?? b?.sta);
-    if (start != null && end != null) stay += Math.max(0, Math.min(end, last) - Math.max(start, first));
+    stay += stayOfGroup(ctx, group, first, last);
     const credit = group.reduce((s, p) => s + ctx.expectedOn(p, 'flight'), 0);
     const rig = group.reduce((s, p) => s + ctx.expectedOn(p, 'rig', slipRule ? [slipRule.id] : []), 0);
     const slipped = slipRule && group.some((p) => ctx.expectedOn(p, 'rig') > ctx.expectedOn(p, 'rig', [slipRule.id]));
@@ -1429,6 +1464,7 @@ function higher_of_planned_performed(ctx, params, rule) {
     const together = group.length > 1 ? group.reduce((s, x) => s + (ctx.plannedCredit(x.plan) ?? 0), 0) : null;
     const diff = together == null ? plannedMinusPerformed(ctx, planned0, exec) : together - sumLegs(exec, ctx.domicile);
     if (diff == null) continue;
+    ctx.higherPairs.push({ plans: group.length > 1 ? group.map((x) => x.plan) : [planned0], exec });
 
     // "הגבוה מבין השתיים" הוא סך הכול, לא תוספת על ההשלמה למינימום שהסבב שבוצע מקבל בזכות
     // עצמו: כשהמתוכנן גבוה גם מהמינימום, הנוסף הוא רק ההפרש שמעבר להשלמה שכבר צפויה
@@ -2542,7 +2578,7 @@ export const KNOWN_PARAMS = {
   absence_day_credit: ['plan_codes', 'report_codes', 'plan_code_prefixes', 'report_code_prefixes', 'report_flag_column', 'credit_hours', 'tab_hours', 'requires_assigned_activity', 'flight_day_takes_higher', 'away_flag_on_pairing_start', 'confirm_code_prefixes', 'confirm_label', 'confirm_answer', 'exclude_codes', 'ask_when_missing', 'missing_label', 'assume_unknown_codes', 'unserved_empty_rule'],
   unpaid_leave_days: ['plan_codes', 'report_codes', 'plan_code_prefixes', 'report_code_prefixes'],
   hotel_waiver_days: ['report_column'],
-  per_diem_estimate: ['rates', 'default_position', 'slip_month', 'slip_owner_staff', 'stay_column', 'flight_column', 'stay_deduction_usd', 'hotel_waiver_column', 'hotel_waiver'],
+  per_diem_estimate: ['higher_stay_tolerance_minutes', 'rates', 'default_position', 'slip_month', 'slip_owner_staff', 'stay_column', 'flight_column', 'stay_deduction_usd', 'hotel_waiver_column', 'hotel_waiver'],
   vacation_credit_balance: ['per_day_hours', 'days_full_rate', 'monthly_max_hours', 'yearly_cap_days', 'taper_table', 'taper_table_complete', 'taper_monthly_totals'],
   absence_month_cap: ['cap_hours'],
   late_landing_home: ['grace_minutes', 'step_minutes', 'hours_per_step', 'note_from_minutes'],

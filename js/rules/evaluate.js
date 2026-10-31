@@ -1103,6 +1103,8 @@ function makeContext({ out, timeline, domicile, codes, holidays, answers, stale,
     execCodes: (day) => execCodesOf(day, codes),
     /** ימים ללא פעילות בתכנון מול המינימום בהסכם, לסיכום החודשי. */
     setFreeDays(v) { out.freeDays = v; },
+    // סבבים שחל עליהם "הגבוה מבין השתיים", לבדיקת האש"ל (`plannedPerDiem`).
+    higherPairs: [],
     /** האש"ל הצפוי בחודש, לשורה התחתונה בסיכום: שעות טיסה ושהייה, ימי ויתור מלון וסה"כ בדולרים. */
     setPerDiem(v) { out.perDiem = v; },
     /** קודים בתכנון שאינם היעדרות, הערה או DUM: פעילות, וגם קוד לא מוכר (לא מניחים שהוא יום פנוי). */
