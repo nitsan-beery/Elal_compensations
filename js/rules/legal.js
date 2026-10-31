@@ -122,20 +122,30 @@ export function checkLegalLimits(o) {
   // פעילויות שמנוחה לא חוקית מחברת, כשה-FDP המשותף חורג: הן אינן זמן תפקיד אחד (`brokenRest`; טיוטה 457).
   const broken = [];
   acclimatize(chains, o);
+  // הארכה של יותר מ-`extension_once_over_minutes` מותרת פעם אחת עד `free_time.hours` פנויות (7.2.10; טיוטה 471).
+  let lastExtended = -1;
+  const repeatExtension = (ch, over) => {
+    if (over <= limits.extension_once_over_minutes) return false;
+    const i = chains.indexOf(ch);
+    const repeat = lastExtended >= 0 && !chains.slice(lastExtended, i).some((c, k) => chains[lastExtended + k + 1].start - c.end >= H(limits.free_time.hours));
+    lastExtended = i;
+    return repeat;
+  };
   for (const ch of chains) {
     if (!ch.flights.length) continue;
     const first = ch.flights[0];
     const id = `crew:${first.date}:${first.flight}`;
     for (const f of ch.flights) crewIdOf.set(`${f.date}:${f.flight}`, id);
     if (!inMonth(ch.fdpStart)) continue;
-    checkFdp(ch, id, { ...o, broken }, flag, extend, (need) => result.crewNeeded.push(need));
+    checkFdp(ch, id, { ...o, broken, repeatExtension }, flag, extend, (need) => result.crewNeeded.push(need));
     fdps.push(plannedFdp(ch, id, o));
   }
+  checkAirportReserve(chains, limits, inMonth, flag);
   checkReserve(chains, limits, inMonth, flag);
   checkDeadheadRest(chains, o, inMonth, flag);
   checkFreeTime(chains, limits, inMonth, coverStart, flag);
   checkLongTripRest(chains, o, inMonth, flag);
-  checkConsecutiveNights(chains, limits, inMonth, flag);
+  checkConsecutiveNights(chains, o, inMonth, flag);
   checkCumulative(chains, items, limits, inMonth, flag);
 
   result.violations.sort((a, b) => a.date.localeCompare(b.date));
@@ -271,10 +281,11 @@ function reserveKind(code, limits) {
  * התחלת התפקיד והשחרור ממנו. טיסה: התייצבות לפני STD (בבסיס לפי הצי, בחו"ל `report_minutes_outstation`),
  * ושחרור `post_flight_minutes` אחרי ה-On block. DH: מ-`deadhead_report_minutes` לפני STD ועד ה-On block.
  * אחרי עיכוב לפני FDP (`delayedReport`) ההתייצבות לפני ההמראה בפועל, והכוננות מההתייצבות המקורית ועד אליה.
+ * בלי כוננות ההתייצבות היא המקורית, גם בהמראה מוקדמת (7.2.9; טיוטה 471).
  */
 function setTimes(it, o) {
   const { limits, domicile, fleet } = o;
-  const sched = (x) => (x.delayedReport ? x.std : Math.min(x.std, x.skd ?? x.std));
+  const sched = (x) => (x.delayedReport ? x.std : x.skd ?? x.std);
   if (it.kind === 'flight') {
     it.start = sched(it) - reportMinutes(it, o);
     // ההתייצבות המתוכננת, לצוות החוזי (`plannedFdp`).
@@ -351,19 +362,23 @@ function buildChains(items, restMin, simTolerance = 0) {
 
 /**
  * התאקלמות (7.2.1, Acclimated): 72 שעות באזור, או 36 שעות רצופות פנויות. אזור אחר = הפרש של
- * יותר מ-60° קו אורך; כאן לפי הפרש השעון, יותר מ-`acclimated.offset_hours` (15° לשעה), כי אין
- * קווי אורך בטבלת השדות. מנוחה של 36 שעות ומעלה בתחנה מעבירה את ההתאקלמות אליה.
+ * יותר מ-60° קו אורך; כאן לפי הפרש השעון, `acclimated.offset_hours` ומעלה (15° לשעה), כי אין
+ * קווי אורך בטבלת השדות, ובלעדיו BKK, HKT, SGN ו-HAN היו אזור אחר רק בחורף (טיוטה 471). `since`: מתי הגיע
+ * לאזור שטרם התאקלם אליו.
  */
-function acclimatize(chains, o) {
+export function acclimatize(chains, o) {
   const a = o.limits.acclimated;
   const theater = H(a.offset_hours);
   let acc = 0;
   let prev = null;
+  let since = null;
   for (const ch of chains) {
     const off = o.offsetAt(ch.station, dateOf(ch.start)) ?? 0;
-    if (prev && Math.abs(off - acc) > theater && ch.start - prev.end >= H(a.free_hours)) acc = off;
+    const far = prev && Math.abs(off - acc) >= theater;
+    since = far ? since ?? prev.end : null;
+    if (far && (ch.start - prev.end >= H(a.free_hours) || ch.start - since >= H(a.stay_hours))) acc = off;
     ch.acc = acc;
-    ch.notAcclimated = Math.abs(off - acc) > theater;
+    ch.notAcclimated = Math.abs(off - acc) >= theater;
     prev = ch;
   }
 }
@@ -384,7 +399,7 @@ function restClass(ac, limits) {
  * `comb` – כוננות קצרה ו-FDP אחריה, מתחילת הכוננות (7.2.12): בצוות בודד טבלה B ועוד `rap_fdp_extra_hours`,
  * ולא יותר מ-`rap_fdp_max_hours`; במוגבר או כפול טבלה C ועוד `rap_fdp_extra_hours` (בעל המוצר, 15/10/2026).
  */
-function limitsFor(crew, ch, limits) {
+export function limitsFor(crew, ch, limits) {
   const report = clockOf(ch.fdpStart + ch.acc);
   const red = ch.notAcclimated ? limits.not_acclimated_reduction_minutes ?? 0 : 0;
   const seg = ch.flights.length;
@@ -393,14 +408,14 @@ function limitsFor(crew, ch, limits) {
     const ftRow = tableRow(limits.flight_time_unaugmented, report);
     const fdpRow = tableRow(limits.fdp_unaugmented, report);
     const hours = fdpRow.hours[Math.min(seg, fdpRow.hours.length) - 1];
-    return { ft: H(ftRow.hours), fdp: H(hours) - red, seg: Infinity, comb: Math.min(H(hours + extra), H(limits.rap_fdp_max_hours ?? Infinity)) };
+    return { ft: H(ftRow.hours), fdp: H(hours) - red, seg: Infinity, comb: Math.min(H(hours + extra) - red, H(limits.rap_fdp_max_hours ?? Infinity)) };
   }
   const pilots = CREW[crew].pilots;
   const cls = restClass(ch.flights[0].ac, limits);
   if (!cls) return null;
   const row = tableRow(limits.fdp_augmented, report);
   const hours = row[`class${cls}`][pilots - 3];
-  return { ft: H(limits.flight_time_augmented[String(pilots)]), fdp: H(hours) - red, seg: limits.augmented_max_segments ?? Infinity, comb: H(hours + extra) };
+  return { ft: H(limits.flight_time_augmented[String(pilots)]), fdp: H(hours) - red, seg: limits.augmented_max_segments ?? Infinity, comb: H(hours + extra) - red };
 }
 
 /**
@@ -525,7 +540,9 @@ function checkFdp(ch, id, o, flag, extend, needCrew) {
   const date = ch.flights[0].date;
   const report = (l, crew, tail = '') => {
     const g = grade(l);
-    if (g) (g === 1 ? extend : flag)(date, `${describeChain(ch)}: ${why}${over(l, crew)}.${tail}`);
+    const text = `${describeChain(ch)}: ${why}${over(l, crew)}.${tail}`;
+    if (g === 1 && o.repeatExtension(ch, fdp - l.fdp)) flag(date, `${text} הארכה שנייה בלי ${limits.free_time.hours} שעות פנויות מאז הקודמת (OMA 7.2.10).`);
+    else if (g) (g === 1 ? extend : flag)(date, text);
     if (g === 2 && why) o.broken?.push(new Set(ch.items.map((i) => `${i.date}:${i.flight ?? i.code}`)));
   };
   // צוות גדול רשאי לבצע FDP שעומד במגבלות של צוות קטן ממנו: מגבלות המוגבר והכפול (כמו 3 רגליים
@@ -596,6 +613,19 @@ function plannedFdp(ch, id, o) {
 
 // ---------- מנוחה ----------
 
+/** מקור הזמנים בהודעה. */
+const planned = (o) => (o.exec ? 'פועל' : 'תכנון');
+
+/** כוננות בשדה בלי טיסה: כולה FDP (7.2.12), ונבדקת מול טבלה B לפי רגל אחת (טיוטה 471). */
+function checkAirportReserve(chains, limits, inMonth, flag) {
+  for (const ch of chains) {
+    if (ch.flights.length || ch.fdpStart == null || !inMonth(ch.fdpStart)) continue;
+    const row = tableRow(limits.fdp_unaugmented, clockOf(ch.fdpStart + ch.acc));
+    const max = H(row.hours[0]) - (ch.notAcclimated ? limits.not_acclimated_reduction_minutes ?? 0 : 0);
+    if (ch.fdpEnd - ch.fdpStart > max) flag(dateOf(ch.fdpStart), `${describeItem(ch.items[0])}: כוננות בשדה של ${hm(ch.fdpEnd - ch.fdpStart)}, מעל ${hm(max)}.`);
+  }
+}
+
 /**
  * כוננות קצרה (7.2.12): עד `max_rap_hours`, ומנוחה חוקית לפניה. הכוננות וה-FDP אחריה – ב-`checkFdp`, לפי
  * הרכב הצוות (בעל המוצר, 15/10/2026).
@@ -614,21 +644,22 @@ function checkReserve(chains, limits, inMonth, flag) {
   });
 }
 
-/** DH שחורג מה-FDP שבטבלה B: מנוחה באורך ה-DH, ולא פחות מהמנוחה החוקית (7.2.14). */
+/** DH שחורג מה-FDP שבטבלה B: מנוחה באורך ה-DH, ולא פחות מהמנוחה החוקית, לפני ה-FDP הבא (7.2.14; טיוטה 471). */
 function checkDeadheadRest(chains, o, inMonth, flag) {
   const { limits } = o;
   chains.forEach((ch, i) => {
     const lastFlight = ch.flights.at(-1);
     const dh = ch.items.filter((it) => it.kind === 'dh' && (!lastFlight || it.std > lastFlight.std));
-    const next = chains[i + 1];
-    if (!dh.length || !next || !inMonth(dh[0].start)) return;
+    const at = chains.findIndex((c, j) => j > i && c.fdpStart != null);
+    if (!dh.length || at < 0 || !inMonth(dh[0].start)) return;
+    const next = chains[at];
     const len = Math.max(...dh.map((d) => d.sta)) - dh[0].start;
     const row = tableRow(limits.fdp_unaugmented, clockOf(dh[0].start + ch.acc));
     if (len <= H(row.hours[0])) return;
     const need = Math.max(len, H(limits.rest_hours));
-    const rest = next.start - ch.end;
+    const rest = Math.max(...chains.slice(i, at).map((c, k) => chains[i + k + 1].start - c.end));
     if (rest < need) {
-      flag(dh[0].date, `${describeItem(dh[0])}: DH של ${hm(len)}, יותר מה-FDP המותר. נדרשת מנוחה של ${hm(need)} אחריו, ובתכנון ${hm(rest)} עד ${describeItem(next.items[0])}.`);
+      flag(dh[0].date, `${describeItem(dh[0])}: DH של ${hm(len)}, יותר מה-FDP המותר. נדרשת מנוחה של ${hm(need)} אחריו, וב${planned(o)} ${hm(rest)} עד ${describeItem(next.items[0])}.`);
     }
   });
 }
@@ -675,7 +706,7 @@ function checkLongTripRest(chains, o, inMonth, flag) {
       for (let d = dateOf(ch.end); at(d, n1) <= next.start; d = addDays(d, 1)) if (at(d, n0) >= ch.end) nights++;
       if (rest < H(t.rest_hours) || nights < t.nights) {
         flag(f.date, `${describeItem(f)}: חזרה אחרי ${hm(away)} מחוץ לבסיס ומעבר של יותר מ-${t.longitude_degrees}° קו אורך. ` +
-          `נדרשות ${t.rest_hours} שעות מנוחה עם ${t.nights} לילות, ובתכנון ${hm(rest)} עם ${nights} לילות.`);
+          `נדרשות ${t.rest_hours} שעות מנוחה עם ${t.nights} לילות, וב${planned(o)} ${hm(rest)} עם ${nights} לילות.`);
       }
     }
   });
@@ -684,9 +715,10 @@ function checkLongTripRest(chains, o, inMonth, flag) {
 /**
  * FDP לילה רצופים שנוגעים בשפל הצירקדי (WOCL, 02:00–05:59 באזור ההתאקלמות; 7.2.15): עד 3 בלי
  * תנאים, עד 5 כשבכל FDP יש הזדמנות שינה של שעתיים בין 22:00 ל-05:00 אחרי הרגל הראשונה, ולא יותר.
- * הזדמנות השינה נבדקת כזמן קרקע בין שתי רגליים; אם יש שם מקום לינה מתאים – אינו בקבצים.
+ * הזדמנות השינה נבדקת כזמן קרקע בין שתי רגליים, בשעון המקומי בתחנה (טיוטה 471); אם יש שם מקום לינה מתאים – אינו בקבצים.
  */
-function checkConsecutiveNights(chains, limits, inMonth, flag) {
+function checkConsecutiveNights(chains, o, inMonth, flag) {
+  const { limits } = o;
   const w0 = parseClock(limits.wocl.from);
   const w1 = parseClock(limits.wocl.to);
   const c = limits.consecutive_nights;
@@ -705,7 +737,7 @@ function checkConsecutiveNights(chains, limits, inMonth, flag) {
         const desc = describeChain(n.ch);
         if (k >= c.max) {
           flag(n.ch.flights[0].date, `${desc}: ה-FDP ה-${k + 1} ברצף שנוגע בשעות ${limits.wocl.from}–${clockText(w1 - 1)}, ומותרים ${c.max} לכל היותר.`);
-        } else if (!hasSleep(n.ch, c)) {
+        } else if (!hasSleep(n.ch, c, o)) {
           flag(n.ch.flights[0].date, `${desc}: ${run.length} FDP רצופים שנוגעים בשעות ${limits.wocl.from}–${clockText(w1 - 1)}. ` +
             `מעל ${c.free} נדרשת בכל אחד הזדמנות שינה של ${c.sleep_hours} שעות בין ${c.sleep_from} ל-${c.sleep_to} אחרי הרגל הראשונה, וב-FDP הזה אין.`);
         }
@@ -720,13 +752,14 @@ function checkConsecutiveNights(chains, limits, inMonth, flag) {
   close();
 }
 
-function hasSleep(ch, c) {
+function hasSleep(ch, c, o) {
   const s0 = parseClock(c.sleep_from);
   const s1 = parseClock(c.sleep_to);
   const f = ch.flights;
   for (let i = 1; i < f.length; i++) {
-    const a = f[i - 1].sta + ch.acc;
-    const b = f[i].std + ch.acc;
+    const local = o.offsetAt(f[i].org, f[i].date) ?? 0;
+    const a = f[i - 1].sta + local;
+    const b = f[i].std + local;
     for (let d = dateOf(a - 1440); d <= dateOf(b); d = addDays(d, 1)) {
       if (overlap(a, b, at(d, s0), at(d, s0) + mod(s1 - s0, 1440)) >= H(c.sleep_hours)) return true;
     }
