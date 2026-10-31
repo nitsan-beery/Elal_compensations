@@ -9,11 +9,16 @@ export const COMPANY_CANCEL = ['cancelled', 'wet_lease', 'trainee', 'swap_777', 
  * וכשהרומה כבר הכריעה לא נשאלת שאלה, והסבב מסומן (החלטת בעל המוצר, 23/09/2026).
  *
  * `reason`: `company` – ביוזמת החברה, נספר כבוצע (ס' 40); `no` – לא נספר; `bid` – זכייה במכרז: אינה ביוזמת החברה,
- * ונספרת רק כשהטיסה שזכה בה מאותו סוג, ואת זה בודק החוק עצמו; `review` – בדיקה ידנית; `unknown` – השאלה עוד פתוחה.
+ * ונספרת רק כשהטיסה שזכה בה מאותו סוג, ואת זה בודק החוק עצמו; `review` – "סיבה אחרת", והחוק שתלוי בזה שואל (`other_company:`);
+ * `unknown` – השאלה עוד פתוחה.
  * `source`: מאיפה זה ידוע – `leave`, ‏`activity`, ‏`stay` (סבב מהחודש הקודם), `chain` (יומן השינויים), `rule` (סימון של חוק),
  * `answer`, או `none`.
  */
 export function pairingDecision(ctx, match) {
+  const company = (fallback) => {
+    const said = ctx.answer?.(`other_company:${match.plan?.id}`)?.value;
+    return said === 'yes' ? { reason: 'company', source: 'answer' } : said === 'no' ? { reason: 'no', source: 'answer' } : fallback;
+  };
   if (!match) return { reason: 'unknown', source: 'none' };
   const plan = match.plan;
   if (match.byLeave) return { reason: 'no', source: 'leave' }; // היעדרות ומחלה אינן ביוזמת החברה
@@ -23,8 +28,9 @@ export function pairingDecision(ctx, match) {
   const answer = ctx.answerFor(match);
   // שרשרת מהיומן: השלב הראשון, זה שהוציא את הסבב מהשיבוץ, קובע (`reduceChain`; בעל המוצר, 06/10/2026).
   const count = answer?.count;
+  if (count === 'other') return company({ reason: 'review', source: 'chain' });
   if (count) {
-    const reason = { voluntary_swap: 'no', bid: 'bid', other: 'review', chain_open: 'unknown' }[count] ?? 'company';
+    const reason = { voluntary_swap: 'no', bid: 'bid', chain_open: 'unknown' }[count] ?? 'company';
     return { reason, source: 'chain' };
   }
   const by = (tag) => ctx.pairingHandledBy(plan, tag);
@@ -37,6 +43,6 @@ export function pairingDecision(ctx, match) {
   if (value === 'voluntary_swap') return { reason: 'no', source: 'answer' };
   if (value === 'bid') return { reason: 'bid', source: 'answer' };
   if (COMPANY_CANCEL.includes(value)) return { reason: 'company', source: 'answer' };
-  if (value === 'other') return { reason: 'review', source: 'answer' };
-  return { reason: 'unknown', source: 'none' };
+  if (value === 'other') return company({ reason: 'review', source: 'answer' });
+  return company({ reason: 'unknown', source: 'none' });
 }

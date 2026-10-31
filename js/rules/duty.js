@@ -24,11 +24,9 @@ export const otherOption = () => ({ value: 'other', label: 'סיבה אחרת', 
 
 /**
  * הערה עם הסיבה כלשונה, בין מירכאות, והקרדיט שהמשתמש אמר שמגיע – על `pairing`
- * כשיש טיסה שבוצעה, ואחרת על `date`. תשובה שנשמרה לפני שנשאל על הקרדיט מחזירה false, והקורא
- * שולח אותה לבדיקה ידנית כמו קודם.
+ * כשיש טיסה שבוצעה, ואחרת על `date`. תשובה שנשמרה לפני שנשאל על הקרדיט נפתחת מחדש ב-`evaluate` (טיוטה 454).
  */
 export function applyOtherReason(ctx, answer, rule, { what, date, pairing = null, planId = null, extra, noteExtra }) {
-  if (typeof answer.creditMin !== 'number') return false;
   const min = answer.creditMin;
   const note = `${what}: "${answer.text}"`;
   ctx.note(date, `${note} – ${min > 0 ? 'קרדיט נוסף' : 'לא מגיע קרדיט'}.`, rule, { byUser: true, ruleTitle: null, pairingId: planId ?? pairing?.id, ...noteExtra });
@@ -36,8 +34,22 @@ export function applyOtherReason(ctx, answer, rule, { what, date, pairing = null
   const shown = { ...extra, ruleTitle: 'סיבה אחרת', ...(!pairing && planId && { forPlan: planId }) };
   if (min > 0 && pairing) ctx.expectPairing(pairing, 'rig', min, rule, note, shown);
   else if (min > 0) ctx.expect(date, 'rig', min, rule, note, shown);
-  return true;
 }
+/**
+ * "סיבה אחרת" על סבב שלא בוצע, כשזה משנה את התוצאה של חוק: הטקסט אינו אומר אם זה היה ביוזמת החברה (2024 ס' 40). שאלה
+ * אחת לסבב, והתשובה נקראת ב-`pairingDecision` (בעל המוצר, 31/10/2026, טיוטה 454). `title`: הטיסה או הסבב, `what`: על מה הפיצוי.
+ */
+function askCompanyCancel(ctx, plan, title, rule, what) {
+  ctx.ask({
+    id: `other_company:${plan.id}`,
+    date: plan.from,
+    title: `${title} לא בוצעה: האם זה היה ביוזמת החברה?`,
+    body: `התשובה קובעת אם מגיע פיצוי על ${what}.`,
+    options: [{ value: 'yes', label: 'כן, ביוזמת החברה' }, { value: 'no', label: 'לא ביוזמת החברה' }],
+    ruleId: rule.id,
+  });
+}
+
 const dayMs = 86400000;
 const clockOf = (abs) => ((abs % 1440) + 1440) % 1440;
 const addDays = (iso, n) => new Date(Date.parse(iso) + n * dayMs).toISOString().slice(0, 10);
@@ -444,7 +456,7 @@ function base_rest_shortfall(ctx, params, rule) {
   const sequences = turnaroundSequences(ctx, params.turnaround_sequence, links, legal, declined);
   // מה קרה בכל מנוחה קצרה, להערות: 'open' – לא זוכתה ולא נענתה (בתכנון לבד – תמיד), 'answered' – נענתה
   // (חוץ מ"רצף"), 'paid' – הרומה זיכתה, 'sequence' – רצף שהוצג בתכנית החודשית, 'unperformed' – לא בוצע
-  // כמתוכנן, 'skip' – בדיקה ידנית.
+  // כמתוכנן, 'skip' – דיווח לניצן.
   const status = new Map();
   const asked = new Set();
   for (const link of links) {
@@ -456,7 +468,7 @@ function base_rest_shortfall(ctx, params, rule) {
       `והמנוחה החוזית היא ${minToHhmm(required)} (${basis})${failed ? `. ${failed.why}` : ''}`;
     if (capUnknown && rest >= H(params.long_stay_min_hours)) {
       status.set(link, 'skip');
-      ctx.review(`${what}. אין ב-rules.json תקרה למנוחה אחרי שהייה ארוכה (long_stay_max_hours), ולכן לא ידוע אם זו חריגה. דורש בדיקה ידנית.`, rule);
+      ctx.review(`${what}. אין ב-rules.json תקרה למנוחה אחרי שהייה ארוכה (long_stay_max_hours), ולכן לא ידוע אם זו חריגה.`, rule);
       continue;
     }
 
@@ -501,9 +513,7 @@ function base_rest_shortfall(ctx, params, rule) {
       if (ctx.pairingHandledBy(p2, 'base_rest_other')) continue;
       ctx.markPairing(p2, 'base_rest_other');
       const rest = `מנוחה בבסיס קצרה מהחוזית לפני ${describePairing(p2)}`;
-      if (!applyOtherReason(ctx, a, rule, { what: rest, date: p2.from, pairing: target })) {
-        ctx.review(`${what}. ${a.text || 'סיבה אחרת'}. דורש בדיקה ידנית.`, rule);
-      }
+      applyOtherReason(ctx, a, rule, { what: rest, date: p2.from, pairing: target });
       continue;
     }
     if (a.value !== params.answer_value) continue;
@@ -809,7 +819,7 @@ function night_landings(ctx, params, rule) {
   if (unsure.length && night.length + unsure.length >= params.min_planned_count) {
     for (const leg of unsure) {
       ctx.review(`${ddmm(leg.date)} ${leg.flight}: הנחיתה ב-${leg.dst} היא ${minToHhmm(leg.arr.min)} שעון מקומי, והשדה לא בטבלת אזורי הזמן, כך שלא ידוע ההפרש לשעון ישראל. ` +
-        `לא ניתן לדעת אם היא נחיתת לילה, וזה משנה את ${rule.title}. דורש בדיקה ידנית.`, rule);
+        `לא ניתן לדעת אם היא נחיתת לילה, וזה משנה את ${rule.title}.`, rule);
     }
   }
   const min = params.min_planned_count;
@@ -909,10 +919,7 @@ function night_landings(ctx, params, rule) {
     const why = `נספרות ${counted.length} טיסות מתוך ${pool.length} מתוכננות עם נחיתה בין ` +
       `${params.window_from} ל-${params.window_to}, והפיצוי הוא מהטיסה ה-${threshold} שבוצעה`;
     const reviewed = unsettled.filter((x) => x.status === 'review');
-    for (const n of reviewed) {
-      ctx.review(`${ddmm(n.leg.date)} ${n.leg.flight} לא בוצעה, והסיבה שנרשמה עליה היא "סיבה אחרת", כך שלא ידוע אם זה היה ביוזמת ` +
-        `החברה – ורק אז היא נספרת (ס' 40). ${why}. דורש בדיקה ידנית.`, rule);
-    }
+    for (const n of reviewed) askCompanyCancel(ctx, n.pairing, `${n.leg.flight} ב-${ddmm(n.leg.date)}`, rule, 'נחיתות לילה');
     const pending = unsettled.filter((x) => x.status === 'unknown');
     if (pending.length) {
       const many = pending.length > 1;
@@ -922,7 +929,7 @@ function night_landings(ctx, params, rule) {
       const many = reviewed.length > 1;
       ctx.note(null, `${why}. ${list(reviewed)} לא ${many ? 'בוצעו' : 'בוצעה'}, והסיבה שנרשמה ` +
         `${many ? 'עליהן' : 'עליה'} היא "סיבה אחרת", ולכן לא ידוע אם ${many ? 'הן נספרות' : 'היא נספרת'} ` +
-        `(ס' 40). הספירה תיסגר אחרי הבדיקה הידנית.`, rule);
+        `(ס' 40). הספירה תיסגר לפי התשובה.`, rule);
     }
     return;
   }
@@ -998,7 +1005,7 @@ function night_landings(ctx, params, rule) {
  * הסיבה נשאלת פעם אחת בלבד, בשאלה על הסבב שלא בוצע, שרצה לפני החוק הזה. הקריאה כאן היא
  * לפי הסימונים שהחוקים הקודמים שמו על הסבב, ולא לפי התשובה בלבד: כשהדוח כבר מזכה את
  * השעות שהפסיד לא נשאלת שאלה, והסבב מסומן `lost_hours_credit` (החלטת בעל המוצר, 23/09/2026).
- * `company` נספר כבוצע, `no` לא נספר, `review` נדרשת בדיקה ידנית, `unknown` השאלה עוד פתוחה.
+ * `company` נספר כבוצע, `no` לא נספר, `review` "סיבה אחרת", ונשאל אם זה היה ביוזמת החברה, `unknown` השאלה עוד פתוחה.
  * `bid` – זכייה במכרז: אינה "ביוזמת החברה" (ס' 40), ולכן אינה נספרת, אלא אם הטיסה שזכה בה
  * מאותו סוג (נחיתת לילה, שבת). את זה בודק החוק עצמו, לפי הטיסה שבקישור (`bidTarget`).
  */
@@ -1367,7 +1374,14 @@ function consecutive_saturdays(ctx, params, rule) {
   };
   // ביטול ביוזמת החברה (ס' 40): בחודש הזה לפי השאלה על הסבב, ובחודש הקודם לפי התשובה שם.
   const cancelledByCompany = (p, earlier) => (earlier
-    ? COMPANY_CANCEL.includes(prior.answers?.[`cancelled:${p.id}`]?.value) : cancelStatus(ctx, p) === 'company');
+    ? COMPANY_CANCEL.includes(prior.answers?.[`cancelled:${p.id}`]?.value) || prior.answers?.[`other_company:${p.id}`]?.value === 'yes'
+    : cancelStatus(ctx, p) === 'company');
+  // שבת מתוכננת עם "סיבה אחרת": אי אפשר לדעת אם היא נספרת, עד התשובה (`askCompanyCancel`; טיוטה 454).
+  const awaiting = (date) => {
+    if (!ctx.hasExec || date < ctx.monthFirst || hit(date, execSpans, priorExec) || groundIn(date, true)) return null;
+    const p = hit(date, planSpans, priorPlan)?.pairing;
+    return p && cancelStatus(ctx, p) === 'review' ? p : null;
+  };
   const active = (date) => {
     const earlier = date < ctx.monthFirst;
     const planned = hit(date, planSpans, priorPlan);
@@ -1386,6 +1400,8 @@ function consecutive_saturdays(ctx, params, rule) {
   for (let i = 1; i < saturdays.length; i++) {
     const [s1, s2] = [saturdays[i - 1], saturdays[i]];
     const [a1, a2] = [active(s1), active(s2)];
+    const [w1, w2] = [awaiting(s1), awaiting(s2)];
+    if ((a1 || w1) && (a2 || w2)) for (const p of [w1, w2].filter(Boolean)) askCompanyCancel(ctx, p, describePairing(p), rule, rule.title);
     if (!a1 || !a2) continue;
     const grounds = [a1, a2].flatMap((a) => a.ground ?? []);
     const why = `${rule.title}: פעילות בשבתות ${ddmm(s1)} ו-${ddmm(s2)}${a2.cancelled ? ' (בשבת השנייה סבב שבוטל ביוזמת החברה)' : ''}` +
@@ -1475,7 +1491,7 @@ function consecutive_night_rounds(ctx, params, rule) {
     const st = cancelStatus(ctx, planned.get(d));
     // זכייה במכרז על טיסת סבב לילה כבר נספרת כבוצעה דרך `performed`; אחרת היא אינה נספרת (ס' 40).
     if (st === 'bid') return 'no';
-    return st === 'review' ? 'unknown' : st; // הבדיקה הידנית על הרצף מכסה גם את זה
+    return st === 'review' ? 'unknown' : st; // השאלה על הרצף מכסה גם את זה
   };
 
   const nights = [...planned.keys()].sort();
@@ -1486,26 +1502,37 @@ function consecutive_night_rounds(ctx, params, rule) {
     else runs.push([d]);
   }
 
-  for (const run of runs) {
-    if (run.length <= params.more_than) continue;
+  // רצף שלא כולו בוצע נספר לפי מה שבוצע ברצף: "מעל שתי טיסות סבב עוקבות" (2024 ס' 37; בעל המוצר, 31/10/2026, טיוטה 454).
+  const chains = (days) => days.reduce((all, d) => {
+    if (all.at(-1) && addDays(all.at(-1).at(-1), 1) === d) all.at(-1).push(d);
+    else all.push([d]);
+    return all;
+  }, []);
+  const paying = [];
+  for (const whole of runs) {
+    if (whole.length <= params.more_than) continue;
+    const statuses = whole.map(statusOf);
+    const head = `${rule.title}: ${whole.length} טיסות סבב לילה מתוכננות בלילות ${whole.map(ddmm).join(', ')}`;
+    const counted = whole.filter((d, i) => statuses[i] === 'done' || statuses[i] === 'company');
+    const open = whole.filter((d, i) => statuses[i] === 'unknown');
+    if (counted.length + open.length <= params.more_than) {
+      if (!earlier.has(planned.get(whole[params.more_than]))) ctx.note(whole[0], `${head}, אבל רק ${counted.length} מהן בוצעו או בוטלו ביוזמת החברה, ולכן אין פיצוי.`, rule);
+      continue;
+    }
+    if (open.length) {
+      for (const p of open.map((d) => planned.get(d))) if (!ctx.isAsked(`cancelled:${p.id}`)) askCompanyCancel(ctx, p, describePairing(p), rule, rule.title);
+      continue;
+    }
     // הלילה שמזכה בסבב של החודש הקודם: הרצף נבדק שם.
-    if (earlier.has(planned.get(run[params.more_than]))) continue;
+    const long = chains(counted).filter((c) => c.length > params.more_than);
+    if (!long.length) ctx.note(whole[0], `${head}, אבל הן לא בוצעו ברצף, ולכן אין פיצוי.`, rule);
+    paying.push(...long.filter((c) => !earlier.has(planned.get(c[params.more_than]))));
+  }
+
+  for (const run of paying) {
     const list = run.map(ddmm).join(', ');
     const statuses = run.map(statusOf);
     const what = `${rule.title}: ${run.length} טיסות סבב לילה מתוכננות בלילות ${list}`;
-    const counted = run.filter((d, i) => statuses[i] === 'done' || statuses[i] === 'company');
-    const open = run.filter((d, i) => statuses[i] === 'unknown');
-    if (counted.length < run.length) {
-      if (counted.length + open.length <= params.more_than) {
-        ctx.note(run[0], `${what}, אבל רק ${counted.length} מהן בוצעו או בוטלו ביוזמת החברה, ולכן אין פיצוי.`, rule);
-      } else if (open.length) {
-        ctx.review(`${what}. לא ידוע אם ${open.map((d) => describePairing(planned.get(d))).join(', ')} בוטלה ביוזמת החברה, ` +
-          'וזה קובע אם הרצף נחשב בוצע (2024 ס\' 40). דורש בדיקה ידנית.', rule);
-      } else {
-        ctx.review(`${what}, אבל לא כל הרצף בוצע (בוצעו או בוטלו ביוזמת החברה: ${counted.map(ddmm).join(', ')}). דורש בדיקה ידנית.`, rule);
-      }
-      continue;
-    }
 
     const payNight = run[params.more_than];
     // כשהדוח כבר מזכה על אחד הלילות ברצף, הצפוי נרשם שם.
@@ -1638,29 +1665,22 @@ function white_flight(ctx, params, rule) {
  *
  * הבלוק הוא המתוכנן: SkdDur בדוח, ו-STA − STD בקובץ התכנון (החלטת בעל המוצר,
  * 23/09/2026). "ביצע" = הרגל בדוח ואינה DH. "תוכנן" = אותה טיסה נמצאת גם בסבב המתוכנן
- * שהותאם לה; טיסה כזו שלא תוכננה יוצאת לבדיקה ידנית ולא מדולגת בשקט.
+ * שהותאם לה; טיסה כזו מזכה גם כשלא תוכננה (טיוטה 454).
  */
 function ulh_flight(ctx, params, rule) {
   const key = keyFor(params.report_column);
   const min = H(params.min_block_hours);
   const max = H(params.max_block_hours);
-  const entries = ctx.hasExec
-    ? ctx.matches.filter((m) => m.exec).map((m) => ({ pairing: m.exec, plan: m.plan }))
-    : ctx.planPairings.map((p) => ({ pairing: p, plan: p }));
+  // טיסה שבוצעה מזכה גם כשלא תוכננה (בעל המוצר, 31/10/2026, טיוטה 454).
+  const pairings = ctx.hasExec ? ctx.matches.filter((m) => m.exec).map((m) => m.exec) : ctx.planPairings;
 
-  for (const { pairing, plan } of entries) {
+  for (const pairing of pairings) {
     for (const l of pairing.legs) {
       if (l.prevMonth || (ctx.hasExec ? l.dhd || l.type === 'DHO' : l.dh)) continue; // `prevMonth`: נבדקה בחודש ההמראה (טיוטה 426)
       const block = legBlock(ctx, l);
       if (block == null || block <= min || block > max) continue;
 
       const what = `${l.flight ?? ''} ${l.org}→${l.dst} ב-${ddmm(l.date)}, בלוק ${minToHhmm(block)}`.trim();
-      const planned = !ctx.hasExec ||
-        (plan?.legs ?? []).some((p) => !p.dh && (l.flight ? p.flight === l.flight : p.org === l.org && p.dst === l.dst));
-      if (!planned) {
-        ctx.review(`${rule.title}: ${what} אינה בתכנון. ס' 21.2 מזכה צוות כפול "אשר תוכנן וביצע", ולכן צריך לבדוק ידנית אם מגיע ${amountWord(params.report_column)}.`, rule);
-        continue;
-      }
       ctx.expectPairingDay(pairing, l.date, key, H(params.hours), rule, `${rule.title}: ${what} (צוות כפול)`);
     }
   }
@@ -2308,7 +2328,7 @@ function israelSims(ctx, params) {
 
 const simLabel = (s) => `סימולטור ב-${ddmm(s.date)} ${minToHhmm(s.std)}–${s.sta != null ? minToHhmm(s.sta) : '?'}`;
 
-/** ימי החג של השנה, ובדיקה ידנית אחת לכל שנה שחסרה ב-rules.json. */
+/** ימי החג של השנה, ודיווח אחד לכל שנה שחסרה ב-rules.json. */
 function holidaysOf(ctx, year, rule, what) {
   const list = ctx.holidays(year);
   if (!list) ctx.review(`${what}: אין ב-rules.json את תאריכי החגים לשנת ${year}, ולכן נבדק רק לפי ימי השבוע. נדרש עדכון של קובץ החוקים.`, rule);

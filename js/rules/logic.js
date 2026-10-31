@@ -67,7 +67,14 @@ function credit_from_scheduled(ctx, params, rule) {
       const split = splitAtMidnight(leg, ctx.tz);
       if (leg.carryUnknown) {
         // הרומה אינה מכריעה אם הרגל המריאה ב-1 לחודש או ביום האחרון של החודש הקודם (`markCarryIn`; טיוטה 417).
-        ctx.review(`${dayOf(leg.date)} ${leg.flight}: לא ניתן לדעת מהרומה אם הרגל המריאה ב-${dayOf(leg.date)} או ביום האחרון של החודש הקודם. הקרדיט הצפוי לפי המראה ב-${dayOf(leg.date)}. דורש בדיקה ידנית.`, rule);
+        ctx.ask({
+          id: `carry:${leg.date}:${leg.flight}`,
+          date: leg.date,
+          title: `${leg.flight} ב-${dayOf(leg.date)}: מתי הרגל המריאה?`,
+          body: 'הרומה אינה מכריעה, והתשובה קובעת את הקרדיט בחודש הזה.',
+          options: [{ value: 'here', label: `ב-${dayOf(leg.date)}` }, { value: 'prev', label: `ב-${dayOf(addDays(leg.date, -1))}` }],
+          ruleId: rule.id,
+        });
       }
       if (leg.prevMonth) {
         // הרגל רשומה ביום 1 אבל יצאה ביום האחרון של החודש הקודם.
@@ -102,7 +109,7 @@ function credit_from_scheduled(ctx, params, rule) {
       add(next, dur - split.before, note(`${leg.flight}: ${minToHhmm(dur - split.before)} אחרי חצות (${minToHhmm(dur)} − ${minToHhmm(split.before)})`));
     }
     if (error) {
-      ctx.review(`${describePairing(pairing)}: ${error} דורש בדיקה ידנית.`, rule);
+      ctx.review(`${describePairing(pairing)}: ${error}`, rule);
       continue;
     }
     // רגל בגבול החודש: מה שהרומה נתנה עליה בפועל – הקרדיט ביום, פחות מה שצפוי בו על שאר הרגליים.
@@ -441,11 +448,9 @@ function standbyMissing(ctx, params, rule, credit) {
       row('הכוננות התקיימה', many ? `קרדיט ${run.length} ימי כוננות.` : 'קרדיט יום כוננות.');
     } else if (answer.value === 'standby_cancelled_mine') {
       row('ביטול הכוננות לבקשתי', 'לא מגיע קרדיט.');
-    } else if (applyOtherReason(ctx, answer, rule, { what: `${what} (${when})`, date: from, noteExtra: { placed: true } })) {
-      row('סיבה אחרת', `"${answer.text}" – ${answer.creditMin > 0 ? 'קרדיט נוסף' : 'לא מגיע קרדיט'}.`, true);
     } else {
-      ctx.review(`${what} (${when}): ${answer.text || 'סיבה אחרת'}. דורש בדיקה ידנית.`, rule);
-      row('סיבה אחרת', 'דורש בדיקה ידנית.');
+      applyOtherReason(ctx, answer, rule, { what: `${what} (${when})`, date: from, noteExtra: { placed: true } });
+      row('סיבה אחרת', `"${answer.text}" – ${answer.creditMin > 0 ? 'קרדיט נוסף' : 'לא מגיע קרדיט'}.`, true);
     }
   }
 }
@@ -503,7 +508,7 @@ function unservedEmptyDays(ctx, params, rule) {
   if (!empty.length) return;
   const target = ctx.rulesWithLogic('absence_day_credit').find((r) => r.id === params.unserved_empty_rule);
   if (!target) {
-    ctx.review(`${rule.title}: ${empty.map((d) => dayOf(d.date)).join(', ')} – לא בוצעו, וברומה לא רשום כלום. החוק "${params.unserved_empty_rule}" אינו בתוקף. דורש בדיקה ידנית.`, rule);
+    ctx.review(`${rule.title}: ${empty.map((d) => dayOf(d.date)).join(', ')} – לא בוצעו, וברומה לא רשום כלום. החוק "${params.unserved_empty_rule}" אינו בתוקף.`, rule);
     return;
   }
   const p = target.logic.params;
@@ -584,7 +589,6 @@ function askUnconfirmedCodes(ctx, params, rule) {
       });
     } else if (answer.value === 'other') {
       ctx.explainCode(c.code, c.dates, answer.text || `לא ${params.confirm_label}`);
-      ctx.review(`קוד ${c.code} (${days}): ${answer.text || 'לא ' + params.confirm_label}. דורש בדיקה ידנית.`, rule);
     } else {
       ctx.explainCode(c.code, c.dates, `${params.confirm_label} – ${value} ליום (${rule.title})`);
     }
@@ -633,7 +637,7 @@ function vacation_credit_balance(ctx, params, rule) {
   } else if (params.taper_table_complete && params.taper_table?.[String(n)] != null) {
     rate = params.taper_table[String(n)];
   } else {
-    ctx.review(`בחודש ${n} ימי חופשה, ואין לכך מדרגה בטבלת איזון החופשה ב-rules.json. דורש בדיקה ידנית.`, rule);
+    ctx.review(`בחודש ${n} ימי חופשה, ואין לכך מדרגה בטבלת איזון החופשה ב-rules.json.`, rule);
     return;
   }
 
@@ -928,7 +932,7 @@ function examiner_training_boost(ctx, params, rule) {
     .sort((a, b) => a.from.localeCompare(b.from));
   if (!slips.length) return;
   if (threshold == null) {
-    ctx.review(`${rule.title}: ${slips.length} סליפי הדרכה בחודש, ואין ב-rules.json סף לצי ${ctx.fleet ?? 'לא ידוע'}. דורש בדיקה ידנית.`, rule);
+    ctx.review(`${rule.title}: ${slips.length} סליפי הדרכה בחודש, ואין ב-rules.json סף לצי ${ctx.fleet ?? 'לא ידוע'}.`, rule);
     return;
   }
   slips.forEach((pairing, i) => {
@@ -985,7 +989,7 @@ function special_call(ctx, params, rule) {
       const stay = awayFromBase(whole, ctx.tz, ctx.timeline.at(-1).date);
       if (stay.error) {
         ctx.markPairing(match.exec, 'special_call');
-        ctx.review(`${describePairing(match.exec)}: ${stay.error} לא ניתן לספור יממות לקריאה המיוחדת. דורש בדיקה ידנית.`, rule);
+        ctx.review(`${describePairing(match.exec)}: ${stay.error} לא ניתן לספור יממות לקריאה המיוחדת.`, rule);
         continue;
       }
       const days = countSpecialCallDays(stay, params, whole, ctx.fdp);
@@ -1120,7 +1124,7 @@ function special_call(ctx, params, rule) {
 /**
  * יום ברומה בלי טיסה, עם TAB, אחרי סבב שנחת לפני חצות (`attachReportTails` ב-js/rules/evaluate.js):
  * הקבצים אינם מסבירים למה שייכות השעות, ולא מנחשים (בעל המוצר, 08/10/2026). "המשך" מצרף את היום
- * לסבב, והשהייה והקריאה המיוחדת נספרות לפיו; תשובה אחרת – בדיקה ידנית.
+ * לסבב, והשהייה והקריאה המיוחדת נספרות לפיו; תשובה אחרת – מה שנכתב בה והקרדיט שנבחר.
  */
 function askReportDay(ctx, date, pairing, rule) {
   const id = `report_day:${date}`;
@@ -1128,7 +1132,7 @@ function askReportDay(ctx, date, pairing, rule) {
   const values = ctx.timeline.find((d) => d.date === date)?.exec?.values ?? {};
   const cells = ['Credit', 'TAB'].filter((c) => values[c]?.min).map((c) => `${c} ${minToHhmm(values[c].min)}`).join(', ');
   if (answer?.value === 'other') {
-    ctx.review(`${dayOf(date)}: ברומה ${cells} בלי טיסה – "${answer.text}". דורש בדיקה ידנית.`, rule);
+    applyOtherReason(ctx, answer, rule, { what: `${dayOf(date)}: ברומה ${cells} בלי טיסה`, date });
     return;
   }
   if (answer) return;
@@ -1139,7 +1143,7 @@ function askReportDay(ctx, date, pairing, rule) {
     body: `הסבב ${describePairing(pairing)} נחת לפני חצות, ולכן לא ברור למה שייכות השעות האלה. מה קרה?`,
     options: [
       { value: 'continued', label: `הנחיתה של ${pairing.legs.at(-1).flight ?? flightsOf(pairing)} נדחתה ליום הזה`, hint: 'השהייה נמשכת עד היום הזה' },
-      { value: 'other', label: 'משהו אחר', needsText: true },
+      { value: 'other', label: 'משהו אחר', needsText: true, needsCredit: true },
     ],
     ruleId: rule.id,
   });
@@ -1346,7 +1350,7 @@ const swapWord = (answer) => SWAP_WORD[answer?.value] ?? 'שינוי ביוזמ�
  * קריאה מיוחדת, וייתכן שמגיעות עליה השעות שהפסיד.
  *
  * הטיסה שבוצעה במקום היא זו שנבחרה בקישור שבתשובה: הסבב שבוצע באותם ימים, או כל פעילות
- * שלא תוכננה. טיסה שאינה בקבצים של החודש עוברת לבדיקה ידנית, כי אי אפשר לחשב את ההפרש.
+ * שלא תוכננה. טיסה שאינה בקבצים של החודש – הערה שההפרש לא חושב, כי אי אפשר לחשב את ההפרש.
  */
 function higher_of_planned_performed(ctx, params, rule) {
   const column = params.shortfall_column === 'Rig' ? 'rig' : 'com';
@@ -1368,8 +1372,7 @@ function higher_of_planned_performed(ctx, params, rule) {
     // תשובה ישנה נשמרה בלי קישור, ואז ההחלפה היא הסבב שבוצע באותם ימים.
     const exec = answer && 'link' in answer ? (answer.link ? ctx.pairingById(answer.link) : null) : match.exec;
     if (!exec) {
-      ctx.review(`${describePairing(match.plan)}: ${swapWord(answer)} בטיסה שאינה בקבצים של החודש, ` +
-        'ולכן לא ניתן לחשב את ההפרש. דורש בדיקה ידנית.', rule);
+      ctx.note(match.plan.from, `${swapWord(answer)} בטיסה שאינה בקבצים של החודש: ההפרש לא חושב.`, rule, { pairingId: match.plan.id });
       continue;
     }
     // שינוי ביוזמת החברה או זכייה במכרז לטיסה ביום שלא תוכנן בו כלום (`companySwapToFreeDay`), וזכייה
@@ -1481,10 +1484,7 @@ function lost_hours_credit(ctx, params, rule) {
     if (!values.includes(answer?.value) && assumed?.rule !== rule) continue;
     // סתירה עם החלפה מרצון שנפתרה נגד הסבב הזה (`resolveSwapConflict`).
     if (ctx.pairingHandledBy(match.plan, 'swap_conflict_void')) continue;
-    if (!lostHoursApplies(ctx, match.plan, params)) {
-      ctx.review(`${describePairing(match.plan)}: התשובה "${params.answer_label}" אינה מתאימה לצי או לסוג המטוס בתכנון. דורש בדיקה ידנית.`, rule);
-      continue;
-    }
+    if (!lostHoursApplies(ctx, match.plan, params)) continue;
 
     // בשרשרת מהיומן: השעות של הגבוה מבין הסבבים, ביום של הסבב שממנו הורד (`reduceChain`; בעל המוצר, 06/10/2026).
     const from = answer?.basis ?? match.plan;
@@ -1649,6 +1649,7 @@ function cancelled_no_compensation(ctx, params, rule) {
   for (const match of ctx.matches) {
     if (!match.plan || (match.how !== 'cancelled' && match.how !== 'dates')) continue;
     if (ctx.pairingHandledBy(match.plan, 'swap_conflict_void')) continue;
+    dropUnfitAnswer(ctx, match);
     const answer = ctx.answerFor(match);
     if (!answer) {
       if (inheritAnswer(ctx, match, rule)) continue;
@@ -1659,14 +1660,19 @@ function cancelled_no_compensation(ctx, params, rule) {
     }
     if (answer.value === 'cancelled') noteCancelled(ctx, match, rule, null);
     if (answer.value === 'diversion' && match.exec) noteDiversion(ctx, match, rule);
-    if (answer.value === 'other' && !applyOtherReason(ctx, answer, rule, {
+    if (answer.value === 'other') applyOtherReason(ctx, answer, rule, {
       what: match.exec ? 'סבב מתוכנן שבמקומו בוצע סבב אחר' : 'סבב מתוכנן שלא בוצע',
       date: match.plan.from, pairing: match.exec, planId: match.plan.id, extra: { plannedRoute: describeRoute(match.plan),
         ...(!match.exec && performedOn(ctx, match.plan.from) && { explain: `סבב מתוכנן שלא בוצע, ${describePairing(match.plan)}: "${answer.text}".` }) },
-    })) {
-      ctx.review(`${describePairing(match.plan)}: ${answer.text || 'סיבה אחרת'}. דורש בדיקה ידנית.`, rule);
-    }
+    });
   }
+}
+
+/** הורדה מהטיסה שאינה מתאימה לצי או למטוס בתכנון, למשל אחרי שהצי התברר: השאלה נפתחת מחדש (טיוטה 454). */
+function dropUnfitAnswer(ctx, match) {
+  const value = ctx.answerFor(match)?.value;
+  const unfit = ctx.rulesWithLogic('lost_hours_credit').find((r) => [r.logic.params.answer_value, ...(r.logic.params.merged_answer_values ?? [])].includes(value));
+  if (unfit && !lostHoursApplies(ctx, match.plan, unfit.logic.params)) ctx.dropAnswer(`cancelled:${match.plan.id}`);
 }
 
 /**
@@ -2115,7 +2121,7 @@ function vacation_recall(ctx, params, rule) {
  * עצמו נעשה בקריאה מיוחדת.
  *
  * פעילות שמתחילה ב-`moved_ok_prefixes` (HOME) אינה הדרכה לעניין הזה: אם היא זזה ליום אחר
- * בחודש אין פיצוי (07/06/2026: HOME_RGT תוכנן ל-07 ובוצע ב-09). אם לא זזה – בדיקה ידנית.
+ * בחודש אין פיצוי (07/06/2026: HOME_RGT תוכנן ל-07 ובוצע ב-09). אם לא זזה – השאלה על הטיסה מכריעה (טיוטה 454).
  * הטיסה שבוצעה ביום המקורי מוזכרת בהערה רק כשהיא לא מוסברת כבר בפני עצמה (`ctx.matches`):
  * ב-07/06/2026 הטיסה שם היא BER, שכבר מוסברת משלה כהחלפה מרצונית של FRA (סבב אחר לגמרי,
  * לא קשור ל-HOME) – ולכן אין טעם לצרף אותה להערה על ה-HOME (בעל המוצר, 26/09/2026).
@@ -2156,9 +2162,6 @@ function training_cancelled_flight(ctx, params, rule) {
         const f = ctx.codeLabel(code)?.feminine ? 'ה' : ''; // בשם העברי ("HOME RGT תוכנן"; טיוטה 403)
         ctx.note(day.date, `${ctx.codeName(code)} תוכנן${f} ל-${dayOf(day.date)} ובוצע${f} ב-${movedTo.map((d) => dayOf(d.date)).join(', ')}${placed}. ` +
           'הזזה בתוך החודש אינה מזכה בפיצוי.', rule, { aside: true, pairingId: pairing.id });
-      } else {
-        ctx.review(`${code} תוכנן ל-${dayOf(day.date)}${placed}. ` +
-          `${code} לא בוצע ביום אחר בחודש. דורש בדיקה ידנית.`, rule);
       }
     }
   }
@@ -2243,9 +2246,7 @@ function standby_end_for_bid(ctx, params, rule) {
         ctx.markPairing(pairing, 'standby_activated');
       } else {
         ctx.markPairing(pairing, 'standby_bid_pending');
-        if (!applyOtherReason(ctx, answer, rule, { what: `טיסה ביומיים האחרונים של הכוננות (${range})`, date: pairing.from, pairing })) {
-          ctx.review(`${describePairing(pairing)}, ביומיים האחרונים של הכוננות (${range}): ${answer.text || 'סיבה אחרת'}. דורש בדיקה ידנית.`, rule);
-        }
+        applyOtherReason(ctx, answer, rule, { what: `טיסה ביומיים האחרונים של הכוננות (${range})`, date: pairing.from, pairing });
       }
     }
   }
@@ -2360,14 +2361,14 @@ function compareStandbyFlown(ctx, pairing, rule) {
   const unknown = days.find((d) => !d.value);
   if (unknown) {
     ctx.review(`${describePairing(pairing)}: על ${what} מגיע הגבוה מבין קרדיט הטיסה לבין ערך ימי הכוננות (2018 ס' 98). ` +
-      `אין חוק שקובע את ערך הכוננות לקוד ${unknown.code}. דורש בדיקה ידנית.`, rule);
+      `אין חוק שקובע את ערך הכוננות לקוד ${unknown.code}.`, rule);
     return;
   }
   const value = days.reduce((s, d) => s + d.value.min, 0);
   const parts = days.map((d) => `${dayOf(d.date)} ${d.code} ${minToHhmm(d.value.min)}`).join(', ');
   if (credit == null) {
     ctx.review(`${describePairing(pairing)}: על ${what} מגיע הגבוה מבין קרדיט הטיסה לבין ${minToHhmm(value)} (${parts}; 2018 ס' 98), ` +
-      'וקרדיט הטיסה אינו ידוע. דורש בדיקה ידנית.', rule);
+      'וקרדיט הטיסה אינו ידוע.', rule);
   } else if (credit < value) {
     ctx.markPairing(pairing, 'standby_rig');
     ctx.expectPairing(pairing, 'rig', value - credit, rule,

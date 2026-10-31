@@ -12,10 +12,13 @@ import { buildTimeline, buildPairings, markCarryIn, attachCarried, attachNext, m
 import { hoursToMin, minToHhmm } from '../time.js';
 import { OPTIONAL_COLUMNS } from '../pdf/exec.js';
 import { checkLegalLimits, restDefinition, delayFitsFdp, baseReportMinutes, dutyTimes } from './legal.js';
-import { whiteFlightLegs, whiteCrew, contractCrewOf, execFdpGroups } from './duty.js';
+import { whiteFlightLegs, whiteCrew, contractCrewOf, execFdpGroups, applyOtherReason, keyFor, otherOption } from './duty.js';
 import { timeZones, legTimes, pairingTimes, crossesMidnight, dateOf, at } from '../flight-times.js';
 import { calendarView, buildJournal, reduceChain, sameAssignment, firstFdpLegs, overlapDays, samePairing, legOrder } from './journal.js';
 import { baseTime } from '../airports.js';
+
+/** השאלות שב"סיבה אחרת" שלהן בוחרים קרדיט (`otherOption`). */
+const CREDIT_ANSWERS = ['cancelled:', 'unplanned:', 'standby_missing:', 'base_rest:', 'standby_bid:', 'report_day:'];
 
 /** עמודות הדוח שכל סוג ציפייה נבדק מולן. */
 const KEY_COLUMNS = {
@@ -85,6 +88,14 @@ function evaluateFiles({ rulesData, plan = null, exec = null, answers = {}, hist
   calendar = withoutKept(calendar);
   // התשובות שהשרשרת מהיומן קובעת נוספות לכאן (`applyJournal`).
   answers = { ...answers };
+  // "סיבה אחרת" שנשמרה לפני שנשאל על הקרדיט: השאלה נפתחת מחדש, עם מה שנכתב בה (`previous`; טיוטה 454).
+  const stale = {};
+  for (const [id, a] of Object.entries(answers)) {
+    if (a?.value === 'other' && typeof a.creditMin !== 'number' && CREDIT_ANSWERS.some((p) => id.startsWith(p))) {
+      stale[id] = a;
+      delete answers[id];
+    }
+  }
   if (!plan && !exec) throw new Error('לא הועלה אף קובץ.');
   const period = (exec ?? plan).period;
   const mode = plan && exec ? 'full' : plan ? 'plan' : 'exec';
@@ -129,7 +140,7 @@ function evaluateFiles({ rulesData, plan = null, exec = null, answers = {}, hist
   const prev = history[0]?.period && (period.month === 1 ? history[0].period.year === period.year - 1 && history[0].period.month === 12
     : history[0].period.year === period.year && history[0].period.month === period.month - 1) ? history[0] : null;
   const prevExec = prev?.exec ?? null;
-  if (exec) markCarryIn(timeline, domicile, prev);
+  if (exec) markCarryIn(timeline, domicile, prev, answers);
   // אזורי הזמן של החודש, לזמני הרגליים והסבבים (js/flight-times.js).
   const tz = timeZones(domicile, plan?.stationOffsets ?? null, timeline);
   // חזרה לבסיס אחרי המראה מצטרפת לטיסה שיוצאת אחריה באותו FDP, לפי הגדרת ה-FDP של הסליפ הקצר.
@@ -194,7 +205,7 @@ function evaluateFiles({ rulesData, plan = null, exec = null, answers = {}, hist
   };
 
   const assumed = new Map(); // planId → ערכי התשובה שהאפליקציה הניחה בלי לשאול
-  const ctx = makeContext({ out, timeline, domicile, codes, holidays: rulesData.holidays ?? {}, answers, plan, exec, supported, matches, planPairings,
+  const ctx = makeContext({ out, timeline, domicile, codes, holidays: rulesData.holidays ?? {}, answers, stale, plan, exec, supported, matches, planPairings,
     period, fleet, position, fdp, tz, assumed, assumedIgnored, reportDays, calendarAnswer: (id) => (reopen.includes(id) ? null : cal.answer(id)), calendarFirstDay: cal.firstDay,
     calendarRun: !!calendarRun,
     // בלי דוח ביצוע, הסבבים המתוכננים משמשים לחישוב הקרדיט והרי"ג הצפויים.
@@ -304,7 +315,7 @@ function evaluateFiles({ rulesData, plan = null, exec = null, answers = {}, hist
   explainByCarriedStay(matches, fdp);
   explainByActivity(matches, timeline, codes, sickCodeTest(supported), movableCodeTest(supported), reserveCodeTest(supported), ctx);
   out.changes = mergeCarriedStay(matches.map((m) => describeMatch(m, codes)), matches);
-  // פעילות קרקע במקום סבב: הזיכוי עליה בא מחוק הקוד שלה. קוד שאף חוק נתמך לא מכסה – לבדיקה ידנית.
+  // פעילות קרקע במקום סבב: הזיכוי עליה בא מחוק הקוד שלה. קוד שאף חוק נתמך לא מכסה – לדיווח לניצן.
   const covered = new Set(supported.flatMap((r) => [...(r.logic.params?.plan_codes ?? []), ...(r.logic.params?.report_codes ?? [])]));
   const coveredPrefixes = supported.flatMap((r) => [...(r.logic.params?.plan_code_prefixes ?? []), ...(r.logic.params?.report_code_prefixes ?? [])]);
   const isCovered = (c) => covered.has(c) || coveredPrefixes.some((p) => c.startsWith(p));
@@ -314,7 +325,7 @@ function evaluateFiles({ rulesData, plan = null, exec = null, answers = {}, hist
     if (!uncovered.length) continue;
     out.reviews.push({ ruleId: null, ruleTitle: null,
       message: `${describePairing(m.plan)} הוחלף בפעילות קרקע (${uncovered.join(', ')}). ` +
-        'אין חוק נתמך שקובע מה מגיע במקרה הזה. דורש בדיקה ידנית.' });
+        'אין חוק נתמך שקובע מה מגיע במקרה הזה.' });
   }
 
   for (const logicId of LOGIC_ORDER) {
@@ -960,7 +971,7 @@ function calendarFacts(calendar, domicile) {
 
 // ---------- ctx: מה שהלוגיקות רואות ----------
 
-function makeContext({ out, timeline, domicile, codes, holidays, answers, plan, exec, supported, matches, planPairings, period, fleet, position = null, execPairings, fdp, tz, assumed, assumedIgnored = [], reportDays = [], calendarAnswer, calendarFirstDay, calendarRun = false }) {
+function makeContext({ out, timeline, domicile, codes, holidays, answers, stale, plan, exec, supported, matches, planPairings, period, fleet, position = null, execPairings, fdp, tz, assumed, assumedIgnored = [], reportDays = [], calendarAnswer, calendarFirstDay, calendarRun = false }) {
   const absenceBy = new Map(); // date → Set(ruleId)
   const pairingTags = new Map(); // pairing.id → Set(tag)
   const askedIds = new Set();
@@ -1160,7 +1171,13 @@ function makeContext({ out, timeline, domicile, codes, holidays, answers, plan, 
         const [, text, ask] = question.body.replaceAll('הרומה לא מזכה', 'הרומה מזכה').match(/^(.*?)(\s*מה קרה\?)?$/s);
         question = { ...question, body: `${text} ביקשת לשנות את הנחת האפליקציה.${ask ?? ''}` };
       }
-      out.questions.push(question);
+      out.questions.push(stale[question.id] ? { ...question, previous: stale[question.id] } : question);
+    },
+
+    /** תשובה שאינה מתאימה עוד: השאלה נפתחת מחדש, עם התשובה כ-`previous`. */
+    dropAnswer(id) {
+      if (answers[id]) stale[id] = answers[id];
+      delete answers[id];
     },
 
     /**
@@ -1258,7 +1275,7 @@ function makeContext({ out, timeline, domicile, codes, holidays, answers, plan, 
     capAbsenceTotal(capMin, rule) {
       const total = out.expectations.filter((e) => e.key === 'absence').reduce((s, e) => s + e.min, 0);
       if (total > capMin) {
-        out.reviews.push({ message: `סך הזיכויים בחודש של היעדרות מלאה (${fmt(total)}) עובר את התקרה של ${fmt(capMin)}. הצפוי הוא התקרה.`, ...ruleRef(rule) });
+        this.note(null, `סך הזיכויים בחודש של היעדרות מלאה (${fmt(total)}) עובר את התקרה של ${fmt(capMin)}. הצפוי הוא התקרה.`, rule);
       }
     },
   };
@@ -1339,7 +1356,7 @@ function fleetOf(plan) {
  * ולכן לא שואלים "מה קרה". כוננות (קוד שמתחיל ב-SBY) ומחלה (קוד שמתחיל ב-SCK, וגם SICK) אינן
  * פעילות קרקע (בעל המוצר, 27/09/2026): מחלה מתוארת "בוטל עקב מחלה", כוננות "בוטל והוצבת
  * לכוננות", ושילוב של שתיהן (21/06/2026: SCK_F ‏21/06 ואחריו SBY_S ‏22/06) מפרט את התאריך של
- * כל אחת, כדי להבחין ביניהן. פעילות קרקע שאין חוק נתמך לקוד שלה עוברת לבדיקה ידנית.
+ * כל אחת, כדי להבחין ביניהן. פעילות קרקע שאין חוק נתמך לקוד שלה עוברת לדיווח לניצן.
  *
  * פעילות קרקע מזוהה גם בקוד המקוצר של הרומה (CPT_B הוא CPT_BAS; 17/06/2025: TBS שהוחלף ב-CPT_B).
  * פעילות שאפשר להזיז בלי פיצוי (HOME, `moved_ok_prefixes`) אינה מסבירה למה הסבב לא בוצע, כי
@@ -2506,7 +2523,7 @@ function checkSameMonthAndEmployee(plan, exec, warnings) {
  * - יממה שנגעו בה שני FDP נפרדים (`execFdpGroups`), שאחד מהם לא תוכנן. החלפה מרצוני והוספה בהסכמה – מתוכננים;
  *   סבב שבוטל ללא קרדיט – לא. נגיעה ביממה כמו ב-`dayActivity`: מימי הסבב, או נחיתה בה.
  * כל אחד צריך ציפייה ביום (קריאה מיוחדת או פעילות שנייה), שאלה פתוחה על הסבב או על היום, או סיבה מפורשת
- * שאין כלום. אחרת – לבדיקה ידנית. סימולטור אינו בבדיקה השנייה: אין לו שעות, וסימון SIM מופיע גם באמצע סבב.
+ * שאין כלום. אחרת – שאלה על היום (`askDay`; טיוטה 454). סימולטור אינו בבדיקה השנייה: אין לו שעות, וסימון SIM מופיע גם באמצע סבב.
  */
 function auditDays(ctx, out, matches, execPairings, timeline) {
   const sc = ctx.rulesWithLogic('special_call')[0];
@@ -2537,7 +2554,8 @@ function auditDays(ctx, out, matches, execPairings, timeline) {
         if (!inMonth.has(d) || !ctx.planFreeDay(d)) continue;
         if (expected(d, (e) => e.key === 'sc' || e.ruleId === second?.id) || asked(o, d) || quiet(o)) continue;
         if (ctx.pairingHandledBy(o, 'special_call') || (consented(o) && scheduled(o, d))) continue;
-        ctx.review(`${ddmm(d)}: נגעה בו טיסה שבוצעה (${flightsOn(o, d)}), והיום תוכנן פנוי, ואף חוק לא קבע מה מגיע עליו. דורש בדיקה ידנית.`, sc);
+        askDay(ctx, { id: `free_day:${d}`, date: d, pairing: o, rule: sc, title: `${ddmm(d)}: ${flightsOn(o, d)} נגעה ביום שתוכנן פנוי`, due: 'מגיעה קריאה מיוחדת',
+          column: sc.logic.params.report_column ?? 'S/C', hours: hoursToMin(sc.logic.params.hours) });
       }
     }
   }
@@ -2553,9 +2571,27 @@ function auditDays(ctx, out, matches, execPairings, timeline) {
       if (!unplanned.length) continue;
       if (expected(d, (e) => e.ruleId === second.id) || here.flat().some((o) => asked(o, d)) || unplanned.some(quiet)) continue;
       const what = here.map((g) => g.filter((o) => touches(o, d)).map((o) => flightsOn(o, d)).join('/')).join(', ');
-      ctx.review(`${ddmm(d)}: שתי פעילויות ב-FDP נפרדים (${what}), אחת מהן לא בתכנון, ואף חוק לא קבע מה מגיע עליה. דורש בדיקה ידנית.`, second);
+      askDay(ctx, { id: `second_day:${d}`, date: d, pairing: unplanned[0], rule: second, title: `${ddmm(d)}: שתי פעילויות נפרדות (${what}), ואחת מהן לא תוכננה`,
+        due: 'מגיע פיצוי על פעילות שנייה', column: second.logic.params.report_column ?? 'COM', hours: hoursToMin(second.logic.params.hours) });
     }
   }
+}
+
+/**
+ * יום שאף חוק לא קבע מה מגיע עליו (`auditDays`): הקבצים אינם מכריעים, ולכן שואלים (בעל המוצר, 31/10/2026, טיוטה 454). כשהרומה
+ * זיכתה – מניחים שמגיע. `title`: מה קרה ביום, `due`: התשובה שמזכה.
+ */
+function askDay(ctx, { id, date, pairing, rule, title, due, column, hours }) {
+  const key = keyFor(column);
+  const a = ctx.answer(id) ?? (ctx.paidOnDate(date, column, key, hours) ? ctx.assume(id, 'due', due) : null);
+  if (!a) {
+    ctx.ask({ id, date, title, body: 'אף חוק לא קבע מה מגיע על היום הזה, והסיבה אינה בקבצים. מה קרה?', ruleId: rule.id,
+      options: [{ value: 'due', label: due }, { value: 'agreed', label: 'בהסכמתי, בלי פיצוי' }, otherOption()] });
+    return;
+  }
+  if (a.value === 'due') ctx.expectPairing(pairing, key, hours, rule, title, { date, dates: [date], perDay: key === 'sc', explain: '' });
+  else if (a.value === 'other') applyOtherReason(ctx, a, rule, { what: title, date, pairing });
+  else ctx.note(date, `${title}: בהסכמתך, בלי פיצוי.`, rule, { aside: true });
 }
 
 const addDay = (iso) => new Date(Date.parse(iso) + 864e5).toISOString().slice(0, 10);

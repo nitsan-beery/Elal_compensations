@@ -13,7 +13,7 @@ import * as store from './store.js';
 import * as calendar from './calendar.js';
 
 // מספר הגרסה של הקוד שרץ בדף. עולה יחד עם CACHE ב-sw.js, לאותו מספר (בעל המוצר, 15/10/2026).
-const APP_VERSION = 335;
+const APP_VERSION = 336;
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -1114,7 +1114,8 @@ function renderAlerts(res) {
       <button class="btn no-print" data-action="copy-codes">העתק פרטים</button></div>`);
   }
   if (res.reviews.length) {
-    out.push(`<div class="notice warn"><strong>לבדיקה ידנית</strong><ul>${res.reviews.map((v) => `<li${ruleAttr([v.ruleTitle])}>${esc(v.message)}</li>`).join('')}</ul></div>`);
+    // דיווח על מה שחסר באפליקציה: הודעת מערכת, בכחול. כל מה שאפשר להכריע הוא שאלה (טיוטה 454).
+    out.push(`<div class="notice info"><strong>אנא העבר לניצן לבדיקה</strong><ul>${res.reviews.map((v) => `<li${ruleAttr([v.ruleTitle])}>${esc(v.message)}</li>`).join('')}</ul></div>`);
   }
   return out.length ? `<div class="card">${out.join('')}</div>` : '';
 }
@@ -1433,7 +1434,8 @@ function renderAnswered(res) {
   const saved = state.record?.answers ?? {};
   // הנחה שאין בה מה לשנות – בלי שאלה כשמבטלים אותה – אינה מוצגת (`changeable`; טיוטה 388).
   const assumed = (res.assumptions ?? []).filter((x) => !saved[x.id] && x.changeable !== false).map((x) => [x.id, { value: x.value, label: x.label, why: x.why }, true]);
-  const answers = [...Object.entries(saved), ...assumed].sort(answerOrder);
+  // תשובה שנפתחה מחדש (`previous`) היא שאלה, ולא תשובה שמורה (טיוטה 454).
+  const answers = [...Object.entries(saved).filter(([id]) => !res.questions.some((q) => q.id === id)), ...assumed].sort(answerOrder);
   if (!answers.length) return '';
   const recall = (id) => (res.vacationRecall?.includes(id) ? ' וביטול חופשה' : '');
   return `<details class="card" data-section="answered">
@@ -1473,7 +1475,8 @@ const QUESTION_KIND = { fleet: 'הצי', cancelled: 'סבב שלא בוצע', un
   crew: 'הרכב הצוות', night_crew: 'הרכב הצוות', white: 'טיסה לבנה', diversion: 'סטיה לשדה משנה', swap_conflict: 'סבב שהוחלף',
   base_rest: 'מנוחה בבסיס', second_activity: 'פעילות נוספת באותו FDP', occasion: 'תאריך מיוחד', night_rounds: 'טיסות סבב לילה עוקבות',
   stay_extension: 'הארכת שהייה', miami_short_rest: 'קיצור מנוחה במיאמי', miami_delay: 'דחייה במיאמי', las_vegas_rest: 'קיצור מנוחה בלאס וגאס',
-  sim_extension: 'הארכת סימולטור', extended: 'סבב שהתארך', saturdays: 'שתי שבתות ברצף' };
+  sim_extension: 'הארכת סימולטור', extended: 'סבב שהתארך', saturdays: 'שתי שבתות ברצף', other_company: 'ביוזמת החברה',
+  carry: 'רגל בגבול החודש', free_day: 'יום שתוכנן פנוי', second_day: 'שתי פעילויות ביממה' };
 
 /**
  * ראש השורה ב"תשובות שנשמרו": התאריך (או טווח הסבב) בבולד, הכי מימין, ואחריו היעד או הטיסה וסוג השאלה
@@ -1590,6 +1593,8 @@ function bindResults(root) {
     bindQuestionForm(form);
     // הצי: התשובה האחרונה מחודש אחר של אותו טייס מסומנת מראש (בעל המוצר, 25/10/2026; טיוטה 410).
     if (form.dataset.qid.startsWith('fleet:') && state.fleetPreset) preselectAnswer(form, { value: state.fleetPreset });
+    const reopened = state.result?.questions.find((q) => q.id === form.dataset.qid)?.previous;
+    if (reopened && !form.dataset.edit) preselectAnswer(form, reopened);
   }
 }
 

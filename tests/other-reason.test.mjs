@@ -49,8 +49,9 @@ test('אותה תוצאה בלי היומן', () => {
   }
 });
 
-test('תשובה ישנה בלי בחירה בקרדיט נשארת לבדיקה ידנית', () => {
+test('תשובה ישנה בלי בחירה בקרדיט: השאלה נפתחת מחדש', () => {
   const r = go(undefined);
-  assert.ok(reviews(r).some((n) => n.includes(TEXT)));
+  assert.deepEqual(reviews(r), []);
+  assert.equal(r.questions.find((q) => q.id === ID).previous.text, TEXT);
   assert.equal(notes(r).some((n) => n.includes('קרדיט נוסף')), false);
 });

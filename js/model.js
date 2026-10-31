@@ -85,19 +85,23 @@ export function buildPairings(days, domicile, getLegs, fdp = null) {
  * 3. רגל מחו"ל לחו"ל שחוצה חצות (TAB של 24:00 בשני המקרים): הקרדיט ביום 1 ברומה – החלק שאחרי חצות,
  *    ועוד הרגליים שאחריה באותו יום, או החלק שלפני חצות.
  * 4. התכנון של החודש הקודם (`prev.plan`): אותה רגל ביום האחרון שלו (טיוטה 425).
- * 5. בלי הכרעה – `carryUnknown`, לבדיקה ידנית (`credit_from_scheduled`).
+ * 5. בלי הכרעה – התשובה (`carry:`), ובלעדיה `carryUnknown`, והשאלה נשאלת ב-`credit_from_scheduled` (טיוטה 454).
  *
  * @param {{period, plan, exec}|null} prev  החודש הקודם, אם הוא בחודשים השמורים.
  */
-export function markCarryIn(days, domicile, prev = null) {
+export function markCarryIn(days, domicile, prev = null, answers = {}) {
   const day = days[0];
   const exec = day?.exec;
   const leg = exec?.legs?.[0];
   const date = day?.date ?? exec?.date;
   if (!leg || !date?.endsWith('-01')) return;
   const carried = carriedIn(leg, exec, date, domicile, prev?.exec ?? null) ?? (plannedInto(prev, days, domicile, leg) || null);
-  if (carried) leg.prevMonth = true;
-  else if (carried == null) leg.carryUnknown = true;
+  // הרגל משותפת לכל הריצות, ולכן גם תשובה שהשתנתה מתעדכנת כאן.
+  const said = carried == null ? answers[`carry:${date}:${leg.flight}`]?.value : null;
+  if (carried || said === 'prev') leg.prevMonth = true;
+  else delete leg.prevMonth;
+  if (carried == null && !said) leg.carryUnknown = true;
+  else delete leg.carryUnknown;
 }
 
 function carriedIn(leg, exec, date, domicile, prevExec) {
