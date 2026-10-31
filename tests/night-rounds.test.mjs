@@ -45,6 +45,21 @@ test('תכנון לבד: בלי שאלה, כמו היום', () => {
   assert.ok((r.expectations ?? []).some((e) => e.min === 150));
 });
 
+test('ראשון, שלישי וחמישי אינן עוקבות: רק ימים קלנדריים רצופים', () => {
+  const r = run(oct(['04', '06', '08']));
+  assert.equal(asked(r, 'night_rounds:'), false);
+  assert.deepEqual(com(r), []);
+});
+
+test('יום בלי לילה באמצע רצף: שני הצדדים נספרים בנפרד', () => {
+  assert.equal(asked(run(oct(['05', '06', '08', '09'])), 'night_rounds:'), false);
+  assert.equal(asked(run(oct(['05', '06', '07', '09'])), 'night_rounds:2026-10-05'), true);
+});
+
+test('ראשון, שני ושלישי עוקבות', () => {
+  assert.equal(asked(run(oct(['04', '05', '06'])), 'night_rounds:2026-10-04'), true);
+});
+
 // רגל שהרומה חוזרת עליה ב-1 לחודש (`markCarryIn`).
 test('אותה טיסה ב-30/09 וב-01/10, ונחתה לפני חצות: זו טיסה חדשה, לא רגל חוזרת', () => {
   const r = run(oct(['01']), { prev: month(2026, 9, { plan: days(['30']), exec: days(['30']) }) });
