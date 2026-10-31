@@ -231,9 +231,9 @@ function evaluateFiles({ rulesData, plan = null, exec = null, answers = {}, hist
       planPairings: prev.plan ? buildPairings(days, domicile, planLegsWithCredit, fdp).map(ftOnLastDay) : [],
       execPairings: prev.exec ? buildPairings(days, domicile, (d) => d.exec?.legs, fdp) : [] };
   }
-  // כוננות אחרי מחלה בימי סבב שבוטל בגללה (2018 ס' 92; טיוטה 472): לפני Soft Start, ולפני ההתאמה של הסבבים.
+  // כוננות בימי סבב שבוטל (`placedStandbyDays`): לפני Soft Start, שגובר עליה.
   const isSick = sickCodeTest(supported);
-  ctx.sickStandby = exec ? sickStandbyDays(planPairings, timeline, codes, isSick, ctx.prevMonth) : new Set();
+  ctx.placedStandby = exec ? placedStandbyDays(matches, timeline, codes, isSick, ctx) : new Map();
   // טיסות שהרכב הצוות שלהן משנה את בדיקת מגבלות החוק או את הזכאות לפיצוי, "date|flight": רק עליהן
   // ההודעה על הרכב צוות שחסר ביומן (`calendarMissing`; בעל המוצר, 04/10/2026).
   const crewMatters = new Set();
@@ -243,9 +243,10 @@ function evaluateFiles({ rulesData, plan = null, exec = null, answers = {}, hist
   // Soft Start (2018 ס' 91): הימים שבהם הופעלת לטיסה מהכן מיידי שהוצב בגלל דחיית ההמראה – לזיכוי הכוננות
   // (`absence_day_credit`) ולמגבלות החוק (בעל המוצר, 15/10/2026).
   const isRap = (c) => (rulesData.legal_limits?.short_call_reserve_codes ?? []).some((x) => c === x || c === x.slice(0, 5));
-  const softStart = exec ? softStartDays({ timeline, execPairings, planPairings, codes, answer: ctx.answer, domicile, placed: ctx.sickStandby,
+  const softStart = exec ? softStartDays({ timeline, execPairings, planPairings, codes, answer: ctx.answer, domicile, placed: ctx.placedStandby,
     snapshots: (calendarHistory?.length ? calendarHistory : calendar ? [calendar] : []).map(withoutKept), isRap, reportBefore: duty.reportBefore }) : new Set();
   ctx.softStart = (date) => softStart.has(date);
+  for (const d of softStart) ctx.placedStandby.delete(d);
 
   // מגבלות החוק על התכנון (בעל המוצר, 03/10/2026). לפני החוקים, כדי ששאלת הרכב הצוות שלהן
   // תשמש גם את נחיתות הלילה.
@@ -319,7 +320,7 @@ function evaluateFiles({ rulesData, plan = null, exec = null, answers = {}, hist
     if (m.how === 'unplanned' && m.exec.legs.every((l) => l.prevMonth)) { m.how = 'carried_in'; ctx.markPairing(m.exec, 'carried_in'); }
   }
   explainByCarriedStay(matches, fdp);
-  splitSickStandby(matches, ctx.sickStandby);
+  splitPlacedStandby(matches, ctx.placedStandby, ctx);
   explainByActivity(matches, timeline, codes, isSick, movableCodeTest(supported), reserveCodeTest(supported), ctx);
   out.changes = mergeCarriedStay(matches.map((m) => describeMatch(m, codes)), matches);
   // פעילות קרקע במקום סבב: הזיכוי עליה בא מחוק הקוד שלה. קוד שאף חוק נתמך לא מכסה – לדיווח לניצן.
@@ -484,7 +485,7 @@ function softStartDays({ timeline, execPairings, planPairings, codes, answer, do
   for (const day of timeline) {
     const leg = day.exec?.legs?.[0];
     if (leg?.type !== 'LEG' || !leg.flight || !execCodesOf(day, codes).some(isRap)) continue;
-    if (placed.has(day.date) || (day.plan?.codes ?? []).some((c) => c.startsWith('SBY'))) continue;
+    if (placed.get(day.date) === 'sick' || (day.plan?.codes ?? []).some((c) => c.startsWith('SBY'))) continue;
     const first = journalFirst(day.date, leg.flight);
     const pairing = execPairings.find((p) => p.dates.includes(day.date));
     if (first ? first === 'flight' : (day.plan?.legs ?? []).some((l) => !l.dh && l.flight === leg.flight) || (pairing && own(pairing)) || atReport(day, leg)) {
@@ -1376,31 +1377,43 @@ function fleetOf(plan) {
 }
 
 /**
- * ימי כוננות אחרי מחלה (2018 ס' 92; בעל המוצר, 31/10/2026; טיוטה 472): מי שפעילותו בוטלה עקב מחלה, ומחלתו
- * הסתיימה, אפשר להציב בכוננות ביממות שבהן היה מתוכנן לפעילות, וכל הוראות הכוננות חלות. יום עם קוד כוננות ברומה, בימי
- * סבב מתוכנן ואחרי יום מחלה בו, הוא כמו יום כוננות בתכנון. סבב שלא חזר בחודש הקודם: גם ב-1 לחודש, ומעבר לו אינו ידוע.
+ * ימי כוננות בסבב שבוטל: יום עם קוד כוננות ברומה, בימי סבב מתוכנן שלא בוצע, הוא כמו יום כוננות בתכנון, כי החברה
+ * רשאית להציב שם בכוננות, וכל הוראות הכוננות חלות. אחרי מחלה בסבב (2018 ס' 92; בעל המוצר, 31/10/2026; טיוטה 472) –
+ * `sick`. בלי מחלה (2024 ס' 53; ישן כ"ה ס' 9.ד; טיוטה 473) – `cancelled`, אלא אם המשתמש ענה על הסבב או ביטל את
+ * ההנחה. סבב שלא חזר בחודש הקודם ולא בוצע: גם ב-1 לחודש, ומעבר לו אינו ידוע. מפה מתאריך לסוג.
  */
-function sickStandbyDays(planPairings, timeline, codes, isSick, before) {
+function placedStandbyDays(matches, timeline, codes, isSick, ctx) {
   const has = (day, test) => execCodesOf(day, codes).some(test);
-  const out = new Set();
-  for (const p of planPairings) {
+  const out = new Map();
+  for (const m of matches) {
+    if (m.how !== 'cancelled' && m.how !== 'dates') continue;
+    const id = `cancelled:${m.plan.id}`;
+    const open = !ctx.answer(id) && !ctx.assumeIgnored(id);
     let sick = false;
-    for (const day of timeline.filter((d) => d.date >= p.from && d.date <= (p.shownTo ?? p.to))) {
-      if (sick && has(day, isStandbyCode)) out.add(day.date);
+    for (const day of timeline.filter((d) => d.date >= m.plan.from && d.date <= (m.plan.shownTo ?? m.plan.to))) {
+      if ((sick || open) && has(day, isStandbyCode)) out.set(day.date, sick ? 'sick' : 'cancelled');
       sick ||= has(day, isSick);
     }
   }
-  const cut = before?.planPairings.at(-1);
-  if (cut?.cutAtEnd && has(timeline[0], isStandbyCode) && before.timeline.some((d) => d.date >= cut.from && has(d, isSick))) out.add(timeline[0].date);
+  const before = ctx.prevMonth;
+  const cut = before?.hasExec ? before.planPairings.at(-1) : null;
+  if (cut?.cutAtEnd && !before.execPairings.at(-1)?.cutAtEnd && has(timeline[0], isStandbyCode)) {
+    out.set(timeline[0].date, before.timeline.some((d) => d.date >= cut.from && has(d, isSick)) ? 'sick' : 'cancelled');
+  }
   return out;
 }
 
 /**
- * טיסה מכוננות אחרי מחלה בימי הסבב שבוטל (`sickStandbyDays`) אינה החלפה של הסבב: הסבב בוטל עקב מחלה
- * (`explainByActivity`), והטיסה נבדקת כהפעלה מכוננות (טיוטה 472).
+ * טיסה מכוננות בימי הסבב שבוטל (`placedStandbyDays`) אינה החלפה של הסבב: הסבב בוטל (`explainByActivity`), והטיסה
+ * נבדקת כהפעלה מכוננות. בלי מחלה זו הנחה שניתנת לשינוי (`ctx.assume`), ושרשרת מהיומן גוברת עליה (טיוטה 473).
  */
-function splitSickStandby(matches, placed) {
+function splitPlacedStandby(matches, placed, ctx) {
   for (const m of matches.filter((x) => x.how === 'dates' && placed.has(x.exec.from))) {
+    if (placed.get(m.exec.from) === 'cancelled' &&
+      (ctx.answerFor(m) || !ctx.assume(`cancelled:${m.plan.id}`, 'standby_placed', 'בוטל והוצבת לכוננות', 'ברומה רשומה כוננות בימי הסבב'))) {
+      for (const d of [...placed.keys()]) if (d >= m.plan.from && d <= (m.plan.shownTo ?? m.plan.to)) placed.delete(d);
+      continue;
+    }
     matches.splice(matches.indexOf(m), 1, { plan: m.plan, exec: null, how: 'cancelled' }, { plan: null, exec: m.exec, how: 'unplanned' });
   }
 }

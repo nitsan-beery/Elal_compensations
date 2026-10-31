@@ -526,6 +526,8 @@ function base_rest_shortfall(ctx, params, rule) {
   // רצף של 3 טיסות יום אינו נשאל (טיוטה 328), ותשובה קודמת עליו אינה נקראת.
   const declined = (c) => { const a = c.type === 'day3' ? null : ctx.answer(c.id); return a ? a.value !== 'sequence' : c.links.every(paidOn); };
   const sequences = turnaroundSequences(ctx, params.turnaround_sequence, links, legal, declined);
+  restAfterSequence(ctx, units, links, sequences, params, paidOn);
+  restAfterStandby(ctx, units, links, params);
   // מה קרה בכל מנוחה קצרה, להערות: 'open' – לא זוכתה ולא נענתה (בתכנון לבד – תמיד), 'answered' – נענתה
   // (חוץ מ"רצף"), 'paid' – הרומה זיכתה, 'sequence' – רצף שהוצג בתכנית החודשית, 'unperformed' – לא בוצע
   // כמתוכנן, 'skip' – דיווח לניצן.
@@ -536,7 +538,7 @@ function base_rest_shortfall(ctx, params, rule) {
     const seq = sequences.get(link);
     const failed = seq && !seq.ok ? seq : null;
     const chain = seq?.ok ? seq.chain : null;
-    const what = `${u1.pairings.map(describePairing).join(' + ')} ← ${u2.pairings.map(describePairing).join(' + ')}: מנוחה בבסיס ${minToHhmm(Math.max(rest, 0))}, ` +
+    const what = `${link.label ?? u1.pairings.map(describePairing).join(' + ')} ← ${u2.pairings.map(describePairing).join(' + ')}: מנוחה בבסיס ${minToHhmm(Math.max(rest, 0))}, ` +
       `והמנוחה החוזית היא ${minToHhmm(required)} (${basis})${failed ? `. ${failed.why}` : ''}`;
     if (capUnknown && rest >= H(params.long_stay_min_hours)) {
       status.set(link, 'skip');
@@ -592,10 +594,60 @@ function base_rest_shortfall(ctx, params, rule) {
     // ההסבר בשורת הפיצוי, קצר (בעל המוצר, 13/10/2026; טיוטה 321).
     const explain = failed
       ? `רצף טיסות עם מנוחה קצרה שחורג מתנאי ההסכם – ${failed.explain}.`
-      : `חריגה ממנוחה חוזית בין טיסות – מנוחה בבסיס ${minToHhmm(Math.max(rest, 0))}, והמנוחה החוזית ${minToHhmm(required)} (${basis}).`;
+      : `חריגה ממנוחה חוזית${link.label ? '' : ' בין טיסות'} – מנוחה בבסיס ${minToHhmm(Math.max(rest, 0))}, והמנוחה החוזית ${minToHhmm(required)} (${basis}).`;
     ctx.expectPairing(target, keyFor(params.report_column), H(params.hours), rule, what, { explain });
   }
   restNotes(ctx, rule, units, links, sequences, status, ctx.hasExec ? execRestShortfalls(ctx, params, legal) : []);
+}
+
+/**
+ * מנוחה חוזית אחרי רצף טיסות של 2018 ס' 55.1 או 55.2 שהוצג בתכנית החודשית (2024 ס' 32; בעל המוצר, 31/10/2026, טיוטה
+ * 473; `after_sequence`). מנוחה קצרה ממנה היא מנוחה קצרה רגילה, עם אותה שאלה.
+ */
+function restAfterSequence(ctx, units, links, sequences, params, paidOn) {
+  const need = params.after_sequence;
+  if (!need || ctx.monthFirst < need.from) return;
+  const chains = new Set([...sequences.values()].map((s) => s.chain).filter((c) => c && need.types.includes(c.type)));
+  for (const c of chains) {
+    const u1 = c.links.at(-1).u2;
+    const u2 = units[units.indexOf(u1) + 1];
+    const shown = c.assumed ? !c.links.every(paidOn) : ctx.answer(c.id)?.value === 'sequence';
+    if (!shown || u2?.span.report == null || u1.span.end == null) continue;
+    const rest = u2.span.report - u1.span.end - 2 * (params.rest_buffer_minutes ?? 0);
+    if (rest >= H(need.hours)) continue;
+    const short = { rest, required: H(need.hours), basis: 'אחרי רצף טיסות' };
+    const link = links.find((l) => l.u1 === u1 && l.u2 === u2);
+    if (link) Object.assign(link, short);
+    else links.push({ u1, u2, p1: u1.pairings.at(-1), p2: u2.pairings[0], s1: u1.span, s2: u2.span, ...short });
+  }
+}
+
+/**
+ * מנוחה חוזית אחרי רצף כוננות בתכנון (2018 ס' 94.3; בעל המוצר, 31/10/2026, טיוטה 473; `after_standby`): מסוף שורת
+ * הכוננות ביום האחרון ברומה, ובלעדיה מסוף היום, ועד `rest_buffer_minutes` לפני ההתייצבות, גם כשהרצף בחודש הקודם.
+ * הכוננות לא התקיימה ביום האחרון או שהופעל ממנה בו: אין מה לבדוק (אחרי הפעלה – 2018 ס' 96).
+ */
+function restAfterStandby(ctx, units, links, params) {
+  const need = params.after_standby;
+  if (!need) return;
+  const planned = (day) => (day?.plan?.codes ?? []).some((c) => c.startsWith('SBY'));
+  const days = [...(ctx.prevMonth?.timeline ?? []), ...ctx.timeline];
+  let run = 0;
+  days.forEach((day, i) => {
+    run = planned(day) ? run + 1 : 0;
+    if (!run || planned(days[i + 1])) return;
+    if (ctx.hasExec && day.exec && (day.exec.legs?.length || !ctx.execCodes(day).some((c) => c.startsWith('SBY')))) return;
+    const row = day.exec?.standby?.at(-1);
+    const end = row?.sta != null ? at(day.date, row.sta < row.std ? row.sta + 1440 : row.sta) : at(day.date, 1440);
+    const u2 = units.find((u) => u.span.report != null && u.span.report >= end);
+    if (!u2 || links.some((l) => l.p2 === u2.pairings[0])) return;
+    const rest = u2.span.report - end - (params.rest_buffer_minutes ?? 0);
+    const required = H(need.narrow_fleets.includes(ctx.fleet) ? need.narrow_hours : run > need.long_run_days ? need.long_run_hours : need.wide_hours);
+    if (rest >= required) return;
+    const first = days[i - run + 1].date;
+    links.push({ u1: { pairings: [] }, u2, p1: u2.pairings[0], p2: u2.pairings[0], s2: u2.span, rest, required, basis: 'אחרי רצף כוננות',
+      label: `כוננות ⁦${first === day.date ? ddmm(first) : `${ddmm(first)}–${ddmm(day.date)}`}⁩`, noteDate: day.date < ctx.monthFirst ? ctx.monthFirst : day.date });
+  });
 }
 
 /**
@@ -681,7 +733,7 @@ function restNotes(ctx, rule, units, links, sequences, status, execShort) {
   for (const l of links) {
     // רצף שעומד בתנאים ולא נענה "רצף" – כמו כל מנוחה קצרה.
     if (sequences.get(l)?.ok === false || !shown(l)) continue;
-    ctx.note(l.p1.shownTo ?? l.p1.to, `חריגה ממנוחה חוזית בין ${describeUnit(l.u1)} ל-${describeUnit(l.u2)}: מנוחה בבסיס ` +
+    ctx.note(l.noteDate ?? l.p1.shownTo ?? l.p1.to, `חריגה ממנוחה חוזית בין ${l.label ?? describeUnit(l.u1)} ל-${describeUnit(l.u2)}: מנוחה בבסיס ` +
       `${minToHhmm(Math.max(l.rest, 0))}, והמנוחה החוזית ${minToHhmm(l.required)} (${l.basis}).`, rule, { to: l.p2.from, ...warn(status.get(l) === 'open') });
   }
   for (const l of execShort) {
@@ -800,7 +852,7 @@ function turnaroundSequences(ctx, seq, links, legal, declined = () => false) {
       ? [...Array(2).fill(`רצף של ${n} טיסות סבב${c.night ? ' חוצות לילה' : ''}. ההסכם מתיר רצף של 2 טיסות סבב חוצות לילה, או 2–3 שאינן חוצות לילה`),
         c.night ? `רצף של ${n} טיסות חוצות לילה, וההסכם מתיר עד 2` : `רצף של ${n} טיסות, וההסכם מתיר עד 3`]
       : ['רצף טיסות סבב עוקבות מעבר למכסה החודשית', 'מעבר למכסה החודשית', 'מעבר למכסה החודשית'];
-    const chain = { id: c.id, links: c.links, assumed: c.type === 'day3' && best.has(c) };
+    const chain = { id: c.id, links: c.links, type: c.type, assumed: c.type === 'day3' && best.has(c) };
     for (const link of c.links) out.set(link, best.has(c) || c.declined ? { ok: true, chain } : { ok: false, why, short, explain });
   }
   return out;
@@ -2578,7 +2630,7 @@ export const DUTY_PARAMS = {
   same_fdp_rounds: ['legal_rest_hours', 'hours', 'report_column'],
   second_unplanned_activity: ['legal_rest_hours', 'hours', 'report_column', 'sim_report_codes', 'sim_plan_codes', 'sim_plan_code_prefixes'],
   base_rest_shortfall: ['answer_value', 'hours', 'report_column', 'rest_buffer_minutes', 'legal_rest_hours',
-    'short_stay_max_hours', 'short_stay_factor', 'long_stay_share', 'long_stay_min_hours', 'long_stay_max_hours', 'turnaround_sequence'],
+    'short_stay_max_hours', 'short_stay_factor', 'long_stay_share', 'long_stay_min_hours', 'long_stay_max_hours', 'turnaround_sequence', 'after_sequence', 'after_standby'],
   night_landings: ['fleet', 'window_from', 'window_to', 'min_planned_count', 'paid_from_count', 'hours', 'report_column', 'base_landings_only', 'counted_crews', 'legal_rest_hours'],
   special_date_activity: ['occasions', 'flight_activity_only', 'hours', 'report_column'],
   free_days_waived: ['hours', 'report_column', 'paid_from_day', 'reserve_code_prefixes', 'reserve_free_from_day', 'training_free_from_day', 'standby_free_days', 'standby_free_fleets', 'off_block_from', 'on_block_until', 'min_free_days'],

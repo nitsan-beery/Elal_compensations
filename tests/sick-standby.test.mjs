@@ -1,4 +1,4 @@
-// סבב שבוטל עקב מחלה, וכוננות בימיו (2018 ס' 92; טיוטה 472). סינתטי.
+// סבב שבוטל, וכוננות בימיו (2018 ס' 92, טיוטה 472; 2024 ס' 53, ישן כ"ה ס' 9.ד, טיוטה 473). סינתטי.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { month, leg, run, rulesData } from './helpers.mjs';
@@ -67,8 +67,20 @@ test('בלי החודש הקודם אי אפשר לדעת על הסבב: השא�
   assert.ok(asked(run(oct()), 'unplanned:'));
 });
 
-test('סבב שבוטל בלי מחלה: ס\' 92 אינו חל', () => {
-  assert.ok(asked(run(oct(), { prev: sep({ sick: false }) }), 'unplanned:'));
+test('סבב שבוטל בלי מחלה (2024 ס\' 53): אותו מסלול, והשאלה בלי המחלה', () => {
+  const r = run(oct(), { prev: sep({ sick: false }) });
+  assert.equal(asked(r, 'unplanned:'), undefined);
+  assert.ok(!asked(r, 'standby_bid:').body.includes('מחלה'));
+  assert.ok(asked(r, 'standby_bid:').body.includes('בימי סבב שבוטל'));
+});
+
+test('הסבב בוצע וחזר ב-1 לחודש: אינו סבב שבוטל', () => {
+  const fill = { ...other('05'), ...other('12'), ...other('20') };
+  const prev = month(2026, 9, { plan: { ...fill, 30: out() }, exec: { ...fill, 30: out() } });
+  const fillO = { ...other('08'), ...other('15'), ...other('22') };
+  const home = [{ ...leg('LY322', 'ATH', 'TLV', '09:00', '12:00') }];
+  const m = month(2026, 10, { plan: { ...fillO, '01': 'X' }, exec: { ...fillO, '01': home }, codes: { '01': 'SBY_S' } });
+  assert.equal(asked(run(m, { prev }), 'standby_bid:'), undefined);
 });
 
 test('ברומה אין כוננות ביום הטיסה: השאלה על פעילות לא מתוכננת נשארת', () => {
@@ -113,8 +125,51 @@ test('הרומה זיכתה קריאה מיוחדת על הפעלה: פיצוי 
   assert.ok(line.notes.join().includes('שאף חוק אינו מסביר'));
 });
 
-test('בלי מחלה: סבב אחר באותם ימים נשאל כרגיל', () => {
-  assert.ok(asked(run(inside({ sick: false })), 'cancelled:'));
+const CANCELLED = 'cancelled:2026-08-10..2026-08-12:ATH';
+
+test('בלי מחלה (2024 ס\' 53, ישן 9.ד): הסבב בוטל והוצבת לכוננות, כהנחה, והטיסה הפעלה', () => {
+  const r = run(inside({ sick: false }));
+  assert.equal(asked(r, 'cancelled:'), undefined);
+  assert.ok(r.changes.some((c) => c.label === 'סבב מתוכנן שבוטל והוצבת לכוננות'));
+  assert.ok(asked(r, 'standby_bid:'));
+  assert.ok(r.assumptions.some((a) => a.id === CANCELLED));
+});
+
+test('ההנחה ניתנת לשינוי: בלעדיה נשאלת השאלה על הסבב', () => {
+  assert.ok(asked(run(inside({ sick: false }), { assumedIgnored: [CANCELLED] }), 'cancelled:'));
+});
+
+test('תשובה שכבר ניתנה על הסבב גוברת', () => {
+  const r = run(inside({ sick: false }), { answers: { [CANCELLED]: { value: 'replaced', link: '2026-08-12..2026-08-12:LCA' } } });
+  assert.equal(asked(r, 'standby_bid:'), undefined);
+  assert.ok(!r.assumptions.some((a) => a.id === CANCELLED));
+});
+
+test('Soft Start על טיסה אחרת באותו יום: שורת הכוננות בהתייצבות המקורית גוברת', () => {
+  const m = inside({ sick: false, last: '13', flown: '11' });
+  m.exec.days['2026-08-11'].standby = [{ type: 'SBY_S', std: 9 * 60, sta: 9 * 60 + 5 }];
+  const r = run(m);
+  assert.ok(r.notes.some((n) => n.message.includes('Soft Start')));
+});
+
+// ---------- כוננות ביום פנוי, בלי סבב שבוטל (ישן כ"ה ס' 11.יב) ----------
+
+const free = (values = {}) => {
+  const fill = { ...other('05'), ...other('20'), ...other('25') };
+  return month(2026, 8, { plan: fill, exec: { ...fill, 12: turn() }, codes: { 12: 'SBY_S' }, values: { 12: { Rig: '03:00', ...values } } });
+};
+
+test('טיסה ביום פנוי עם כוננות ברומה: שאלה על קריאה מיוחדת, בלי ההערה על הפעלה מכוננות', () => {
+  const r = run(free());
+  assert.ok(asked(r, 'unplanned:'));
+  assert.ok(!texts(r).includes('הופעלת מכוננות'));
+});
+
+test('הקריאה המיוחדת: בלי זיכוי כוננות, ובלי פער ב-Rig', () => {
+  const r = run(free({ 'S/C': '02:30' }));
+  assert.equal(row(r, 'S/C', '2026-08-12').ok, true);
+  assert.equal(row(r, 'Rig', '2026-08-12').ok, true);
+  assert.ok(!texts(r).includes('הופעלת מכוננות'));
 });
 
 // ---------- ימים ללא פעילות ----------
