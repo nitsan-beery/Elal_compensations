@@ -305,7 +305,9 @@ export function reduceChain(chain, { toExec, credit, execAnswer, byExecId }) {
     if (a.value === 'voluntary_swap') return result('voluntary_swap', { ...linkOf(a, e, a.link), endsAt: e ?? at });
     const pool = [base, ...company];
     if (COMPANY.includes(a.value)) return result(a.value, { ...linkOf(a, e), endsAt: e ?? at, ...basis(pool) });
-    return result(a.value, { ...(a.text && { text: a.text }), endsAt: at, ...(at !== chain.plan && { lostOn: at }), ...basis(pool) });
+    // `creditMin`: הקרדיט שנבחר ב"סיבה אחרת" (`applyOtherReason`; טיוטה 453).
+    return result(a.value, { ...(a.text && { text: a.text }), ...(typeof a.creditMin === 'number' && { creditMin: a.creditMin }), endsAt: at,
+      ...(at !== chain.plan && { lostOn: at }), ...basis(pool) });
   };
   const open = (id, pairing) => result('chain_open', { open: { id, pairing }, endsAt: pairing });
 
