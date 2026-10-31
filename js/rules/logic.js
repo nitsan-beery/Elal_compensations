@@ -2112,9 +2112,9 @@ function unplannedNote(ctx, n) {
 // ---------- שינויים בפעילות שאינה טיסה ----------
 
 /**
- * קריאה מחופשה (ישן כ"ה ס' 13.ג): יום שתוכנן בו VAC ובדוח יש בו טיסה או פעילות אחרת, ואין VAC.
- * התשלום הוא לכל יממה או חלק ממנה של פעילות בתקופת החופשה, בנוסף לקרדיט של מה שבוצע.
- * הסבב מסומן, וקריאה מיוחדת לא שואלת עליו "מה קרה": ידוע שהחברה קראה לחזור מחופשה.
+ * קריאה מחופשה (ישן כ"ה ס' 13.ג): יום שתוכנן בו VAC ובדוח יש בו טיסה, ואין VAC. התשלום הוא לכל יממה או חלק ממנה של
+ * "פעילות טיסתית" בתקופת החופשה, בנוסף לקרדיט של מה שבוצע. "נקרא ע"י ההנהלה" אינו בקבצים: הרומה זיכתה – מניחים, ולא
+ * זיכתה – שואלים. סימולטור, פעילות קרקע וכוננות אינם פעילות טיסתית (בעל המוצר, 31/10/2026, טיוטה 458).
  */
 function vacation_recall(ctx, params, rule) {
   if (!ctx.hasPlan || !ctx.hasExec) return;
@@ -2126,19 +2126,36 @@ function vacation_recall(ctx, params, rule) {
     if (!(day.plan?.codes ?? []).some((c) => ok(c) && codeIn(c, params.plan_codes, params.plan_code_prefixes))) continue;
     if (ctx.execCodes(day).some((c) => codeIn(c, params.report_codes, params.report_code_prefixes))) continue;
     // גם יום הנחיתה אחרי חצות (`shownTo`; בעל המוצר, 21/10/2026; טל: ZRH ‏01/09 נחתה ב-02:47 ב-02/09, יום חופשה).
-    const pairing = ctx.execPairings.find((p) => p.from <= day.date && day.date <= (p.shownTo ?? p.to));
+    const pairing = ctx.execPairings.find((p) => inStay(p, day.date) || (p.from <= day.date && day.date <= (p.shownTo ?? p.to)));
     if (pairing) {
       if (!byPairing.has(pairing)) byPairing.set(pairing, []);
       byPairing.get(pairing).push(day.date);
       continue;
     }
     const activity = ctx.activityCodes(day);
-    if (activity.length) ctx.expect(day.date, key, hours, rule, `${rule.title}: ${activity.join(', ')} ביום חופשה מתוכנן.`);
+    if (!activity.length) continue;
+    if (ctx.paidOnDate(day.date, params.report_column, key, hours) && ctx.assume(`vacation_activity:${day.date}`, 'paid', 'הרומה מזכה קריאה מחופשה')) {
+      ctx.expect(day.date, key, hours, rule, `${rule.title}: ${activity.join(', ')} ביום חופשה מתוכנן.`, { explain: 'הרומה מזכה את הפיצוי, והאפליקציה מניחה שזו קריאה מחופשה.' });
+    } else {
+      ctx.note(day.date, `${ctx.codeNames(activity)} ביום חופשה: קריאה מחופשה מגיעה רק על טיסה, ולכן אין פיצוי.`, rule);
+    }
   }
   for (const [pairing, dates] of byPairing) {
-    ctx.markPairing(pairing, 'vacation_recall');
     // כל יום חופשה בנפרד: הוא אינו קריאה מיוחדת (`special_call`; טיוטה 387).
     for (const d of dates) ctx.markPairing(pairing, `vacation_recall:${d}`);
+    const id = `vacation_recall:${pairing.id}`;
+    const a = ctx.answer(id) ?? (ctx.paidOn(pairing, params.report_column, key, dates.length * hours) ? ctx.assume(id, 'recalled', 'נקראתי לחזור מחופשה') : null);
+    const when = `${pairing.legs.find((l) => l.date === dates[0])?.flight ?? flightsOf(pairing)} ב-${dates.map(dayOf).join(', ')}`;
+    if (!a) {
+      ctx.ask({ id, date: dates[0], title: `${when} בוצעה ביום חופשה`, body: 'הרומה לא מזכה קריאה מחופשה. מה קרה?',
+        options: [{ value: 'recalled', label: 'נקראתי לחזור מחופשה' }, { value: 'mine', label: 'טסתי לבקשתי' }], ruleId: rule.id });
+      continue;
+    }
+    if (a.value === 'mine') {
+      ctx.note(dates[0], `${when}: טסת לבקשתך, בלי פיצוי על קריאה מחופשה.`, rule, { pairingId: pairing.id });
+      continue;
+    }
+    ctx.markPairing(pairing, 'vacation_recall');
     // שורה משלה בפירוט, רק בימי החופשה (`ownDays`; בעל המוצר, 21/10/2026; טיוטה 392).
     ctx.expectPairing(pairing, key, dates.length * hours, rule,
       `${rule.title}: ${dates.length === 1 ? 'יממה אחת' : `${dates.length} יממות`} של טיסה בימי חופשה מתוכננים (${dates.map(dayOf).join(', ')}).`,

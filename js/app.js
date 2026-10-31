@@ -13,7 +13,7 @@ import * as store from './store.js';
 import * as calendar from './calendar.js';
 
 // מספר הגרסה של הקוד שרץ בדף. עולה יחד עם CACHE ב-sw.js, לאותו מספר (בעל המוצר, 15/10/2026).
-const APP_VERSION = 339;
+const APP_VERSION = 340;
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -1476,7 +1476,7 @@ const QUESTION_KIND = { fleet: 'הצי', cancelled: 'סבב שלא בוצע', un
   base_rest: 'מנוחה בבסיס', second_activity: 'פעילות נוספת באותו FDP', occasion: 'תאריך מיוחד', night_rounds: 'טיסות סבב לילה עוקבות',
   stay_extension: 'הארכת שהייה', miami_short_rest: 'קיצור מנוחה במיאמי', miami_delay: 'דחייה במיאמי', las_vegas_rest: 'קיצור מנוחה בלאס וגאס',
   sim_extension: 'הארכת סימולטור', extended: 'סבב שהתארך', saturdays: 'שתי שבתות ברצף', other_company: 'ביוזמת החברה',
-  carry: 'רגל בגבול החודש', free_day: 'יום שתוכנן פנוי', second_day: 'שתי פעילויות ביממה' };
+  carry: 'רגל בגבול החודש', free_day: 'יום שתוכנן פנוי', second_day: 'שתי פעילויות ביממה', vacation_recall: 'קריאה מחופשה' };
 
 /**
  * ראש השורה ב"תשובות שנשמרו": התאריך (או טווח הסבב) בבולד, הכי מימין, ואחריו היעד או הטיסה וסוג השאלה
