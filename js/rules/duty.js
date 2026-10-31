@@ -1309,6 +1309,10 @@ function free_days_waived(ctx, params, rule) {
   const landed = carried ? pairingTimes(carried, ctx.tz).end : null;
   const lastBefore = !ctx.hasExec && ctx.prevMonth?.hasExec ? ctx.prevMonth.execPairings.at(-1) ?? null : null;
   const priorEnd = !lastBefore ? null : lastBefore.cutAtEnd ? Infinity : pairingTimes(lastBefore, ctx.tz).end;
+  // סבב בתכנון הקודם שלא חזר בחודש ולא בוצע: הספירה לפי התכנון (בעל המוצר, 14/10/2026), גם כשהרומה לא הראתה נחיתה,
+  // ושעת הנחיתה המתוכננת אינה בקבצים (טיוטה 472).
+  const lastPlanned = ctx.prevMonth?.planPairings.at(-1);
+  const over = firstIsX && lastPlanned?.cutAtEnd && !carried && !lastBefore?.cutAtEnd && (ctx.hasExec || ctx.prevMonth.hasExec) ? lastPlanned : null;
   // הערה רק כשהיום מוריד את המספר מתחת למינימום (בעל המוצר, 04/10/2026).
   const notFree = (pairing, end) => {
     free.splice(free.indexOf(ctx.monthFirst), 1);
@@ -1316,11 +1320,11 @@ function free_days_waived(ctx, params, rule) {
     const when = end === Infinity ? 'ועוד לא חזרת' : `ב-${ddmm(dateOf(end))} ${hhmm(end)}, אחרי ${params.on_block_until}`;
     ctx.note(ctx.monthFirst, `${rule.title}: ב-${ddmm(ctx.monthFirst)} מסומן X, אבל לפי הרומה נחתת מסבב של החודש הקודם (${describePairing(pairing)}) ${when}, ולכן היום אינו נספר.`, rule);
   };
-  if (firstIsX && ctx.hasExec && (!carried || landed != null)) {
+  if (firstIsX && !over && ctx.hasExec && (!carried || landed != null)) {
     if (carried && landed > at(ctx.monthFirst, onUntil)) notFree(carried, landed);
-  } else if (firstIsX && ctx.prevMonth?.hasExec && !ctx.hasExec && (!lastBefore || priorEnd != null)) {
+  } else if (firstIsX && !over && ctx.prevMonth?.hasExec && !ctx.hasExec && (!lastBefore || priorEnd != null)) {
     if (lastBefore && priorEnd > at(ctx.monthFirst, onUntil)) notFree(lastBefore, priorEnd);
-  } else if (firstIsX && ctx.calendarFirstDay(ctx.monthFirst)?.carried === false) {
+  } else if (firstIsX && !over && ctx.calendarFirstDay(ctx.monthFirst)?.carried === false) {
     // היומן מראה טיסה ב-1 לחודש שיוצאת מהבסיס, ולא סבב מהחודש הקודם: לא נחתת בו מסבב כזה, וה-X
     // הוא יום פנוי לפי התכנון, כמו עם רומה (בעל המוצר, 04/10/2026). הטיסה עצמה בשינויים.
   } else if (firstIsX) {
@@ -1333,10 +1337,15 @@ function free_days_waived(ctx, params, rule) {
       ctx.ask({
         id: fid,
         date: ctx.monthFirst,
-        title: `ימים ללא פעילות: ב-${ddmm(ctx.monthFirst)} מסומן X. האם נחתת בו מסבב של החודש הקודם?`,
-        body: `X ב-1 לחודש מופיע גם כשסבב מהחודש הקודם נוחת בו, והנחיתה אינה בתכנון. יום עם נחיתה בבסיס עד ${params.on_block_until} נחשב פנוי. ` +
+        title: over ? `ימים ללא פעילות: ב-${ddmm(ctx.monthFirst)} מסומן X. מתי תוכננה הנחיתה של ${describePairing(over)}?`
+          : `ימים ללא פעילות: ב-${ddmm(ctx.monthFirst)} מסומן X. האם נחתת בו מסבב של החודש הקודם?`,
+        body: `${over ? `הסבב לא חזר בתכנון של החודש הקודם, ושעת הנחיתה המתוכננת אינה בקבצים. הספירה לפי התכנון, ויום עם נחיתה בבסיס עד ${params.on_block_until} נחשב פנוי.`
+          : `X ב-1 לחודש מופיע גם כשסבב מהחודש הקודם נוחת בו, והנחיתה אינה בתכנון. יום עם נחיתה בבסיס עד ${params.on_block_until} נחשב פנוי.`} ` +
           `בלעדיו יש ${free.length} ימים ללא פעילות, והמינימום הוא ${due}.`,
-        options: [
+        options: over ? [
+          { value: 'free', label: `ב-${ddmm(ctx.monthFirst)} עד ${params.on_block_until}`, hint: 'יום פנוי' },
+          { value: 'busy', label: `ב-${ddmm(ctx.monthFirst)} אחרי ${params.on_block_until}, או יום מאוחר יותר`, hint: 'לא יום פנוי' },
+        ] : [
           { value: 'free', label: `לא נחתתי בו, או שנחתתי עד ${params.on_block_until}`, hint: 'יום פנוי' },
           { value: 'busy', label: `נחתתי אחרי ${params.on_block_until}`, hint: 'לא יום פנוי' },
         ],
@@ -1350,10 +1359,10 @@ function free_days_waived(ctx, params, rule) {
   if (missing <= 0) return;
   const paidDays = missing - (params.paid_from_day - 1);
   const what = `בתכנון ${free.length} ימים ללא פעילות` +
-    (pendingFirst ? ` (${free.length + 1} אם ב-${ddmm(ctx.monthFirst)} לא נחתת)` : '') +
+    (pendingFirst ? ` (${free.length + 1} ${over ? `אם הנחיתה תוכננה עד ${params.on_block_until}` : `אם ב-${ddmm(ctx.monthFirst)} לא נחתת`})` : '') +
     `, והמינימום לקרדיט מתוכנן ${minToHhmm(credit)} הוא ${due}`;
   if (paidDays <= 0) {
-    ctx.note(null, `${what}. ${pendingFirst ? 'גם אם נחתת, חסר יום אחד בלבד' : 'חסר יום אחד'}, ` +
+    ctx.note(null, `${what}. ${pendingFirst ? `גם אם ${over ? 'הנחיתה תוכננה מאוחר יותר' : 'נחתת'}, חסר יום אחד בלבד` : 'חסר יום אחד'}, ` +
       `והפיצוי ניתן רק מ-${params.paid_from_day} ימים חסרים ומעלה, ולכן לא מגיע זיכוי.`, rule);
     return;
   }

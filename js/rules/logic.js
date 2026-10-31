@@ -457,7 +457,7 @@ function standbyMissing(ctx, params, rule, credit) {
 
 /** יום שברומה לא רשום בו כלום: לא קוד, לא רגל, ולא בתוך סבב. */
 /** האם תוכננה ביום כוננות מסוג כלשהו. */
-const standbyPlanned = (ctx, date) => (ctx.timeline.find((d) => d.date === date)?.plan?.codes ?? []).some((c) => c.startsWith('SBY'));
+const standbyPlanned = (ctx, date) => ctx.sickStandby.has(date) || (ctx.timeline.find((d) => d.date === date)?.plan?.codes ?? []).some((c) => c.startsWith('SBY'));
 
 /** יום בשהייה של סבב: גם סבב שלא חזר בסוף החודש, שהרגל האחרונה שלו לפני היום הזה (טיוטה 455). */
 const inStay = (p, date) => p.from <= date && (date <= p.to || !!p.cutAtEnd);
@@ -2315,7 +2315,7 @@ function standby_end_for_bid(ctx, params, rule) {
           id,
           date: pairing.from,
           title: `טיסה ביומיים האחרונים של כוננות: ${describePairing(pairing)}`,
-          body: `בתכנון כוננות ב-${range}, והטיסה ${ctx.calendarRun ? 'ביומן' : 'יצאה'} ב-${dayOf(pairing.from)}. ` +
+          body: `${run.sick ? `ברומה כוננות ב-${range}, בימי סבב שבוטל עקב מחלה` : `בתכנון כוננות ב-${range}`}, והטיסה ${ctx.calendarRun ? 'ביומן' : 'יצאה'} ב-${dayOf(pairing.from)}. ` +
             (run.at(-1) === monthEnd && !ctx.nextPlan ? 'הכוננות מגיעה לסוף החודש, וייתכן שהיא נמשכת בחודש הבא. ' : '') +
             (ctx.calendarRun ? '' : 'הרומה לא מזכה קריאה מיוחדת. ') + 'אם הכוננות הופעלה, מגיע רק קרדיט הטיסה. אם החברה אישרה לך לסיים את הכוננות בגלל זכייה במכרז, מגיעה קריאה מיוחדת על ימי הטיסה. מה קרה?',
           // הפעלת הכוננות ראשונה (בעל המוצר, 21/10/2026; טיוטה 390).
@@ -2345,16 +2345,19 @@ function standby_end_for_bid(ctx, params, rule) {
 
 /**
  * רצפי כוננות בתכנון: ימים עוקבים עם קוד כוננות (`plan_codes` / `plan_code_prefixes`). רצף שמגיע לסוף החודש נמשך
- * בתכנון של החודש הבא, כשהוא שמור, כי היומיים האחרונים נספרים מסוף הרצף (2024 ס' 50; טיוטה 451).
+ * בתכנון של החודש הבא, כשהוא שמור, כי היומיים האחרונים נספרים מסוף הרצף (2024 ס' 50; טיוטה 451). יום כוננות אחרי
+ * מחלה (`ctx.sickStandby`, 2018 ס' 92) הוא חלק מהרצף, ורצף כזה מסומן `sick` (טיוטה 472).
  */
 function standbyRuns(ctx, params) {
   const isStandby = (plan) => (plan?.codes ?? []).some((c) => codeIn(c, params.plan_codes, params.plan_code_prefixes));
   const runs = [];
   for (const day of ctx.timeline) {
-    if (!isStandby(day.plan)) continue;
+    const placed = ctx.sickStandby.has(day.date);
+    if (!placed && !isStandby(day.plan)) continue;
     const run = runs.at(-1);
     if (run && run.at(-1) === addDays(day.date, -1)) run.push(day.date);
     else runs.push([day.date]);
+    runs.at(-1).sick ||= placed;
   }
   const end = runs.at(-1);
   if (end?.at(-1) === ctx.timeline.at(-1).date) {
