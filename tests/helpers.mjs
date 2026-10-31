@@ -76,7 +76,7 @@ export function month(year, m, { plan = {}, exec = null, values = {}, codes = {}
 export function run(m, { answers = {}, prev = null, next = null, assumedIgnored = [], planOnly = false, rules = rulesData } = {}) {
   return evaluate({ rulesData: rules, plan: m.plan, exec: planOnly ? null : m.exec, answers, assumedIgnored,
     history: prev ? [{ period: prev.period, plan: prev.plan, exec: prev.exec, answers: prev.answers ?? null }] : [],
-    next: next ? { period: next.period, plan: next.plan, exec: next.exec } : null });
+    next: next ? { period: next.period, plan: next.plan, exec: next.exec, answers: next.answers ?? null } : null });
 }
 
 const clean = (s) => String(s ?? '').replace(/[⁦-⁩‏]/g, '');

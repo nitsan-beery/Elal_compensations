@@ -54,7 +54,7 @@ async function current() {
     const history = p ? [{ period: { year: y, month: mo }, plan: p.plan, exec: p.exec, answers: p.answers }] : [];
     const [ny, nm] = mo === 11 ? [y + 1, 1] : mo === 12 ? [y + 1, 2] : [y, mo + 2];
     const n = data.get(`${ny}-${String(nm).padStart(2, '0')}`);
-    const next = n ? { period: { year: ny, month: nm }, plan: n.plan, exec: n.exec } : null;
+    const next = n ? { period: { year: ny, month: nm }, plan: n.plan, exec: n.exec, answers: n.answers } : null;
     out[k] = snapshot(evaluate({ rulesData, plan: m.plan, exec: m.exec, answers: m.answers, history, next }));
     out[`${k}-plan`] = snapshot(evaluate({ rulesData, plan: m.plan, exec: null, answers: {}, history, next }));
   }

@@ -7,7 +7,7 @@
 import { hoursToMin, minToHhmm, MONTH_NAMES } from '../time.js';
 import { describePairing, describeRoute, fdpParts, wholePairing } from '../model.js';
 import { at, dateOf, legTimes, pairingTimes } from '../flight-times.js';
-import { DUTY_LOGIC, DUTY_PARAMS, execFdpGroups, amountWord, otherOption, applyOtherReason, extensionDays, overStay, dayActivity, keyFor, paidEarlier } from './duty.js';
+import { DUTY_LOGIC, DUTY_PARAMS, execFdpGroups, amountWord, otherOption, applyOtherReason, extensionDays, overStay, stayEnd, carriedStay, extensionAnswer, dayActivity, keyFor, paidEarlier } from './duty.js';
 import { overlapDays } from './journal.js';
 
 const H = (hours) => hoursToMin(hours) ?? 0;
@@ -350,7 +350,7 @@ function absence_day_credit(ctx, params, rule) {
     if (!matchesCode(day, params, ctx)) continue;
     if (params.flight_day_takes_higher) {
       // כל ימי הסבב, גם יום שהייה שאין בו רגל (`standbyDaysFlown`).
-      const pairing = ctx.execPairings.find((p) => p.from <= day.date && day.date <= p.to);
+      const pairing = ctx.execPairings.find((p) => inStay(p, day.date));
       if (pairing) {
         if (onFlightDay.has(pairing)) continue;
         onFlightDay.add(pairing);
@@ -456,8 +456,10 @@ function standbyMissing(ctx, params, rule, credit) {
 }
 
 /** יום שברומה לא רשום בו כלום: לא קוד, לא רגל, ולא בתוך סבב. */
+/** יום בשהייה של סבב: גם סבב שלא חזר בסוף החודש, שהרגל האחרונה שלו לפני היום הזה (טיוטה 455). */
+const inStay = (p, date) => p.from <= date && (date <= p.to || !!p.cutAtEnd);
 const emptyExecDay = (ctx, day) => !ctx.execCodes(day).length && !(day.exec?.legs ?? []).length &&
-  !ctx.execPairings.some((p) => p.from <= day.date && day.date <= p.to);
+  !ctx.execPairings.some((p) => inStay(p, day.date));
 
 /** ימים לפי הסדר, ברצפים של ימים עוקבים. */
 function dayRuns(days) {
@@ -961,6 +963,8 @@ function special_call(ctx, params, rule) {
     if (ctx.pairingHandledBy(match.exec, 'swap_conflict_void')) continue;
     const reported = ctx.reportedOn(match.exec, column);
     const answer = ctx.answerFor(match);
+    // הארכה שחוצה חודש (`carriedStay`; טיוטה 455). תשובה שכבר ניתנה על פעילות לא מתוכננת נשארת.
+    if (!match.plan && !answer && carriedStay(ctx, match.exec)?.plan && extendedPairing(ctx, params, rule, match, null)) continue;
     // הנחיתה של סבב מהחודש הקודם (`carried_in`): קרדיט, ורק היממה האחרונה של קריאה מיוחדת (טיוטות 420, 428).
     if (match.how === 'carried_in') { carriedInCall(ctx, match.exec, params, rule, column); continue; }
     // סטיה לשדה משנה היא אותה טיסה, ולא קריאה מיוחדת, גם כשהרומה זיכתה S/C (`explainUnexplained`; בעל המוצר, 06/10/2026).
@@ -1172,7 +1176,8 @@ function companySwapToFreeDay(match, answer) {
 function extendedPairing(ctx, params, rule, match, answer) {
   const ext = extensionDays(ctx, match);
   if (!ext) return false;
-  const { plan, exec } = match;
+  const { exec } = match;
+  const plan = match.plan ?? carriedStay(ctx, exec).plan;
   if (match.how === 'exact') ctx.markPairing(exec, 'extended');
   // החלפה מרצוני – מול לוח הזמנים של הסבב שהחלפת אליו (`extensionMatch`; בעל המוצר, 18/10/2026).
   const own = answer?.value === 'voluntary_swap';
@@ -1192,14 +1197,14 @@ function extendedPairing(ctx, params, rule, match, answer) {
   // 08/10/2026; רון, ספטמבר 2026: WAW ב-10/09 שהוחלף ב-BCN ‏09–11/09). כך גם בהורדה עקב חניך: ס' 46 עוסק בקרדיט,
   // ואינו שולל קריאה מיוחדת (בעל המוצר, 30/10/2026, טיוטה 442).
   const swapped = match.how === 'dates' && ['replaced', 'bid', 'trainee'].includes(answer?.value);
-  const a = ctx.answer(id) ?? (swapped ? { value: 'company' } : paid ? ctx.assume(id, 'company', 'הסבב הוארך ביוזמת החברה') : null);
+  const a = extensionAnswer(ctx, exec) ?? (swapped ? { value: 'company' } : paid ? ctx.assume(id, 'company', 'הסבב הוארך ביוזמת החברה') : null);
   const list = ext.days.map(dayOf).join(', ');
   if (!a) {
     const due = [days.length ? 'קריאה מיוחדת' : null, ext.second.length ? 'פיצוי על פעילות שנייה באותה יממה' : null].filter(Boolean);
     ctx.ask({
       id,
       date: exec.from,
-      title: `${over ? 'חזרה מאוחרת לבסיס' : 'סבב שהתארך'}: ${describePairing(exec)}`,
+      title: over ? `חזרה מאוחרת לבסיס: ${over.whole}` : `סבב שהתארך: ${describePairing(exec)}`,
       body: over ? `${over.what}. ${ctx.calendarRun ? '' : 'הרומה לא מזכה על כל הימים, ו'}הפיצוי תלוי בסיבה, שאינה בקבצים. מה קרה?`
         : ctx.calendarRun
         ? `הסבב תוכנן ${describePairing(plan)}, וביומן התארך ל-${list}. ${due.join(' ו')} ` +
@@ -1218,7 +1223,8 @@ function extendedPairing(ctx, params, rule, match, answer) {
     return true;
   }
   if (a.value === 'agreed') {
-    ctx.note(ext.days[0], `הסבב התארך: בהסכמתך, ולכן אין פיצוי על ההארכה ל-${list}.`, rule, { pairingId: exec.id });
+    ctx.markPairing(exec, 'extended_agreed');
+    if (ext.days.length) ctx.note(ext.days[0], `הסבב התארך: בהסכמתך, ולכן אין פיצוי על ההארכה ל-${list}.`, rule, { pairingId: exec.id });
     return true;
   }
   for (const d of days) {
@@ -2315,6 +2321,27 @@ function standby_activation(ctx, params, rule) {
 
     }
   }
+  activatedBefore(ctx, params);
+}
+
+/**
+ * סבב שהופעל מכוננות בחודש הקודם וחזר בחודש הזה: על הימים הפנויים כאן מגיעה קריאה מיוחדת, גם בלי תשובה שם. גם הפעלה
+ * וגם זכייה במכרז מזכות בה על הימים שאחרי הכוננות (בעל המוצר, 31/10/2026, טיוטה 455).
+ */
+function activatedBefore(ctx, params) {
+  const pairing = ctx.execPairings[0];
+  const stay = pairing?.cutAtStart ? carriedStay(ctx, pairing) : null;
+  const sc = ctx.rulesWithLogic('special_call')[0];
+  if (!stay || stay.plan || !sc || ctx.matches.find((m) => m.exec === pairing)?.plan) return;
+  const planned = ctx.prevMonth.timeline.find((d) => d.date === stay.before.from)?.plan?.codes ?? [];
+  if (!planned.some((c) => codeIn(c, params.plan_codes, params.plan_code_prefixes))) return;
+  if (ctx.prevMonth.answers?.[`standby_bid:${stay.before.id}`]?.value === 'other' || ctx.answer(`unplanned:${pairing.id}`)) return;
+  ctx.markPairing(pairing, 'standby_activated');
+  const days = daysAfterStandby(ctx, pairing, [addDays(ctx.monthFirst, -1)]);
+  for (const d of days) {
+    ctx.expectPairing(pairing, 'sc', H(sc.logic.params.hours), sc, `${flightsOf(pairing)}: יממה ${dayOf(d)}, אחרי סוף הכוננות.`,
+      { date: d, dates: [d], perDay: true, explain: 'הסבב נמשך אחרי סוף הכוננות.' });
+  }
 }
 
 /**
@@ -2331,7 +2358,7 @@ function standbyDaysFlown(ctx, pairing) {
   };
   const out = [];
   for (const day of ctx.timeline) {
-    if (day.date < pairing.from || day.date > pairing.to || ctx.softStart(day.date)) continue;
+    if (!inStay(pairing, day.date) || ctx.softStart(day.date)) continue;
     const reported = ctx.execCodes(day).find(valueOf);
     const planned = (day.plan?.codes ?? []).find((c) => c.startsWith('SBY'));
     const code = reported ?? planned;
@@ -2390,11 +2417,11 @@ function compareStandbyFlown(ctx, pairing, rule) {
  * כולל נחיתה אחרי חצות, כמו ב-`extensionDays`.
  */
 function daysAfterStandby(ctx, pairing, run) {
-  if (pairing.to <= run.at(-1)) return [];
-  const e = pairingTimes(pairing, ctx.tz, { away: true });
-  if (e.end == null) return [];
+  if (!pairing.cutAtEnd && pairing.to <= run.at(-1)) return [];
+  const { end } = stayEnd(ctx, pairing);
+  if (end == null) return [];
   const days = [];
-  for (let d = addDays(run.at(-1), 1); at(d, 0) < e.end; d = addDays(d, 1)) {
+  for (let d = addDays(run.at(-1), 1); at(d, 0) < end; d = addDays(d, 1)) {
     if (ctx.timeline.some((x) => x.date === d) && ctx.planFreeDay(d)) days.push(d);
   }
   return days;

@@ -174,6 +174,7 @@ export function attachNext(pairing, domicile, next, side) {
   if (!first || !(sameLeg(first.legs[0], last) || first.legs[0].org === last.dst)) return;
   pairing.nextLegs = first.legs.filter((l) => !sameLeg(l, last));
   pairing.nextSource = source;
+  pairing.nextId = first.id; // התשובה על הסבב בחודש הבא (`extensionAnswer`; טיוטה 455)
 }
 
 /**

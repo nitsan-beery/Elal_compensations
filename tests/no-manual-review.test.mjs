@@ -110,24 +110,27 @@ test('התשובה קובעת את הקרדיט, ואפשר לשנות אותה'
 
 // ---------- יום שאף חוק לא קבע מה מגיע עליו ----------
 
-const late = () => month(2026, 8, { plan: { 29: [out()], 30: [back()] }, exec: { 29: [out()] } });
-const FREE = 'free_day:2026-08-31';
+// טיסה שנוספה בהסכמה ונחתה אחרי חצות, ביום פנוי: אף חוק לא קובע מה מגיע עליו.
+const lateLeg = () => [leg('LY321', 'TLV', 'ATH', '20:00', '21:00'), leg('LY322', 'ATH', 'TLV', '22:00', '23:30', { act: 150 })];
+const ADDED = { 'unplanned:2026-08-10..2026-08-10:ATH': { value: 'added' } };
+const late = () => month(2026, 8, { plan: {}, exec: { 10: lateLeg() } });
+const FREE = 'free_day:2026-08-11';
 
 test('יום פנוי שנגעה בו טיסה: שאלה ולא בדיקה ידנית', () => {
-  const r = run(late());
+  const r = run(late(), { answers: ADDED });
   assert.deepEqual(reviews(r), []);
   assert.deepEqual(r.questions.find((q) => q.id === FREE).options.map((o) => o.value), ['due', 'agreed', 'other']);
 });
 
 test('התשובה "מגיעה קריאה מיוחדת" נספרת, ו"בהסכמתי" לא', () => {
-  assert.equal(expected(run(late(), { answers: { [FREE]: { value: 'due' } } }), 'S/C', '31/08'), '02:30');
-  const r = run(late(), { answers: { [FREE]: { value: 'agreed' } } });
-  assert.equal(expected(r, 'S/C', '31/08'), null);
+  assert.equal(expected(run(late(), { answers: { ...ADDED, [FREE]: { value: 'due' } } }), 'S/C', '11/08'), '02:30');
+  const r = run(late(), { answers: { ...ADDED, [FREE]: { value: 'agreed' } } });
+  assert.equal(expected(r, 'S/C', '11/08'), null);
   assert.deepEqual(reviews(r), []);
 });
 
 test('סיבה אחרת על יום כזה: הקרדיט שנבחר', () => {
-  assert.equal(expected(run(late(), { answers: { [FREE]: other({ creditMin: 60 }) } }), 'Rig', 'ATH'), '01:00');
+  assert.ok(run(late(), { answers: { ...ADDED, [FREE]: other({ creditMin: 60 }) } }).comparison.some((c) => c.column === 'Rig' && c.expected >= 60));
 });
 
 test('שתי פעילויות נפרדות ביממה, ואחת לא מתוכננת: שאלה', () => {

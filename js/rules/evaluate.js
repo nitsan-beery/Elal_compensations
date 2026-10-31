@@ -223,6 +223,7 @@ function evaluateFiles({ rulesData, plan = null, exec = null, answers = {}, hist
   }
   ctx.prevExec = prevExec; // לקיזוז בגבול החודש (`credit_from_scheduled`; טיוטה 373)
   ctx.nextPlan = nextPlan; // לרצף כוננות שמגיע לסוף החודש (`standbyRuns`; טיוטה 451)
+  ctx.nextAnswers = nextOne?.answers ?? null; // להארכה שחוצה חודש (`extensionAnswer`; טיוטה 455)
   // החודש הקודם, לרצף שחוצה חודש: שבתות וטיסות סבב לילה (טיוטה 431).
   if (prev) {
     const days = buildTimeline(prev.period, prev.plan, prev.exec);
@@ -2532,7 +2533,7 @@ function auditDays(ctx, out, matches, execPairings, timeline) {
   const matchOf = (o) => matches.find((m) => m.exec === o) ?? null;
   const answerOf = (o) => { const m = matchOf(o); return m ? ctx.answerFor(m) : null; };
   // סיבות מפורשות שאין פיצוי על כל ימי הסבב. `special_call` בלי ציפייה ביום פנוי – יממה שנייה מתחת לסף (`countSpecialCallDays`).
-  const quiet = (o) => ['standby_activated', 'diversion_assumed', 'stay_extension', 'swap_conflict_void', 'carried_in'].some((t) => ctx.pairingHandledBy(o, t)) ||
+  const quiet = (o) => ['standby_activated', 'diversion_assumed', 'stay_extension', 'extended_agreed', 'swap_conflict_void', 'carried_in'].some((t) => ctx.pairingHandledBy(o, t)) ||
     answerOf(o)?.value === 'other' || ctx.answer(`extended:${o.id}`)?.value === 'agreed';
   const expected = (d, test) => out.expectations.some((e) => (e.date === d || e.dates?.includes(d)) && test(e));
   const asked = (o, d) => { const m = matchOf(o); return out.questions.some((q) => q.date === d || q.id.includes(o.id) || (m?.plan && q.id.includes(m.plan.id))); };

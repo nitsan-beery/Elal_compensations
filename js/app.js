@@ -13,7 +13,7 @@ import * as store from './store.js';
 import * as calendar from './calendar.js';
 
 // מספר הגרסה של הקוד שרץ בדף. עולה יחד עם CACHE ב-sw.js, לאותו מספר (בעל המוצר, 15/10/2026).
-const APP_VERSION = 336;
+const APP_VERSION = 337;
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -860,7 +860,7 @@ function nextFor(record, months) {
   const { year, month } = record.period;
   const key = store.monthKey(month === 12 ? { year: year + 1, month: 1 } : { year, month: month + 1 });
   const m = months.find((x) => store.samePilot(x, record) && store.monthKey(x.period) === key && (x.plan || x.exec));
-  return m ? { period: m.period, plan: m.plan ?? null, exec: m.exec ?? null } : null;
+  return m ? { period: m.period, plan: m.plan ?? null, exec: m.exec ?? null, answers: m.answers ?? null } : null;
 }
 
 function historyFor(record, months) {

@@ -4,7 +4,7 @@
 // והסבבים – רק מ-js/flight-times.js (`legTimes`, ‏`pairingTimes`).
 
 import { hoursToMin, isoDate, minToHhmm } from '../time.js';
-import { describePairing, describeRoute, wholePairing } from '../model.js';
+import { describePairing, describeRoute, matchPairings, wholePairing } from '../model.js';
 import { COMPANY_CANCEL, pairingDecision } from './decision.js';
 import { at, dateOf, legTimes, pairingTimes } from '../flight-times.js';
 
@@ -139,27 +139,68 @@ function same_fdp_rounds(ctx, params, rule) {
  * מתוכננת (`second_unplanned_activity`, 2024 ס' 42.6; פעילות קרקע אינה נספרת). null כשאין יום כזה.
  */
 export function extensionDays(ctx, match) {
-  match = extensionMatch(ctx, match);
+  // הסבב המתוכנן חזר בחודש הקודם, ומה שבוצע חזר בחודש הזה (`carriedStay`; טיוטה 455).
+  const earlier = !match?.plan && match?.exec ? carriedStay(ctx, match.exec)?.plan : null;
+  match = earlier ? { ...match, plan: earlier, how: 'exact', fromPrev: true } : extensionMatch(ctx, match);
   if (!match) return null;
-  if (!match.plan || !match.exec || match.exec.cutAtEnd || match.plan.cutAtEnd) return null;
+  if (!match.plan || !match.exec || match.plan.cutAtEnd || (match.exec.cutAtEnd && match.how !== 'exact')) return null;
   // סבב שיצא בחודש הקודם, בתכנון ובביצוע: מתחילת החודש (בעל המוצר, 30/10/2026, טיוטה 433).
   const carried = !!match.exec.cutAtStart;
-  if (carried !== !!match.plan.cutAtStart) return null;
+  if (!match.fromPrev && carried !== !!match.plan.cutAtStart) return null;
   const e = pairingTimes(match.exec, ctx.tz, { away: true });
+  const end = stayEnd(ctx, match.exec).end;
   const p = pairingTimes(match.plan, ctx.tz);
-  if (e.end == null || p.end == null || (!carried && (e.start == null || p.start == null))) return null;
+  if (end == null || p.end == null || (!carried && (e.start == null || p.start == null))) return null;
   const days = [];
   const planStart = carried ? -Infinity : p.start;
-  for (let d = carried ? ctx.monthFirst : dateOf(e.start); at(d, 0) < e.end; d = addDays(d, 1)) {
+  for (let d = carried ? ctx.monthFirst : dateOf(e.start); at(d, 0) < end; d = addDays(d, 1)) {
     if (planStart < at(d, 1440) && p.end > at(d, 0)) continue;
     if (ctx.timeline.some((x) => x.date === d)) days.push(d);
   }
-  if (!days.length) return null;
+  // סבב שלא חזר בסוף החודש התארך גם כשכל הימים הנוספים בחודש הבא.
+  if (!days.length && !match.exec.cutAtEnd) return null;
   const free = days.filter((d) => ctx.planFreeDay(d));
   const sims = ctx.rulesWithLogic('second_unplanned_activity')[0]?.logic.params?.sim_report_codes;
   const second = !sims ? [] : days.filter((d) => !free.includes(d) &&
     (ctx.execPairings.some((x) => x !== match.exec && x.dates.includes(d)) || ctx.execCodes(ctx.timeline.find((x) => x.date === d)).some((c) => sims.includes(c))));
   return { days, free, second };
+}
+
+/**
+ * סוף השהייה של סבב שבוצע: הנחיתה בבסיס, גם בחודש הבא כשהוא שמור (`nextLegs`). בלעדיו – סוף החודש, ו-`known` שקר
+ * (טיוטה 455).
+ */
+export function stayEnd(ctx, exec) {
+  const end = pairingTimes(exec, ctx.tz, { away: true }).end;
+  if (end != null || !exec.cutAtEnd) return { end, known: end != null };
+  const home = exec.nextLegs?.findLast((l) => l.dst === ctx.domicile);
+  const t = home ? legTimes(home, ctx.tz) : null;
+  return t?.sta != null ? { end: t.ata ?? t.sta, known: true } : { end: at(addDays(ctx.timeline.at(-1).date, 1), 0), known: false };
+}
+
+/**
+ * הסבב שבחודש הזה חוזר ממה שהרומה של החודש הקודם השאירה פתוח: `before` – הסבב שם, ו-`plan` – הסבב המתוכנן שלו, כשהוא
+ * חזר באותו חודש, כלומר הארכה שחוצה חודש (`extensionDays`; בעל המוצר, 31/10/2026, טיוטה 455). null בלי הרומה הקודמת.
+ */
+export function carriedStay(ctx, exec) {
+  if (!exec?.cutAtStart || !ctx.prevMonth) return null;
+  const before = ctx.prevMonth.execPairings.at(-1);
+  if (!before?.cutAtEnd || before.legs.at(-1).dst !== exec.legs[0].org) return null;
+  const m = matchPairings(ctx.prevMonth.planPairings, ctx.prevMonth.execPairings).find((x) => x.exec === before);
+  return { before, plan: m?.how === 'exact' && !m.plan.cutAtEnd ? m.plan : null };
+}
+
+/**
+ * התשובה על הארכה: של הסבב עצמו, ובלעדיה של החלק שלו בחודש השכן, כהנחה שניתנת לשינוי. התשובה הראשונה חלה על שני
+ * החודשים (בעל המוצר, 31/10/2026, טיוטה 455).
+ */
+export function extensionAnswer(ctx, exec) {
+  const id = `extended:${exec.id}`;
+  const own = ctx.answer(id);
+  if (own) return own;
+  const before = carriedStay(ctx, exec)?.before;
+  const other = (before && ctx.prevMonth.answers?.[`extended:${before.id}`]) ?? (exec.nextId && ctx.nextAnswers?.[`extended:${exec.nextId}`]);
+  return other?.value ? ctx.assume(id, other.value, other.label ?? other.value, 'התשובה על הסבב בחודש השכן') : null;
 }
 
 /**
@@ -307,7 +348,7 @@ function second_unplanned_activity(ctx, params, rule) {
     const ext = extensionDays(ctx, m);
     if (!ext?.second.length) continue;
     const reason = `extended:${m.exec.id}`;
-    if (ctx.isAsked(reason) || ['agreed', 'force_majeure'].includes(ctx.answer(reason)?.value)) continue;
+    if (ctx.isAsked(reason) || ['agreed', 'force_majeure'].includes(extensionAnswer(ctx, m.exec)?.value)) continue;
     const span = ctx.duty.span(m.exec, { away: true });
     for (const d of ext.second) {
       const what = `${describePairing(m.exec)} התארך ל-${ddmm(d)}`;
@@ -1860,13 +1901,19 @@ function legal_crew_composition(ctx, params, rule) {
  */
 export function overStay(ctx, match) {
   const rule = ctx.rulesWithLogic('stay_extension')[0];
-  if (!rule || match.how !== 'exact') return null;
-  const planned = pairingTimes(match.plan, ctx.tz).end;
-  const actual = pairingTimes(match.exec, ctx.tz, { away: true }).end;
+  const earlier = match.plan ? null : carriedStay(ctx, match.exec);
+  const plan = match.plan ?? earlier?.plan;
+  if (!rule || !plan || (match.plan && match.how !== 'exact')) return null;
+  const planned = pairingTimes(plan, ctx.tz).end;
+  const { end: actual, known } = stayEnd(ctx, match.exec);
   if (planned == null || actual == null || actual - planned <= H(rule.logic.params.over_hours)) return null;
-  const what = `${describePairing(match.exec)}: החזרה לבסיס ב-${ddmm(dateOf(actual))} ${hhmm(actual)}, ` +
-    `${minToHhmm(actual - planned)} אחרי המתוכנן (${ddmm(dateOf(planned))} ${hhmm(planned)})`;
-  return { planned, actual, what, ruleId: rule.id };
+  const { exec } = match;
+  const legs = [...(earlier?.before.legs ?? []), ...exec.legs, ...(exec.nextLegs ?? [])];
+  const whole = describePairing({ ...exec, from: earlier?.before.from ?? exec.from, to: legs.at(-1).date, legs });
+  const when = `(${ddmm(dateOf(planned))} ${hhmm(planned)})`;
+  const what = known ? `החזרה לבסיס ב-${ddmm(dateOf(actual))} ${hhmm(actual)}, ${minToHhmm(actual - planned)} אחרי המתוכנן ${when}`
+    : `לא חזר עד סוף החודש, ${minToHhmm(actual - planned)} אחרי המתוכנן ${when}`;
+  return { planned, actual, what, whole, ruleId: rule.id };
 }
 
 /**
@@ -1879,20 +1926,21 @@ function stay_extension(ctx, params, rule) {
   if (!ctx.hasPlan || !ctx.hasExec) return;
   const key = keyFor(params.report_column);
   for (const m of ctx.matches) {
-    if (!m.plan || !m.exec || ctx.answer(`extended:${m.exec.id}`)?.value !== 'force_majeure') continue;
+    if (!m.exec || extensionAnswer(ctx, m.exec)?.value !== 'force_majeure') continue;
     const over = overStay(ctx, m);
     if (!over) continue;
     ctx.markPairing(m.exec, 'stay_extension');
     ctx.markPairing(m.exec, 'extended');
+    const inMonth = (d) => ctx.timeline.some((y) => y.date === d);
     const landed = dateOf(over.actual);
     const first = [];
     for (let d = addDays(dateOf(over.planned), 1); d <= landed && first.length < params.capped_days; d = addDays(d, 1)) first.push(d);
     const expect = (d, explain) => ctx.expectPairing(m.exec, key, H(params.hours), rule, `${over.what}. אירוע שלא בשליטת החברה.`,
       { date: d, dates: [d], perDay: true, explain });
-    // יממה בחודש הבא אינה ברומה של החודש הזה.
-    for (const d of first.filter((x) => ctx.timeline.some((y) => y.date === x))) expect(d, `אירוע שלא בשליטת החברה: ${params.over_hours} השעות הראשונות.`);
-    if (!first.includes(landed) && ctx.planFreeDay(landed)) expect(landed, 'יום החזרה לבסיס, שלא תוכנן בו כלום.');
-    ctx.note(landed, `${describePairing(m.exec)}: אירוע שלא בשליטת החברה. מגיע אש"ל לכל התקופה, ובתקופה הזאת אין זיכוי שהייה בחו"ל.`, rule, { aside: true });
+    // יממה בחודש השכן אינה ברומה של החודש הזה.
+    for (const d of first.filter(inMonth)) expect(d, `אירוע שלא בשליטת החברה: ${params.over_hours} השעות הראשונות.`);
+    if (!first.includes(landed) && inMonth(landed) && ctx.planFreeDay(landed)) expect(landed, 'יום החזרה לבסיס, שלא תוכנן בו כלום.');
+    ctx.note(inMonth(landed) ? landed : ctx.timeline.at(-1).date, `${describePairing(m.exec)}: אירוע שלא בשליטת החברה. מגיע אש"ל לכל התקופה, ובתקופה הזאת אין זיכוי שהייה בחו"ל.`, rule, { aside: true });
   }
 }
 
