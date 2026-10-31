@@ -69,6 +69,31 @@ test('חודש בלי עמודת ABR: השעות החסרות בשורת האש"
   assert.equal(r.perDiem.stayHours, 28);
 });
 
+const flown = (values) => run(month(2026, 8, { plan: stayPlan, exec: stayPlan, values: { 10: values } }));
+
+test('שהייה חסרה ברומה, גם בלי החלפה (טיוטה 469)', () => {
+  const r = flown({ ABR: '03:00', PDFT: '05:00' });
+  assert.deepEqual(r.perDiem.gaps, ['ברומה חסרה שהייה של 25:00 לעומת החישוב מהטיסות.']);
+  assert.equal(r.perDiem.stayHours, 28);
+  assert.equal(r.perDiem.rome.stayHours, 3);
+});
+
+test('שעות טיסה חסרות ברומה', () => {
+  const r = flown({ ABR: '28:00', PDFT: '03:00' });
+  assert.deepEqual(r.perDiem.gaps, ['ברומה חסרות שעות טיסה של 02:00 לעומת החישוב מהטיסות.']);
+  assert.equal(r.perDiem.flightHours, 5);
+  assert.equal(r.perDiem.rome.flightHours, 3);
+  assert.ok(Math.abs(r.perDiem.usd - r.perDiem.rome.usd - 2 * 14.91) < 0.02);
+});
+
+test('חוסר של עד שעה ועודף ברומה: בלי פער, ולפי הרומה', () => {
+  assert.equal(flown({ ABR: '27:00', PDFT: '04:00' }).perDiem.gaps, undefined);
+  const r = flown({ ABR: '30:00', PDFT: '06:00' });
+  assert.equal(r.perDiem.gaps, undefined);
+  assert.equal(r.perDiem.stayHours, 30);
+  assert.equal(r.perDiem.flightHours, 6);
+});
+
 test('תעודת 777: לפי הטיסה שבוטלה, גם בלי טיסה במקומה', () => {
   const wide = (l) => ({ ...l, ac: 'B789' });
   const m = month(2026, 8, { plan: { 10: [wide(out())], 11: [wide(back())], 20: turn().map(wide) }, exec: { 20: turn().map(wide) }, values: { 20: { ABR: '03:00' } } });

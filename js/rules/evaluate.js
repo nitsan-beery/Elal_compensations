@@ -9,7 +9,7 @@
 import { LOGIC, LOGIC_ORDER, DAY_DUES } from './logic.js';
 import { rulesInEffect, partitionRules, rulesByLogic, classifyCode, codeLabel, codeName, codeNames } from './catalog.js';
 import { buildTimeline, buildPairings, markCarryIn, attachCarried, attachNext, matchPairings, describePairing, describeRoute, pairingParts, fdpParts, sameFdp } from '../model.js';
-import { hoursToMin, minToHhmm } from '../time.js';
+import { hoursToMin, hhmmToMin, minToHhmm } from '../time.js';
 import { OPTIONAL_COLUMNS } from '../pdf/exec.js';
 import { checkLegalLimits, restDefinition, delayFitsFdp, baseReportMinutes, dutyTimes } from './legal.js';
 import { whiteFlightLegs, whiteCrew, contractCrewOf, execFdpGroups, applyOtherReason, keyFor, otherOption } from './duty.js';
@@ -389,8 +389,10 @@ function evaluateFiles({ rulesData, plan = null, exec = null, answers = {}, hist
     const runCompare = () => compare({ out, timeline, execPairings, tz, codes, fdp, hideCode: (d, c) => softStart.has(d) && isRap(c) });
     out.comparison = runCompare();
     if (assignFloating(out)) out.comparison = runCompare();
+    holdSurplus(out);
     explainUnexplained(out, timeline, cal, execPairings.filter((p) => ctx.pairingHandledBy(p, 'diversion_assumed')));
     out.totals = compareTotals(out, exec);
+    checkRomeTotals(out, exec);
     // ימי מילואים לא מתוכננים: MILUP ברומה, בלי קרדיט – לשורת הימים בסיכום בלבד (בעל המוצר, 21/10/2026).
     out.unplannedReserveDays = Object.values(exec.days ?? {}).reduce((n, d) => n + (d.values?.MILUP?.count ?? 0), 0);
     warnMissingColumns(out, exec);
@@ -2446,6 +2448,38 @@ function compareTotals(out, exec) {
     const r = { column: columns[0], columns, expected: sum(columns), reported: reported(columns) };
     return { ...r, ok: r.reported == null ? null : r.reported === r.expected };
   });
+}
+
+/**
+ * הרומה זיכתה יותר מהצפוי ויש שאלה פתוחה בחודש: השורה ממתינה, גם כשהשאלה על יום אחר, כי הרומה רושמת לפעמים על טיסה
+ * סמוכה (10/06/2026: Rig 05:10 על OTP, והשאלה על LTN מ-11/06; בעל המוצר, 31/10/2026, טיוטה 469). אחרי `assignFloating`,
+ * שאינו מחכה לתשובות, ולפני `explainUnexplained`, שמחכה.
+ */
+function holdSurplus(out) {
+  if (!out.questions.length) return;
+  for (const r of out.comparison) {
+    if (COMPARED_COLUMNS.includes(r.column) && r.ok === false && r.reported > r.expected) Object.assign(r, { ok: null, pending: true });
+  }
+}
+
+/**
+ * הסיכום של הרומה מול הימים שלה, ו-CRTOT ו-COMTOT מול הסיכום (בעל המוצר, 31/10/2026, טיוטה 469): סכום שאינו בשום יום
+ * אינו בשום שורה בפירוט. כך נתפסת שגיאת קריאה של ה-PDF, או עמודה שהסיכום סופר ואיננה ב-`COM_PARTS`.
+ */
+function checkRomeTotals(out, exec) {
+  const t = exec.totals ?? {};
+  if (!Object.keys(t).length) return;
+  const days = Object.values(exec.days ?? {});
+  const report = (what, actual, against, of) => {
+    if (actual == null || actual === against) return;
+    out.reviews.push({ message: `${what} ${actual > against ? 'גבוה' : 'נמוך'} ב-${minToHhmm(Math.abs(actual - against))} ${of}.` });
+  };
+  for (const c of ['Credit', 'Rig', 'COM', 'S/C']) {
+    report(`סיכום הרומה ב-${c}`, t[c] ?? 0, days.reduce((s, d) => s + (d.values?.[c]?.min ?? 0), 0), 'מסכום הימים בה');
+  }
+  const sum = (...columns) => columns.reduce((s, c) => s + (t[c] ?? 0), 0);
+  report('CRTOT ברומה', hhmmToMin(exec.reportTotals?.CRTOT), sum('Credit', 'Rig'), 'מ-Credit + Rig');
+  report('COMTOT ברומה', hhmmToMin(exec.reportTotals?.COMTOT), sum('COM', 'S/C'), 'מ-COM + S/C');
 }
 
 /** מה צפוי בעמודה, בהודעה על עמודה חסרה. */

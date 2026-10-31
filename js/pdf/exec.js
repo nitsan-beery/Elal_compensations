@@ -7,8 +7,16 @@
 import { extractPages, toRows, centerX, pageText } from './extract.js';
 import { hhmmToMin, minToHhmm, toNumber, isoDate, daysInMonth } from '../time.js';
 
+/**
+ * עמודות פיצוי שהסיכום של הרומה סופר בתוך COM: HHM הוא הפיצוי על נחיתה מאוחרת בארץ (בעל המוצר,
+ * 08/10/2026; ספטמבר 2026: HHM 00:30 ב-24/09, ובסיכום COM 00:30 ו-HHM 00:30, בלי COM באף יום).
+ * הערך שלהן מתווסף ל-COM של היום. HBH הוא הזיכוי על קריאה מחופשה (בעל המוצר, 21/10/2026; טל, ספטמבר 2026: HBH
+ * 02:30 ב-02/09, ובסיכום COM 03:00 = HBH 02:30 + HHM 00:30). השאר לפי "תרגום קודי פיצוי לתשלום" במצגת של הרומה,
+ * ועדיין לא הופיעו ברומות (טיוטה 469).
+ */
+const COM_PARTS = ['HPZ', 'HPM', 'HPS', 'HHT', 'HAM', 'HTF', 'BSP', 'CRN', 'BMB', 'HNB', 'HBT', 'HHM', 'HBH'];
 /** עמודות שהאפליקציה יודעת להשתמש בהן. חסרה אחת – מדווחים, לא מנחשים. */
-const KNOWN_DAY_COLUMNS = ['Day', 'Src', 'Details', 'Credit', 'Rig', 'FLT', 'TAB', 'DH', 'SIMD', 'SIM', 'CORS', 'VAC', 'SICK', 'SCKFM', 'SBY', 'MEAL', 'COM', 'HHM', 'HBH', 'S/C', 'PDFT', 'ABR', 'NHTL', 'MIL', 'MILUP'];
+const KNOWN_DAY_COLUMNS = ['Day', 'Src', 'Details', 'Credit', 'Rig', 'FLT', 'TAB', 'DH', 'SIMD', 'SIM', 'CORS', 'VAC', 'SICK', 'SCKFM', 'SBY', 'MEAL', 'COM', ...COM_PARTS, 'S/C', 'PDFT', 'ABR', 'NHTL', 'MIL', 'MILUP'];
 /**
  * עמודות שאינן נוגעות לקרדיט ולפיצויים: לא נקראות ולא מוצגות (בעל המוצר, 08/10/2026).
  * Pay Queries – מספר בירורי השכר על היום. בדרך כלל הכותרת נשברת לשתי שורות ("Pay" מעל שורת הכותרות,
@@ -16,13 +24,6 @@ const KNOWN_DAY_COLUMNS = ['Day', 'Src', 'Details', 'Credit', 'Rig', 'FLT', 'TAB
  * נקראת, וגם MILUP – ימי מילואים לא מתוכננים, בלי קרדיט, לשורת הימים בסיכום (21/10/2026).
  */
 const IGNORED_DAY_COLUMNS = ['PICK', 'PICKUP', 'IPP', 'SLS', 'SLSAVE', 'MPPD', 'Pay Queries', 'Pay', 'Queries'];
-/**
- * עמודות פיצוי שהסיכום של הרומה סופר בתוך COM: HHM הוא הפיצוי על נחיתה מאוחרת בארץ (בעל המוצר,
- * 08/10/2026; ספטמבר 2026: HHM 00:30 ב-24/09, ובסיכום COM 00:30 ו-HHM 00:30, בלי COM באף יום).
- * הערך שלהן מתווסף ל-COM של היום. HBH הוא הזיכוי על קריאה מחופשה (בעל המוצר, 21/10/2026; טל, ספטמבר 2026: HBH
- * 02:30 ב-02/09, ובסיכום COM 03:00 = HBH 02:30 + HHM 00:30).
- */
-const COM_PARTS = ['HHM', 'HBH'];
 const LEG_COLUMNS = ['Details', 'Flt', 'Seq', 'DHD', 'DD', 'ORG', 'DST', 'POS', 'STD', 'STA', 'ATD', 'ATA', 'SkdFlt', 'ActFlt', 'SkdDur', 'ActDur', 'Time', 'Occ'];
 
 /** עמודות שהחוקים נשענים עליהן. היעדרן מדווח למשתמש. */
@@ -175,7 +176,7 @@ const isLegHeaderRow = (row) => {
  * עמודה בכותרת שאינה מוכרת ואינה ברשימת ההתעלמות. בפורמט ה-iPad הכותרת הימנית נחתכת ("PI", ‏"AB",
  * ‏"PD"), ולכן תחילית של עמודה מוכרת אינה עמודה חדשה.
  */
-function isUnknownColumn(s) {
+export function isUnknownColumn(s) {
   const named = [...KNOWN_DAY_COLUMNS, ...IGNORED_DAY_COLUMNS];
   return !!s && !named.some((c) => c === s || c.startsWith(s));
 }
@@ -227,12 +228,17 @@ function fillDayRow(day, row, cols) {
     if (col === 'Day' || col === 'Src' || col === 'Details' || IGNORED_DAY_COLUMNS.includes(col)) continue;
     day.values[col] = parseValue(raw);
   }
+  addComParts(day.values);
+}
+
+/** מוסיף ל-COM של היום את עמודות הפיצוי שהסיכום של הרומה סופר בתוכו (`COM_PARTS`). */
+export function addComParts(values) {
   for (const part of COM_PARTS) {
-    const v = day.values[part];
+    const v = values[part];
     if (v?.kind !== 'duration') continue;
-    const min = (day.values.COM?.min ?? 0) + v.min;
-    day.values.COM = { kind: 'duration', min, raw: minToHhmm(min) };
-    delete day.values[part];
+    const min = (values.COM?.min ?? 0) + v.min;
+    values.COM = { kind: 'duration', min, raw: minToHhmm(min) };
+    delete values[part];
   }
 }
 

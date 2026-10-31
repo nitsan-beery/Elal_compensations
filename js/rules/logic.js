@@ -715,7 +715,8 @@ function per_diem_estimate(ctx, params, rule) {
   const romeStay = column(params.stay_column);
   // עמודה שאין בה ערך באף יום אינה ברומה של החודש (הרומה מציגה רק עמודות שיש בהן ערך).
   const stay = romeStay || computed.stay + planned.reduce((s, c) => s + c.extra, 0);
-  const flight = column(params.flight_column) || computed.flight;
+  const romeFlight = column(params.flight_column);
+  const flight = romeFlight || computed.flight;
   const waivedDays = ctx.timeline.filter((d) => {
     const v = d.exec?.values?.[params.hotel_waiver_column];
     return !!(v?.min || v?.count);
@@ -726,11 +727,17 @@ function per_diem_estimate(ctx, params, rule) {
   const flightH = hours(flight);
   const waivedH = hotel.as_stay_hours ? hours(column(params.hotel_waiver_column)) : 0;
   const hotelUsd = hotel.as_stay_hours ? cents(waivedH * stayRate) : waivedDays.length * (hotel.usd_per_day ?? 0);
-  const totalFor = (min) => cents(cents(hours(min) * stayRate) + cents(flightH * rate.flight_usd) + hotelUsd
+  const totalFor = (min, flown = flight) => cents(cents(hours(min) * stayRate) + cents(hours(flown) * rate.flight_usd) + hotelUsd
     - cents((hours(min) + waivedH) * params.stay_deduction_usd));
   // הרומה רושמת את השעות לפעמים על טיסה סמוכה (10/06/2026), ולכן ההשוואה על כל החודש (טיוטה 464).
+  // כל השעות, ולא רק הטיסה המתוכננת: החישוב תואם את ABR ו-PDFT בדיוק כשאין החלפה (טיוטה 469). עמודה ריקה אינה ברומה.
+  const short = (rome, calc) => (rome && calc - rome > params.higher_stay_tolerance_minutes ? calc - rome : 0);
+  const stayShort = short(romeStay, computed.stay);
+  const flightShort = short(romeFlight, computed.flight);
   const gaps = [];
-  let due = stay;
+  if (stayShort) gaps.push(`ברומה חסרה שהייה של ${minToHhmm(stayShort)} לעומת החישוב מהטיסות.`);
+  if (flightShort) gaps.push(`ברומה חסרות שעות טיסה של ${minToHhmm(flightShort)} לעומת החישוב מהטיסות.`);
+  let due = stay + stayShort;
   let paid = Math.max(0, romeStay - computed.stay);
   for (const c of romeStay ? planned : []) {
     const missing = c.extra - Math.min(paid, c.extra);
@@ -740,9 +747,9 @@ function per_diem_estimate(ctx, params, rule) {
     gaps.push(`על ${describePairing(c.plans[0])} מגיע אש"ל לפי הטיסה ${c.word}, שהייה של ${minToHhmm(c.stay)}, וברומה חסרה שהייה של ${minToHhmm(missing)}.`);
   }
   // `rateFrom`/`rateSource`: התקופה של התעריף, ו-'slip' כשהוא מתלוש האש"ל במכשיר הזה ולא מ-rules.json (בעל המוצר, 18/10/2026).
-  ctx.setPerDiem({ flightHours: flightH, stayHours: hours(due), hotelDays: waivedDays.length, usd: totalFor(due), position,
+  ctx.setPerDiem({ flightHours: hours(flight + flightShort), stayHours: hours(due), hotelDays: waivedDays.length, usd: totalFor(due, flight + flightShort), position,
     rateFrom: rate.from, ...(rate.source && { rateSource: rate.source }),
-    ...(position !== ctx.position && { positionAssumed: true }), ...(gaps.length && { gaps, rome: { stayHours: hours(stay), usd: totalFor(stay) } }) });
+    ...(position !== ctx.position && { positionAssumed: true }), ...(gaps.length && { gaps, rome: { stayHours: hours(stay), flightHours: flightH, usd: totalFor(stay) } }) });
 }
 
 /**
