@@ -36,6 +36,9 @@ const snapshot = (r) => ({
   reviews: r.reviews.map((n) => clean(n.message)),
   freeDays: r.freeDays ? `${r.freeDays.free}/${r.freeDays.due}` : null,
   perDiem: r.perDiem ? `${r.perDiem.flightHours}/${r.perDiem.stayHours}/${r.perDiem.usd}${(r.perDiem.gaps ?? []).map((g) => ` | ${clean(g)}`).join('')}` : null,
+  // מגבלות החוק: חריגה, הארכה בביצוע, והרכב צוות שנדרש בתכנון לבד.
+  legal: r.legal ? [...r.legal.violations.map((v) => `✗ ${v.date} ${clean(v.message)}`), ...(r.legal.extensions ?? []).map((v) => `~ ${v.date} ${clean(v.message)}`),
+    ...(r.legal.crewNeeded ?? []).map((c) => `צוות ${c.date} ${clean(c.what)}: ${c.crews}`)] : [],
 });
 
 async function current() {
