@@ -456,6 +456,9 @@ function standbyMissing(ctx, params, rule, credit) {
 }
 
 /** יום שברומה לא רשום בו כלום: לא קוד, לא רגל, ולא בתוך סבב. */
+/** האם תוכננה ביום כוננות מסוג כלשהו. */
+const standbyPlanned = (ctx, date) => (ctx.timeline.find((d) => d.date === date)?.plan?.codes ?? []).some((c) => c.startsWith('SBY'));
+
 /** יום בשהייה של סבב: גם סבב שלא חזר בסוף החודש, שהרגל האחרונה שלו לפני היום הזה (טיוטה 455). */
 const inStay = (p, date) => p.from <= date && (date <= p.to || !!p.cutAtEnd);
 const emptyExecDay = (ctx, day) => !ctx.execCodes(day).length && !(day.exec?.legs ?? []).length &&
@@ -996,13 +999,19 @@ function special_call(ctx, params, rule) {
         ctx.review(`${describePairing(match.exec)}: ${stay.error} לא ניתן לספור יממות לקריאה המיוחדת.`, rule);
         continue;
       }
-      const days = countSpecialCallDays(stay, params, whole, ctx.fdp);
+      const days = countSpecialCallDays(stay, params, whole, ctx.fdp, seriesSpan(ctx, match.exec, stay));
       // רק יממות החודש הזה: השאר ברומה של החודש השכן (טיוטה 428).
       days.counted = days.counted.filter((d) => ctx.timeline.some((x) => x.date === d));
       // יום חופשה שנקראת ממנו (`vacation_recall`): הפיצוי עליו הוא על ביטול החופשה, ולא קריאה מיוחדת – גם מעל הסף
       // של היממה השנייה – ואין עליו הערה שאין קריאה מיוחדת (בעל המוצר, 21/10/2026, טיוטה 387; טל: ZRH נחתה ב-02/09).
       const recalled = (d) => ctx.pairingHandledBy(match.exec, `vacation_recall:${d}`);
       days.counted = days.counted.filter((d) => !recalled(d));
+      // יממה שתוכננה בה כוננות אינה קריאה מיוחדת (ישן כ"ה ס' 12.ב), ועליה הגבוה מבין הרגליים בה לערך הכוננות. החריג:
+      // זכייה במכרז (2024 ס' 50; טיוטה 456).
+      if (!bid && days.counted.some((d) => standbyPlanned(ctx, d))) {
+        days.counted = days.counted.filter((d) => !standbyPlanned(ctx, d));
+        compareStandbyFlown(ctx, match.exec, ctx.rulesWithLogic('standby_activation')[0] ?? rule);
+      }
       if (days.skipped && recalled(days.skipped.date)) delete days.skipped;
       if (!days.counted.length) {
         // סבב שיצא בחודש הקודם: היממה היחידה בחודש לא עמדה בסף, והרומה רשמה עליה S/C (טיוטה 428).
@@ -1185,6 +1194,8 @@ function extendedPairing(ctx, params, rule, match, answer) {
   if (match.how === 'dates' && !answer) return false;
   const days = ext.free;
   const over = overStay(ctx, match);
+  // יום כוננות שהסבב נמשך אליו: בלי קריאה מיוחדת, והגבוה מבין הרגליים בו לערך הכוננות (טיוטה 456).
+  if (ext.days.some((d) => standbyPlanned(ctx, d))) compareStandbyFlown(ctx, exec, ctx.rulesWithLogic('standby_activation')[0] ?? rule);
   if (!days.length && !ext.second.length && !over) return false;
   const id = `extended:${exec.id}`;
   const second = ctx.rulesWithLogic('second_unplanned_activity')[0]?.logic.params;
@@ -1293,7 +1304,7 @@ function carriedInCall(ctx, pairing, params, rule, column) {
  * (מנוחה אמיתית לפני, לא רק חיבור בין רגליים) זו יממת עבודה נפרדת לפי 12.ג, ונספרת בלי
  * בדיקת הסף: 19–20/06/2025, TLV-LCA ב-19 ואחרי מנוחה PFO-LCA-TLV שיוצאת כולה ב-20.
  */
-function countSpecialCallDays(stay, params, pairing, fdp) {
+function countSpecialCallDays(stay, params, pairing, fdp, series = null) {
   const firstDay = Math.floor(stay.start / 1440);
   const lastDay = Math.floor((stay.end - 1) / 1440);
   const all = [];
@@ -1305,8 +1316,8 @@ function countSpecialCallDays(stay, params, pairing, fdp) {
   if (pairing && lastFdpStartsOn(pairing, fdp, all.at(-1))) return { counted: all, all, ownFdp: true };
 
   // `lastWhy`: ההסבר בשורה של היממה האחרונה, כשהיא נספרת. `skipped`: היממה שלא נספרה, ולמה.
-  const total = stay.end - stay.start;
-  const inLast = stay.end - lastDay * 1440;
+  const total = (series?.end ?? stay.end) - (series?.start ?? stay.start);
+  const inLast = (series?.end ?? stay.end) - lastDay * 1440;
   const gap = H(params.second_day_min_gap_hours);
   const min = H(params.second_day_min_hours);
   const which = all.length === 2 ? 'השנייה' : 'האחרונה';
@@ -1317,6 +1328,20 @@ function countSpecialCallDays(stay, params, pairing, fdp) {
     all,
     skipped: { date: all.at(-1), why: `אין קריאה מיוחדת על היממה ${which}. סה"כ זמן שהייה ${minToHhmm(total)}, מתוכן ${minToHhmm(inLast)} ביממה ${which}. נדרשת ${need}.` },
   };
+}
+
+/**
+ * סדרת טיסות דרך הבסיס: סבבים באותו FDP, בלי חזרה לבסיס למנוחה (ישן כ"ה ס' 1.יד). השהייה נגמרת רק בנחיתה האחרונה (ס' 1.יא(2)),
+ * ולכן הסף של היממה השנייה נמדד על כולם, בדקות מתחילת היממה הראשונה של `stay`. null כשהסבב לבדו (בעל המוצר, 31/10/2026, טיוטה 456).
+ */
+function seriesSpan(ctx, pairing, stay) {
+  if (!ctx.fdp) return null;
+  const group = execFdpGroups(ctx, ctx.execPairings, ctx.fdp.legalRestMin).find((g) => g.includes(pairing));
+  if (!group || group.length < 2) return null;
+  const spans = group.map((p) => pairingTimes(p, ctx.tz, { away: true }));
+  if (spans.some((s) => s.start == null || s.end == null)) return null;
+  const zero = at(stay.first, 0);
+  return { start: Math.min(...spans.map((s) => s.start)) - zero, end: Math.max(...spans.map((s) => s.end)) - zero };
 }
 
 /** מספרי הטיסות של הסבב לפתיח של הערה: LY5109-LY5110. מספר שחוזר ברצף נכתב פעם אחת. */
@@ -2407,7 +2432,7 @@ function compareStandbyFlown(ctx, pairing, rule) {
     // לשינוי, שבו אין סכומים (בעל המוצר, 15/10/2026).
     const day = ctx.timeline.find((d) => d.date === days[0].date);
     const leg = (day?.exec?.legs ?? []).find((l) => l.flight) ?? pairing.legs?.find((l) => l.flight);
-    ctx.note(days[0].date, `${leg ? `${leg.flight} ` : ''}הופעלת מכוננות, וקרדיט ${partial ? 'הרגליים בימי הכוננות' : 'הסליפ'} (${minToHhmm(credit)}) גבוה מערך הכוננות, ולכן אין תוספת.`,
+    ctx.note(days[0].date, `${leg ? `${leg.flight} ` : ''}${days[0].date === pairing.from ? 'הופעלת מכוננות' : 'טסת ביום כוננות'}, וקרדיט ${partial ? 'הרגליים בימי הכוננות' : 'הסליפ'} (${minToHhmm(credit)}) גבוה מערך הכוננות, ולכן אין תוספת.`,
       rule, { pairingId: pairing.id, aside: true });
   }
 }
