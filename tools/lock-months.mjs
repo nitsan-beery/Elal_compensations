@@ -2,29 +2,23 @@
 // node tools/lock-months.mjs            משווה לתוצאה הנעולה, ומציג כל הבדל.
 // node tools/lock-months.mjs --write    כותב את התוצאה הנוכחית. מה שנכתב כך "לא מאושר" עד --approve.
 // node tools/lock-months.mjs --approve 2026-08,2026-09   מסמן חודשים שבעל המוצר אישר.
-// התיקייה: ELAL_SAMPLES, ובלעדיו התיקייה ב-OneDrive.
+// החודשים של בעל המוצר: מקובץ הגיבוי האחרון שנשמר (`tools/backup.mjs`). הטייסים האחרים: מ-samples (ELAL_SAMPLES, ובלעדיו התיקייה ב-OneDrive).
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { parsePlan } from '../js/pdf/plan.js';
 import { parseExec } from '../js/pdf/exec.js';
 import { evaluate } from '../js/rules/evaluate.js';
+import { projectDir, newestBackup, ownerMonths, ownerStaff } from './backup.mjs';
 
-const base = process.env.ELAL_SAMPLES ?? path.join(os.homedir(), 'OneDrive/Code_Dev/Claude/Elal_compensations/samples');
-const lockFile = path.join(path.dirname(base), 'locked-months.json');
+const base = path.join(projectDir, 'samples');
+const lockFile = path.join(projectDir, 'test', 'locked-months.json');
 const rulesData = JSON.parse(fs.readFileSync(new URL('../rules.json', import.meta.url), 'utf8'));
 const clean = (s) => String(s ?? '').replace(/[⁦-⁩‏]/g, '');
-// התשובות השמורות באפליקציה: מהגיבוי האחרון, כי קובצי התשובות בתיקיית הדוגמאות חלקיים.
-const backupDir = path.join(path.dirname(base), 'גיבוי חודשים שמורים');
-const newest = fs.existsSync(backupDir) ? fs.readdirSync(backupDir).filter((f) => f.endsWith('.json')).sort().at(-1) : null;
-const saved = new Map((newest ? JSON.parse(fs.readFileSync(path.join(backupDir, newest), 'utf8')).months : [])
-  .map((m) => [`${m.period.year}-${String(m.period.month).padStart(2, '0')}`, m.answers ?? {}]));
 const prevKey = (k) => { let [y, m] = k.split('-').map(Number); if (--m === 0) { m = 12; y--; } return `${y}-${String(m).padStart(2, '0')}`; };
 
-const load = async (dir, planFile, execFile, answersFile) => ({
-  plan: planFile ? await parsePlan(fs.readFileSync(path.join(dir, planFile))) : null,
-  exec: execFile ? await parseExec(fs.readFileSync(path.join(dir, execFile))) : null,
-  answers: answersFile && fs.existsSync(path.join(dir, answersFile)) ? JSON.parse(fs.readFileSync(path.join(dir, answersFile), 'utf8')) : {},
+const parse = async (planPdf, execPdf) => ({
+  plan: planPdf ? await parsePlan(planPdf) : null,
+  exec: execPdf ? await parseExec(execPdf) : null,
 });
 
 /** מה שננעל: כל מה שהמשתמש רואה ומשפיע על התוצאה, בלי הטקסט של השאלות. */
@@ -43,12 +37,14 @@ const snapshot = (r) => ({
 
 async function current() {
   const out = {};
-  const files = fs.readdirSync(base);
-  const months = files.filter((f) => /^duty-plan-\d{4}-\d{2}\.pdf$/.test(f)).map((f) => f.slice(10, 17)).sort();
+  const backup = newestBackup();
+  if (!backup) throw new Error('אין קובץ גיבוי בתיקיית גיבוי חודשים שמורים.');
+  const own = ownerMonths(backup, ownerStaff(rulesData));
+  const months = [...own.keys()].filter((k) => own.get(k).plan).sort();
   const data = new Map();
   for (const k of months) {
-    const m = await load(base, `duty-plan-${k}.pdf`, files.find((f) => f.startsWith(`crewpay-${k}`)), `answers-${k}.json`);
-    data.set(k, { ...m, answers: { ...m.answers, ...saved.get(k) } });
+    const m = own.get(k);
+    data.set(k, { ...await parse(m.plan, m.exec), answers: m.answers });
   }
   for (const k of months) {
     const m = data.get(k);
@@ -61,12 +57,13 @@ async function current() {
     out[k] = snapshot(evaluate({ rulesData, plan: m.plan, exec: m.exec, answers: m.answers, history, next }));
     out[`${k}-plan`] = snapshot(evaluate({ rulesData, plan: m.plan, exec: null, answers: {}, history, next }));
   }
-  for (const name of files.filter((f) => fs.statSync(path.join(base, f)).isDirectory())) {
+  for (const name of fs.readdirSync(base).filter((f) => fs.statSync(path.join(base, f)).isDirectory())) {
     const dir = path.join(base, name);
     const list = fs.readdirSync(dir);
     const planFile = list.find((f) => /duty-plan/.test(f));
     if (!planFile) continue;
-    const m = await load(dir, planFile, list.find((f) => /rew.*ay.*\.pdf$/i.test(f)), null);
+    const execFile = list.find((f) => /rew.*ay.*\.pdf$/i.test(f));
+    const m = await parse(fs.readFileSync(path.join(dir, planFile)), execFile ? fs.readFileSync(path.join(dir, execFile)) : null);
     out[`p-${name}`] = snapshot(evaluate({ rulesData, plan: m.plan, exec: m.exec, answers: {}, history: [] }));
   }
   return out;

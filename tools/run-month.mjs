@@ -1,6 +1,7 @@
 // כלי פיתוח: מריץ את מנוע החוקים על חודש ומדפיס את הדוח. לא חלק מהאפליקציה.
-// שימוש:  node tools/run-month.mjs --plan samples/duty-plan-2026-07.pdf --exec samples/crewpay-2026-07.pdf [--answers samples/answers-2026-07.json]
-// החודשים הקודמים (למגבלות החוק) נטענים מאותה תיקייה, לפי שמות הקבצים, כמו ההיסטוריה באפליקציה.
+// שימוש:  node tools/run-month.mjs --month 2026-07     חודש של בעל המוצר, מקובץ הגיבוי האחרון שנשמר, עם התשובות שבו.
+//         node tools/run-month.mjs --plan samples/duty-plan-2026-07.pdf --exec samples/crewpay-2026-07.pdf [--answers samples/answers-2026-07.json]
+// החודשים הקודמים (למגבלות החוק) נטענים מאותו מקור: מהגיבוי, או מאותה תיקייה לפי שמות הקבצים, כמו ההיסטוריה באפליקציה.
 // --no-history: בלי חודשים קודמים.
 // --calendar <קובץ>: השלמות מהיומן, כפי שהאפליקציה שומרת אותן ({flights, standby}; `parseEvents` ב-js/calendar.js).
 // --ignore-assumed <מזהה,מזהה>: הנחות שהמשתמש ביטל ("שנה" על הנחה ב"תשובות שנשמרו"; `assumedIgnored`).
@@ -11,54 +12,63 @@ import { parsePlan } from '../js/pdf/plan.js';
 import { parseExec } from '../js/pdf/exec.js';
 import { evaluate } from '../js/rules/evaluate.js';
 import { minToHhmm } from '../js/time.js';
+import { newestBackup, ownerMonths, ownerStaff } from './backup.mjs';
 
 const arg = (name) => { const i = process.argv.indexOf(`--${name}`); return i > 0 ? process.argv[i + 1] : null; };
 const rulesData = JSON.parse(fs.readFileSync(new URL('../rules.json', import.meta.url), 'utf8'));
-const plan = arg('plan') ? await parsePlan(fs.readFileSync(arg('plan'))) : null;
-const exec = arg('exec') ? await parseExec(fs.readFileSync(arg('exec'))) : null;
-const answers = arg('answers') ? JSON.parse(fs.readFileSync(arg('answers'), 'utf8')) : {};
+const own = arg('month') ? ownerMonths(newestBackup(), ownerStaff(rulesData)) : null;
+const chosen = own?.get(arg('month'));
+if (own && !chosen) throw new Error(`אין בגיבוי את החודש ${arg('month')}.`);
+const planPdf = chosen ? chosen.plan : arg('plan') && fs.readFileSync(arg('plan'));
+const execPdf = chosen ? chosen.exec : arg('exec') && fs.readFileSync(arg('exec'));
+const plan = planPdf ? await parsePlan(planPdf) : null;
+const exec = execPdf ? await parseExec(execPdf) : null;
+const answers = arg('answers') ? JSON.parse(fs.readFileSync(arg('answers'), 'utf8')) : chosen?.answers ?? {};
 const history = process.argv.includes('--no-history') ? [] : await loadHistory();
 const calendar = arg('calendar') ? JSON.parse(fs.readFileSync(arg('calendar'), 'utf8')) : null;
 const assumedIgnored = arg('ignore-assumed')?.split(',') ?? [];
 const calendarHistory = arg('calendar-history') ? JSON.parse(fs.readFileSync(arg('calendar-history'), 'utf8')) : null;
 
-async function loadHistory() {
-  const ref = arg('plan') ?? arg('exec');
-  const period = (plan ?? exec)?.period;
-  if (!ref || !period) return [];
-  const dir = path.dirname(ref);
+// חודש סמוך, לפי 'YYYY-MM': מהגיבוי, או מהתיקייה של הקובץ.
+async function neighbour(key) {
+  if (own) {
+    const m = own.get(key);
+    return m ? { plan: m.plan ? await parsePlan(m.plan) : null, exec: m.exec ? await parseExec(m.exec) : null, answers: m.answers } : null;
+  }
+  const dir = path.dirname(arg('plan') ?? arg('exec'));
   const files = fs.readdirSync(dir);
+  const p = files.find((f) => f === `duty-plan-${key}.pdf`);
+  const e = files.find((f) => f.startsWith(`crewpay-${key}`) && f.endsWith('.pdf'));
+  if (!p && !e) return null;
+  const answersFile = path.join(dir, `answers-${key}.json`);
+  return { plan: p ? await parsePlan(fs.readFileSync(path.join(dir, p))) : null, exec: e ? await parseExec(fs.readFileSync(path.join(dir, e))) : null,
+    answers: fs.existsSync(answersFile) ? JSON.parse(fs.readFileSync(answersFile, 'utf8')) : null };
+}
+
+async function loadHistory() {
+  const period = (plan ?? exec)?.period;
+  if (!period) return [];
   const out = [];
   let { year, month } = period;
   for (let i = 0; i < 13; i++) {
     [year, month] = month === 1 ? [year - 1, 12] : [year, month - 1];
     const key = `${year}-${String(month).padStart(2, '0')}`;
-    const p = files.find((f) => f === `duty-plan-${key}.pdf`);
-    const e = files.find((f) => f.startsWith(`crewpay-${key}`) && f.endsWith('.pdf'));
-    if (!p && !e) break;
+    const m = await neighbour(key);
+    if (!m) break;
     // כמו באפליקציה (`historyFor`): גם התכנון והתשובות של החודש, לרצף שחוצה חודש (טיוטות 431, 433).
-    const answersFile = path.join(dir, `answers-${key}.json`);
-    out.push({ period: { year, month },
-      plan: p ? await parsePlan(fs.readFileSync(path.join(dir, p))) : null,
-      exec: e ? await parseExec(fs.readFileSync(path.join(dir, e))) : null,
-      answers: fs.existsSync(answersFile) ? JSON.parse(fs.readFileSync(answersFile, 'utf8')) : null });
+    out.push({ period: { year, month }, ...m });
   }
   return out;
 }
 
-// החודש הבא, כשהוא באותה תיקייה (טיוטה 438). --no-history מבטל גם אותו.
+// החודש הבא, כשהוא באותו מקור (טיוטה 438). --no-history מבטל גם אותו.
 async function loadNext() {
-  const ref = arg('plan') ?? arg('exec');
   const period = (plan ?? exec)?.period;
-  if (!ref || !period) return null;
-  const dir = path.dirname(ref);
-  const files = fs.readdirSync(dir);
+  if (!period) return null;
   const [year, month] = period.month === 12 ? [period.year + 1, 1] : [period.year, period.month + 1];
   const key = `${year}-${String(month).padStart(2, '0')}`;
-  const p = files.find((f) => f === `duty-plan-${key}.pdf`);
-  const e = files.find((f) => f.startsWith(`crewpay-${key}`) && f.endsWith('.pdf'));
-  if (!p && !e) return null;
-  return { period: { year, month }, plan: p ? await parsePlan(fs.readFileSync(path.join(dir, p))) : null, exec: e ? await parseExec(fs.readFileSync(path.join(dir, e))) : null };
+  const m = await neighbour(key);
+  return m && { period: { year, month }, plan: m.plan, exec: m.exec };
 }
 const next = process.argv.includes('--no-history') ? null : await loadNext();
 
