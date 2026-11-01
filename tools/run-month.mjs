@@ -112,6 +112,7 @@ if (r.mode === 'plan') {
 }
 
 console.log('\n== סיכומים ==');
+if (r.stayRatio) console.log(`${r.stayRatio.over ? '✗' : '✓'} יחס טיסה-שהייה 1:${r.stayRatio.ratio.toFixed(2)} (טיסה ${minToHhmm(r.stayRatio.flight)}, שהייה ${minToHhmm(r.stayRatio.stay)}${r.stayRatio.maxStay ? `, מתוך ${r.stayRatio.maxStay / 60}` : `, מקסימום 1:${r.stayRatio.max}`})`);
 if (r.freeDays) console.log(`${r.freeDays.free >= r.freeDays.due ? '✓' : '✗'} ימים פנויים ${r.freeDays.free} מתוך ${r.freeDays.due}`);
 for (const t of r.totals) console.log(`${t.ok == null ? '?' : t.ok ? '✓' : '✗'} ${t.column.padEnd(7)} צפוי ${minToHhmm(t.expected)}  בדוח ${minToHhmm(t.reported)}`);
 if (r.perDiem) console.log(`אש"ל צפוי: ${r.perDiem.flightHours.toFixed(2)} שעות טיסה, ${r.perDiem.stayHours.toFixed(2)} שעות שהייה${r.perDiem.hotelDays ? `, ${r.perDiem.hotelDays} ימי ויתור מלון` : ''}, סה"כ ${r.perDiem.usd.toFixed(2)}$ (${r.perDiem.position}${r.perDiem.positionAssumed ? ', תפקיד לא ידוע' : ''})`);

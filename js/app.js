@@ -13,7 +13,7 @@ import * as store from './store.js';
 import * as calendar from './calendar.js';
 
 // מספר הגרסה של הקוד שרץ בדף. עולה יחד עם CACHE ב-sw.js, לאותו מספר (בעל המוצר, 15/10/2026).
-const APP_VERSION = 357;
+const APP_VERSION = 358;
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -1221,7 +1221,7 @@ const gapClass = (diff) => (diff > 0 ? 'gain' : 'bad');
 const signed = (min) => (min > 0 ? '+' : '') + minToHhmm(min);
 
 const PRINT_BUTTON = '<button class="btn no-print" data-action="print">ייצוא PDF</button>';
-const hasTotals = (res) => res.totals.length > 0 || planTotals(res).length > 0 || !!res.freeDays || !!res.perDiem;
+const hasTotals = (res) => res.totals.length > 0 || planTotals(res).length > 0 || !!res.stayRatio || !!res.freeDays || !!res.perDiem;
 const usd = (v) => v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 /** האש"ל הצפוי, שורה תחתונה בסיכום אחרי ספירת הימים (בעל המוצר, 09/10/2026). */
@@ -1262,6 +1262,7 @@ const totalLabel = (column) => (column === 'Rig'
 
 function renderTotals(res) {
   const fd = res.freeDays;
+  const sr = res.stayRatio;
   if (!hasTotals(res)) return '';
   // כל עוד יש שאלות פתוחות, פער בסיכום אינו ממצא: הצפוי תלוי בתשובות.
   const pending = res.questions.length > 0;
@@ -1284,7 +1285,12 @@ function renderTotals(res) {
         ${totalLabel(t.column)}
         <div class="val num">${minToHhmm(t.expected)}</div>
         <div class="rep">צפוי לפי התכנון</div>
-      </div>`).join('')}${fd ? `
+      </div>`).join('')}${sr ? `
+      <div class="total free ${sr.over ? 'warn' : 'ok'}">
+        <div class="label" style="direction:rtl">יחס טיסה-שהייה בתכנון</div>
+        <div class="val num">1:${sr.ratio.toFixed(2)}</div>
+        <div class="rep">${sr.maxStay ? `שהייה <span class="num">${minToHhmm(sr.stay)}</span> מתוך <span class="num">${sr.maxStay / 60}</span>` : `מקסימום <span class="num">1:${sr.max}</span>`}${sr.over ? '' : ' ✓'}</div>
+      </div>` : ''}${fd ? `
       <div class="total free ${fd.free >= fd.due ? 'ok' : 'warn'}">
         <div class="label" style="direction:rtl">ימים פנויים בתכנון</div>
         <div class="val num">${fd.free}</div>

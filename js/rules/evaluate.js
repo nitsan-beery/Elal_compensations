@@ -20,6 +20,37 @@ import { baseTime } from '../airports.js';
 /** השאלות שב"סיבה אחרת" שלהן בוחרים קרדיט (`otherOption`). */
 const CREDIT_ANSWERS = ['cancelled:', 'unplanned:', 'standby_missing:', 'base_rest:', 'standby_bid:', 'report_day:'];
 
+/**
+ * יחס טיסה-שהייה בתכנון (הסכם 2014; 2018 ס' 60–62; בעל המוצר, 01/11/2026, טיוטה 477). השהייה לפי הסבבים (ישן כ"ה ס' 1.יא),
+ * עד גבול החודש, ולא Time away from base של התכנון, שמוסיף זיכוי על ימי חופשה וקרקע. שעות הטיסה הן Flight time ועוד DH.
+ * מתחת ל-`low_flight_hours` המגבלה היא שעות שהייה, כולל פקודת נסיעה; אחרת יחס, בלי סבב שיום הדרכה נמצא בתוך השהייה שלו.
+ */
+function stayRatio(limits, { fleet, plan, pairings, timeline, tz, isTraining }) {
+  const summaryFlight = plan?.summary?.flightTime;
+  if (!limits?.fleets.includes(fleet) || !summaryFlight) return null;
+  const from = at(timeline[0].date, 0);
+  const to = at(timeline.at(-1).date, 1440);
+  const duration = (legs) => legs.reduce((sum, l) => { const t = legTimes(l, tz); return sum + t.sta - t.std; }, 0);
+  const parts = pairings.map((p) => {
+    const t = pairingTimes(p, tz, { away: true });
+    const start = Math.max(t.start ?? from, from);
+    const end = Math.min(t.end ?? to, to);
+    return { stay: end - start, dh: duration(p.legs.filter((l) => l.dh)), flight: duration(p.legs),
+      training: timeline.some((d) => at(d.date, 0) >= start && at(d.date, 1440) <= end && isTraining(d)) };
+  });
+  const total = (list, key) => list.reduce((sum, x) => sum + x[key], 0);
+  const all = summaryFlight + total(parts, 'dh');
+  if (all < hoursToMin(limits.low_flight_hours)) {
+    const stay = total(parts, 'stay');
+    const maxStay = hoursToMin(limits.low_flight_max_stay_hours);
+    return { flight: all, stay, ratio: stay / all, max: limits.max_ratio, maxStay, over: stay > maxStay };
+  }
+  const flight = all - total(parts.filter((x) => x.training), 'flight');
+  if (flight <= 0) return null;
+  const stay = total(parts.filter((x) => !x.training), 'stay');
+  return { flight, stay, ratio: stay / flight, max: limits.max_ratio, maxStay: null, over: stay > limits.max_ratio * flight };
+}
+
 /** עמודות הדוח שכל סוג ציפייה נבדק מולן. */
 const KEY_COLUMNS = {
   flight: ['Credit', 'FLT+DH'],
@@ -200,6 +231,7 @@ function evaluateFiles({ rulesData, plan = null, exec = null, answers = {}, hist
     comparison: [],
     totals: [],
     freeDays: null,
+    stayRatio: null,
     perDiem: null,
     legal: null,
   };
@@ -260,6 +292,8 @@ function evaluateFiles({ rulesData, plan = null, exec = null, answers = {}, hist
       for (const x of p.legs) if (x.flight) whiteIds.set(`${x.date}|${x.flight}`, `white:${l.date}:${l.flight}`);
     }
   }
+  out.stayRatio = stayRatio(rulesData.stay_ratio, { fleet, plan, pairings: planPairings, timeline, tz,
+    isTraining: (day) => ctx.planActivityCodes(day).some((c) => ctx.isTrainingCode(c) || c.startsWith(rulesData.stay_ratio.sim_code_prefix)) });
   const whiteCrewOf = (date, flight) => {
     const id = [0, -1, 1].map((k) => whiteIds.get(`${new Date(Date.parse(date) + k * 864e5).toISOString().slice(0, 10)}|${flight}`)).find(Boolean);
     return id ? whiteCrew(ctx.answer(id)?.value) : undefined;
