@@ -246,6 +246,7 @@ function evaluateFiles({ rulesData, plan = null, exec = null, answers = {}, hist
   const softStart = exec ? softStartDays({ timeline, execPairings, planPairings, codes, answer: ctx.answer, domicile, placed: ctx.placedStandby,
     snapshots: (calendarHistory?.length ? calendarHistory : calendar ? [calendar] : []).map(withoutKept), isRap, reportBefore: duty.reportBefore }) : new Set();
   ctx.softStart = (date) => softStart.has(date);
+  ctx.isSick = isSick;
   for (const d of softStart) ctx.placedStandby.delete(d);
 
   // מגבלות החוק על התכנון (בעל המוצר, 03/10/2026). לפני החוקים, כדי ששאלת הרכב הצוות שלהן
@@ -319,7 +320,8 @@ function evaluateFiles({ rulesData, plan = null, exec = null, answers = {}, hist
   for (const m of matches) {
     if (m.how === 'unplanned' && m.exec.legs.every((l) => l.prevMonth)) { m.how = 'carried_in'; ctx.markPairing(m.exec, 'carried_in'); }
   }
-  explainByCarriedStay(matches, fdp);
+  const standbyDay = (date) => ctx.placedStandby.has(date) || (timeline.find((d) => d.date === date)?.plan?.codes ?? []).some(isStandbyCode);
+  explainByCarriedStay(matches, fdp, standbyDay);
   splitPlacedStandby(matches, ctx.placedStandby, ctx);
   explainByActivity(matches, timeline, codes, isSick, movableCodeTest(supported), reserveCodeTest(supported), ctx);
   out.changes = mergeCarriedStay(matches.map((m) => describeMatch(m, codes)), matches);
@@ -377,8 +379,8 @@ function evaluateFiles({ rulesData, plan = null, exec = null, answers = {}, hist
   splitChangesByFdp(out, matches, ctx, fdp);
   // טיסה לא מתוכננת בימים שתוכננה בהם פעילות שאינה סבב: הקודים בצד התכנון, ולא "—" (בעל המוצר, 21/10/2026; טיוטה 392).
   for (const c of out.changes) {
-    if (c.how !== 'unplanned' || c.plan) continue;
-    c.plan = plannedCodes(timeline, codes, c.date, c.lastDay ?? c.date);
+    if (c.how !== 'unplanned') continue;
+    c.plan ||= plannedCodes(timeline, codes, c.date, c.lastDay ?? c.date);
     if (ctx.pairingHandledBy({ id: c.execId }, 'standby_activated')) c.label = 'הפעלה מכוננות';
     else if (c.plan && !c.label.startsWith('המשך סבב')) c.label = 'פעילות לא מתוכננת';
   }
@@ -1380,7 +1382,9 @@ function fleetOf(plan) {
  * ימי כוננות בסבב שבוטל: יום עם קוד כוננות ברומה, בימי סבב מתוכנן שלא בוצע, הוא כמו יום כוננות בתכנון, כי החברה
  * רשאית להציב שם בכוננות, וכל הוראות הכוננות חלות. אחרי מחלה בסבב (2018 ס' 92; בעל המוצר, 31/10/2026; טיוטה 472) –
  * `sick`. בלי מחלה (2024 ס' 53; ישן כ"ה ס' 9.ד; טיוטה 473) – `cancelled`, אלא אם המשתמש ענה על הסבב או ביטל את
- * ההנחה. סבב שלא חזר בחודש הקודם ולא בוצע: גם ב-1 לחודש, ומעבר לו אינו ידוע. מפה מתאריך לסוג.
+ * ההנחה. סבב שלא חזר בחודש הקודם ולא בוצע: גם ב-1 לחודש, ומעבר לו אינו ידוע. יום של מילואים, קרקע או סימולטור שלא
+ * התקיימו – `activity`: מי שהוצב בו לכוננות אינו בקריאה מיוחדת (ישן כ"ה ס' 12.ב, 12.י; בעל המוצר, 01/11/2026; טיוטה 474).
+ * מפה מתאריך לסוג.
  */
 function placedStandbyDays(matches, timeline, codes, isSick, ctx) {
   const has = (day, test) => execCodesOf(day, codes).some(test);
@@ -1389,7 +1393,7 @@ function placedStandbyDays(matches, timeline, codes, isSick, ctx) {
     if (m.how !== 'cancelled' && m.how !== 'dates') continue;
     const id = `cancelled:${m.plan.id}`;
     const open = !ctx.answer(id) && !ctx.assumeIgnored(id);
-    let sick = false;
+    let sick = !!sickInCarried(m.plan, ctx.prevMonth, codes, isSick);
     for (const day of timeline.filter((d) => d.date >= m.plan.from && d.date <= (m.plan.shownTo ?? m.plan.to))) {
       if ((sick || open) && has(day, isStandbyCode)) out.set(day.date, sick ? 'sick' : 'cancelled');
       sick ||= has(day, isSick);
@@ -1400,7 +1404,26 @@ function placedStandbyDays(matches, timeline, codes, isSick, ctx) {
   if (cut?.cutAtEnd && !before.execPairings.at(-1)?.cutAtEnd && has(timeline[0], isStandbyCode)) {
     out.set(timeline[0].date, before.timeline.some((d) => d.date >= cut.from && has(d, isSick)) ? 'sick' : 'cancelled');
   }
+  for (const day of timeline) {
+    if (out.has(day.date) || !has(day, isStandbyCode)) continue;
+    const held = (c) => has(day, (x) => x === c || x === c.slice(0, 5));
+    if (ctx.planActivityCodes(day).some((c) => !isStandbyCode(c) && !isSick(c) && !held(c))) out.set(day.date, 'activity');
+  }
   return out;
+}
+
+/**
+ * סבב מתוכנן שהתחיל בחודש הקודם: יום המחלה הראשון בחלק שלו שם, כשהרומה הקודמת שמורה (טיוטה 474).
+ * `{ date, code, kind }` או null.
+ */
+function sickInCarried(plan, before, codes, isSick) {
+  const cut = before?.hasExec ? before.planPairings.at(-1) : null;
+  if (!plan.cutAtStart || !cut?.cutAtEnd) return null;
+  for (const day of before.timeline) {
+    const code = day.date >= cut.from ? execCodesOf(day, codes).find(isSick) : null;
+    if (code) return { date: day.date, code, kind: 'sick' };
+  }
+  return null;
 }
 
 /**
@@ -1448,9 +1471,12 @@ function explainByActivity(matches, timeline, codes, isSick, isMovable, isReserv
       if (day.date < m.plan.from || day.date > m.plan.to) continue;
       for (const code of execCodesOf(day, codes)) found.push({ date: day.date, code, kind: kindOf(code) });
     }
+    const earlier = sickInCarried(m.plan, ctx.prevMonth, codes, isSick);
+    if (earlier) found.unshift(earlier);
     if (!found.length) continue;
     const kinds = new Set(found.map((f) => f.kind));
-    if (kinds.has('other')) continue; // קוד לא מוכר, או פעילות שאפשר להזיז: לא מסיקים ממנו, והשאלה תישאל
+    // קוד לא מוכר, או פעילות שאפשר להזיז: לא מסיקים ממנו, והשאלה תישאל, אלא אם בימי הסבב גם מחלה (טיוטה 474).
+    if (kinds.has('other') && !kinds.has('sick')) continue;
     const id = `cancelled:${m.plan.id}`;
     if (kinds.has('reserve') && (ctx.answer(id) || !ctx.assume(id, 'reserve', 'בוטל עקב מילואים', 'ברומה רשום מילואים בימי הסבב'))) continue;
     m.replacedBy = found;
@@ -1470,14 +1496,16 @@ function explainByActivity(matches, timeline, codes, isSick, isMovable, isReserv
  * על הימים שלא תוכנן בהם סבב (`special_call`). כך גם כשהסבב מהחודש הקודם היה בתכנון (בעל המוצר,
  * 08/10/2026; 28/02–08/03/2026 BUD, ובימיו GVA, ‏FCO ו-VCE).
  */
-function explainByCarriedStay(matches, fdp) {
-  const stays = matches.filter((m) => m.exec?.cutAtStart || (m.how === 'exact' && (m.exec.shownTo ?? m.exec.to) > m.plan.to));
+function explainByCarriedStay(matches, fdp, standbyDay) {
+  // גם הפעלה מכוננות: טיסה מתוכננת בזמן השהייה לא הייתה אפשרית (טיוטה 474).
+  const stays = matches.filter((m) => m.exec?.cutAtStart || (m.how === 'exact' && (m.exec.shownTo ?? m.exec.to) > m.plan.to) ||
+    (m.how === 'unplanned' && standbyDay(m.exec.from)));
   for (const { exec: stay, plan } of stays) {
     const landed = stay.closed ? stay.shownTo ?? stay.to : null;
     for (const m of matches) {
       const first = m.plan?.legs[0];
       if (m.how !== 'cancelled' || !first) continue;
-      if (!stay.cutAtStart && first.date < plan.to) continue;
+      if (!stay.cutAtStart && first.date < (plan?.to ?? stay.from)) continue;
       if (landed && first.date > landed) continue;
       if (landed && first.date === landed && !sameFdp(stay.legs.at(-1), first, fdp)) continue;
       m.how = 'carried_over';

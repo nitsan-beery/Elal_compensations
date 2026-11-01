@@ -24,7 +24,11 @@ export function pairingDecision(ctx, match) {
   if (match.byLeave) return { reason: 'no', source: 'leave' }; // היעדרות ומחלה אינן ביוזמת החברה
   if (match.how === 'replaced_by_ground' || match.how === 'replaced_by_standby') return { reason: 'company', source: 'activity' }; // החברה הציבה אותו לפעילות קרקע או לכוננות
   // הצוות עוד היה בחו"ל, בסבב מהחודש הקודם או בסבב שהתארך (`explainByCarriedStay`); בהסכמה – לא ביוזמת החברה (טיוטה 449).
-  if (match.how === 'carried_over') return { reason: match.carriedBy && ctx.answer(`extended:${match.carriedBy.id}`)?.value === 'agreed' ? 'no' : 'company', source: 'stay' };
+  if (match.how === 'carried_over') {
+    const stay = match.carriedBy;
+    if (stay && ctx.answer(`standby_bid:${stay.id}`)?.value === 'standby_bid') return { reason: 'bid', source: 'stay' }; // הפעלה מכוננות שהייתה זכייה במכרז (טיוטה 474)
+    return { reason: stay && ctx.answer(`extended:${stay.id}`)?.value === 'agreed' ? 'no' : 'company', source: 'stay' };
+  }
   const answer = ctx.answerFor(match);
   // שרשרת מהיומן: השלב הראשון, זה שהוציא את הסבב מהשיבוץ, קובע (`reduceChain`; בעל המוצר, 06/10/2026).
   const count = answer?.count;

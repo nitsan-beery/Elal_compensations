@@ -383,7 +383,8 @@ function absence_day_credit(ctx, params, rule) {
         continue;
       }
       if (!assigned) {
-        ctx.note(day.date, `${rule.title}: לא היית מוצב לפעילות ביום הזה, ולכן אין קרדיט.`, rule);
+        // בתוך סבב שבוצע הוא היה בפעילות: מחלה בחו"ל (`extendedPairing`; טיוטה 474).
+        if (!ctx.execPairings.some((p) => inStay(p, day.date))) ctx.note(day.date, `${rule.title}: לא היית מוצב לפעילות ביום הזה, ולכן אין קרדיט.`, rule);
         continue;
       }
     }
@@ -1252,7 +1253,10 @@ function extendedPairing(ctx, params, rule, match, answer) {
   // 08/10/2026; רון, ספטמבר 2026: WAW ב-10/09 שהוחלף ב-BCN ‏09–11/09). כך גם בהורדה עקב חניך: ס' 46 עוסק בקרדיט,
   // ואינו שולל קריאה מיוחדת (בעל המוצר, 30/10/2026, טיוטה 442).
   const swapped = match.how === 'dates' && ['replaced', 'bid', 'trainee'].includes(answer?.value);
-  const a = extensionAnswer(ctx, exec) ?? (swapped ? { value: 'company' } : paid ? ctx.assume(id, 'company', 'הסבב הוארך ביוזמת החברה') : null);
+  // חלה בחו"ל: השהייה הוארכה בגלל המחלה, ולא ביוזמת החברה (ישן כ"ה ס' 10.א(4), 15.ו; בעל המוצר, 01/11/2026; טיוטה 474).
+  const sickAbroad = ctx.timeline.some((d) => inStay(exec, d.date) && ctx.execCodes(d).some(ctx.isSick));
+  const a = extensionAnswer(ctx, exec) ?? (swapped ? { value: 'company' } : paid ? ctx.assume(id, 'company', 'הסבב הוארך ביוזמת החברה')
+    : sickAbroad ? ctx.assume(id, 'sick_abroad', 'מחלה בחו"ל') : null);
   const list = ext.days.map(dayOf).join(', ');
   if (!a) {
     const due = [days.length ? 'קריאה מיוחדת' : null, ext.second.length ? 'פיצוי על פעילות שנייה באותה יממה' : null].filter(Boolean);
@@ -1277,9 +1281,9 @@ function extendedPairing(ctx, params, rule, match, answer) {
     });
     return true;
   }
-  if (a.value === 'agreed') {
+  if (a.value === 'agreed' || a.value === 'sick_abroad') {
     ctx.markPairing(exec, 'extended_agreed');
-    if (ext.days.length) ctx.note(ext.days[0], `הסבב התארך: בהסכמתך, ולכן אין פיצוי על ההארכה ל-${list}.`, rule, { pairingId: exec.id });
+    if (ext.days.length) ctx.note(ext.days[0], `הסבב התארך: ${a.value === 'agreed' ? 'בהסכמתך' : 'מחלה בחו"ל'}, ולכן אין פיצוי על ההארכה ל-${list}.`, rule, { pairingId: exec.id });
     return true;
   }
   for (const d of days) {
@@ -2232,7 +2236,8 @@ function training_cancelled_flight(ctx, params, rule) {
     if (!pairing) continue;
     const planCodes = day.plan?.codes ?? [];
 
-    const training = unserved && !unserved.has(day.date) ? [] : planCodes.filter((c) => codeIn(c, params.plan_codes, params.plan_code_prefixes));
+    // הוצב לכוננות ביום הזה: הטיסה נבדקת כהפעלה (`ctx.placedStandby`; ישן כ"ה ס' 12.ב, 12.י; טיוטה 474).
+    const training = ctx.placedStandby.has(day.date) || (unserved && !unserved.has(day.date)) ? [] : planCodes.filter((c) => codeIn(c, params.plan_codes, params.plan_code_prefixes));
     if (training.length && !marked.has(pairing)) {
       marked.add(pairing);
       ctx.markPairing(pairing, 'training_cancelled');
@@ -2317,7 +2322,7 @@ function standby_end_for_bid(ctx, params, rule) {
           id,
           date: pairing.from,
           title: `טיסה ביומיים האחרונים של כוננות: ${describePairing(pairing)}`,
-          body: `${run.placed ? `ברומה כוננות ב-${range}, בימי סבב שבוטל${run.placed === 'sick' ? ' עקב מחלה' : ''}` : `בתכנון כוננות ב-${range}`}, והטיסה ${ctx.calendarRun ? 'ביומן' : 'יצאה'} ב-${dayOf(pairing.from)}. ` +
+          body: `${run.placed ? `ברומה כוננות ב-${range}, ${PLACED_ON[run.placed]}` : `בתכנון כוננות ב-${range}`}, והטיסה ${ctx.calendarRun ? 'ביומן' : 'יצאה'} ב-${dayOf(pairing.from)}. ` +
             (run.at(-1) === monthEnd && !ctx.nextPlan ? 'הכוננות מגיעה לסוף החודש, וייתכן שהיא נמשכת בחודש הבא. ' : '') +
             (ctx.calendarRun ? '' : 'הרומה לא מזכה קריאה מיוחדת. ') + 'אם הכוננות הופעלה, מגיע רק קרדיט הטיסה. אם החברה אישרה לך לסיים את הכוננות בגלל זכייה במכרז, מגיעה קריאה מיוחדת על ימי הטיסה. מה קרה?',
           // הפעלת הכוננות ראשונה (בעל המוצר, 21/10/2026; טיוטה 390).
@@ -2344,6 +2349,8 @@ function standby_end_for_bid(ctx, params, rule) {
     }
   }
 }
+
+const PLACED_ON = { sick: 'בימי סבב שבוטל עקב מחלה', cancelled: 'בימי סבב שבוטל', activity: 'ביום של פעילות שבוטלה' };
 
 /**
  * רצפי כוננות בתכנון: ימים עוקבים עם קוד כוננות (`plan_codes` / `plan_code_prefixes`). רצף שמגיע לסוף החודש נמשך
@@ -2465,7 +2472,7 @@ function standbyDaysFlown(ctx, pairing) {
  * 10/10/2026; כל יום לפי הקוד שלו – 15/10/2026; העמודה לא אומתה מול הרומה).
  */
 function compareStandbyFlown(ctx, pairing, rule) {
-  if (ctx.pairingHandledBy(pairing, 'standby_compared')) return;
+  if (ctx.pairingHandledBy(pairing, 'standby_compared') || standbyUnsettled(ctx, pairing)) return;
   ctx.markPairing(pairing, 'standby_compared');
   const days = standbyDaysFlown(ctx, pairing);
   if (!days.length) return;
@@ -2500,6 +2507,17 @@ function compareStandbyFlown(ctx, pairing, rule) {
     ctx.note(days[0].date, `${leg ? `${leg.flight} ` : ''}${days[0].date === pairing.from ? 'הופעלת מכוננות' : 'טסת ביום כוננות'}, וקרדיט ${partial ? 'הרגליים בימי הכוננות' : 'הסליפ'} (${minToHhmm(credit)}) גבוה מערך הכוננות, ולכן אין תוספת.`,
       rule, { pairingId: pairing.id, aside: true });
   }
+}
+
+/**
+ * טיסה לא מתוכננת ביומיים האחרונים של כוננות, בלי התשובה "הפעלת הכוננות": אולי זכייה במכרז, ואז מגיעים קרדיט הטיסה
+ * וקריאה מיוחדת, ולא ערך הכוננות (2024 ס' 50; בעל המוצר, 01/11/2026; טיוטה 474).
+ */
+function standbyUnsettled(ctx, pairing) {
+  const params = ctx.rulesWithLogic('standby_end_for_bid')[0]?.logic.params;
+  if (!params || ctx.matches.find((m) => m.exec === pairing)?.how !== 'unplanned') return false;
+  const tail = (run) => run.slice(-(params.last_days ?? 2));
+  return standbyRuns(ctx, params).some((run) => tail(run).includes(pairing.from)) && ctx.answer(`standby_bid:${pairing.id}`)?.value !== 'standby_activated';
 }
 
 /**
