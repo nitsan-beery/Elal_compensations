@@ -1,7 +1,7 @@
 // ימים ללא פעילות: רצפים שנחשבים פנויים (2018 ס' 71.1; טיוטה 463).
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { month, leg, run } from './helpers.mjs';
+import { month, leg, run, min, asked, notes, expected } from './helpers.mjs';
 
 const pad = (n) => String(n).padStart(2, '0');
 const fill = (from, to, code) => Object.fromEntries(Array.from({ length: to - from + 1 }, (_, i) => [pad(from + i), code]));
@@ -72,4 +72,93 @@ test('כוננות בסוף החודש: מה שבחודש הזה לא משתנה
 
 test('בלי החודש הקודם: הרצף נספר מ-1 לחודש', () => {
   assert.deepEqual(days(run(oct(fill(1, 5, 'SBY_S'), 'B789'), plan), '10-01', '10-05'), ['10-05']);
+});
+
+// ---------- יום שנגרע בגלל ס' 66 (2024 ס' 33, המשפט האחרון; טיוטה 475) ----------
+
+const PEAK = 'free_days_peak:2026-10';
+const WAIVED = 'free_days:2026-10';
+// הימים האחרונים בחודש פנויים, והטיסה ב-1 לחודש קובעת את הצי. `exec`: אותה טיסה ברומה.
+const raised = (free, { sum = '97:00', fict = '12:00', ac = 'B737', exec = false, values = {}, first = null } = {}) => {
+  const m = month(2026, 10, { plan: { ...fill(2, 31 - free, 'SIM'), ...(first ? { '01': first, '02': turn(ac)() } : { '01': turn(ac)() }) },
+    ...(exec ? { exec: { '01': turn(ac)() }, values } : {}) });
+  m.plan.summary = { ...m.plan.summary, sum: min(sum), fictFlightTime: min(fict) };
+  return m;
+};
+const answer = (...pairs) => Object.fromEntries(pairs.map(([id, value]) => [id, { value }]));
+
+test('8 ימים פנויים: נשאל על חודש עומס, לפני הוויתור', () => {
+  const r = run(raised(8), plan);
+  assert.equal(asked(r, PEAK), true);
+  assert.equal(asked(r, WAIVED), false);
+  assert.equal(r.freeDays.due, 9);
+});
+
+test('חודש עומס: המינימום 9, וחסר יום אחד בלי פיצוי', () => {
+  const r = run(raised(8), { ...plan, answers: answer([PEAK, 'peak']) });
+  assert.equal(r.freeDays.due, 9);
+  assert.equal(asked(r, WAIVED), false);
+  assert.ok(notes(r).some((n) => n.includes('חסר יום אחד')));
+});
+
+test('לא חודש עומס: היום שנגרע נספר, וחסרים 2', () => {
+  const r = run(raised(8), { ...plan, answers: answer([PEAK, 'regular']) });
+  assert.equal(r.freeDays.due, 10);
+  assert.ok(r.questions.find((q) => q.id === WAIVED).title.includes('חסרים 2'));
+  assert.ok(r.questions.find((q) => q.id === WAIVED).body.includes('ועוד יום שנגרע בגלל הגדלת המכסה ל-100 שעות, כלומר 10'));
+});
+
+test('לא חודש עומס, לבקשת החברה: פיצוי על היום השני', () => {
+  const r = run(raised(8, { exec: true }), { answers: answer([PEAK, 'regular'], [WAIVED, 'company']) });
+  assert.equal(expected(r, 'COM', 'ימים ללא פעילות'), '02:30');
+});
+
+test('7 ימים פנויים: חודש עומס 02:30, אחרת 05:00', () => {
+  assert.equal(expected(run(raised(7, { exec: true }), { answers: answer([PEAK, 'peak'], [WAIVED, 'company']) }), 'COM', 'ימים ללא פעילות'), '02:30');
+  assert.equal(expected(run(raised(7, { exec: true }), { answers: answer([PEAK, 'regular'], [WAIVED, 'company']) }), 'COM', 'ימים ללא פעילות'), '05:00');
+});
+
+test('9 ימים פנויים: אין פיצוי בכל מקרה, ולכן בלי שאלה ובלי הערה', () => {
+  const r = run(raised(9), plan);
+  assert.equal(asked(r, PEAK), false);
+  assert.equal(r.freeDays.due, 9);
+  assert.ok(!notes(r).some((n) => n.includes('ימים ללא פעילות')));
+});
+
+test('95:00 בדיוק: בתוך התקרה הרגילה, ואין יום שנגרע', () => {
+  assert.equal(asked(run(raised(8, { sum: '95:00' }), plan), PEAK), false);
+});
+
+test('10:00 בדיוק לא טיסתי: ס\' 66 אינו חל', () => {
+  assert.equal(asked(run(raised(8, { fict: '10:00' }), plan), PEAK), false);
+});
+
+test('רחב גוף: ס\' 66 אינו חל, והמינימום לפי הטבלה שלו', () => {
+  const r = run(raised(8, { ac: 'B789' }), plan);
+  assert.equal(asked(r, PEAK), false);
+  assert.equal(asked(r, WAIVED), true);
+  assert.equal(r.freeDays.due, 10);
+});
+
+test('הרומה זיכתה את הסכום המלא: מניחים, בלי שאלה', () => {
+  const r = run(raised(8, { exec: true, values: { '01': { COM: '02:30' } } }));
+  assert.equal(asked(r, PEAK), false);
+  assert.equal(asked(r, WAIVED), false);
+  assert.equal(r.freeDays.due, 10);
+  assert.ok(r.assumptions.some((a) => a.id === PEAK && a.value === 'regular'));
+});
+
+test('ביטול ההנחה: השאלה חוזרת', () => {
+  const r = run(raised(8, { exec: true, values: { '01': { COM: '02:30' } } }), { assumedIgnored: [PEAK] });
+  assert.equal(asked(r, PEAK), true);
+});
+
+test('הרומה זיכתה רק את הסכום של חודש עומס: נשאל', () => {
+  assert.equal(asked(run(raised(7, { exec: true, values: { '01': { COM: '02:30' } } })), PEAK), true);
+});
+
+test('X ב-1 לחודש שטרם נענה: קודם השאלה עליו', () => {
+  const r = run(raised(8, { first: 'X' }), plan);
+  assert.equal(asked(r, 'free_days_first:'), true);
+  assert.equal(asked(r, PEAK), false);
 });

@@ -1406,13 +1406,45 @@ function free_days_waived(ctx, params, rule) {
     }
   }
 
-  ctx.setFreeDays({ free: free.length, due, dates: free });
-  const missing = due - free.length;
+  // יום שנגרע בגלל 2024 ס' 66 (ס' 33, המשפט האחרון; בעל המוצר, 01/11/2026, טיוטה 475): בלי ס' 66 אפשר להגיע לשורה
+  // "95 ומעלה" מחוץ לחודשי העומס רק ב-95:00 בדיוק, ומי שעבר אותה בזכותו ירד יום מהשורה שלפניה. היום הזה נספר לפיצוי.
+  // חודשי העומס אינם בקבצים. עם 9 ימים אין פיצוי בכל מקרה, ולכן שואלים רק מתחת למינימום של הטבלה.
+  const raise = params.raised_limit;
+  const paidFor = (n) => Math.max(0, n - (params.paid_from_day - 1));
+  const covered = (n) => ctx.hasExec &&
+    ctx.reportedOnDate(ctx.monthFirst, params.report_column) - ctx.expectedOnDate(ctx.monthFirst, keyFor(params.report_column)) >= n * H(params.hours);
+  let cutDays = 0;
+  if (raise?.fleets.includes(ctx.fleet) && credit > H(raise.above_credit_hours) && free.length < due &&
+    ctx.planSummary.fictFlightTime > H(raise.above_non_flight_hours)) {
+    const pid = `free_days_peak:${ctx.monthFirst.slice(0, 7)}`;
+    const pa = ctx.answer(pid) ?? (covered(paidFor(due + raise.days - free.length)) ? ctx.assume(pid, 'regular', 'לא') : null);
+    if (!pa && !pendingFirst) {
+      ctx.ask({
+        id: pid,
+        date: ctx.monthFirst,
+        title: 'ימים ללא פעילות: האם החודש הוא חודש עומס?',
+        body: `קרדיט מתוכנן ${minToHhmm(credit)}, מתוכו ${minToHhmm(ctx.planSummary.fictFlightTime)} לא טיסתי. ` +
+          `מחוץ לחודשי העומס, יום אחד נגרע בגלל הגדלת המכסה ל-${raise.limit_hours} שעות, והוא נספר לפיצוי.`,
+        options: [
+          { value: 'peak', label: 'כן, חודש עומס', hint: `המינימום ${due}` },
+          { value: 'regular', label: 'לא', hint: `לפיצוי נספרים ${due + raise.days}` },
+        ],
+        ruleId: rule.id,
+      });
+      ctx.setFreeDays({ free: free.length, due, dates: free });
+      return;
+    }
+    if (pa?.value === 'regular') cutDays = raise.days;
+  }
+
+  ctx.setFreeDays({ free: free.length, due: due + cutDays, dates: free });
+  const missing = due + cutDays - free.length;
   if (missing <= 0) return;
-  const paidDays = missing - (params.paid_from_day - 1);
+  const paidDays = paidFor(missing);
   const what = `בתכנון ${free.length} ימים ללא פעילות` +
     (pendingFirst ? ` (${free.length + 1} ${over ? `אם הנחיתה תוכננה עד ${params.on_block_until}` : `אם ב-${ddmm(ctx.monthFirst)} לא נחתת`})` : '') +
-    `, והמינימום לקרדיט מתוכנן ${minToHhmm(credit)} הוא ${due}`;
+    `, והמינימום לקרדיט מתוכנן ${minToHhmm(credit)} הוא ${due}` +
+    (cutDays ? `, ועוד יום שנגרע בגלל הגדלת המכסה ל-${raise.limit_hours} שעות, כלומר ${due + cutDays}` : '');
   if (paidDays <= 0) {
     ctx.note(null, `${what}. ${pendingFirst ? `גם אם ${over ? 'הנחיתה תוכננה מאוחר יותר' : 'נחתת'}, חסר יום אחד בלבד` : 'חסר יום אחד'}, ` +
       `והפיצוי ניתן רק מ-${params.paid_from_day} ימים חסרים ומעלה, ולכן לא מגיע זיכוי.`, rule);
@@ -1421,12 +1453,9 @@ function free_days_waived(ctx, params, rule) {
   const id = `free_days:${ctx.monthFirst.slice(0, 7)}`;
   const key = keyFor(params.report_column);
   // הדוח כבר מזכה ביום הראשון בחודש: לא שואלים.
-  const paid = ctx.hasExec &&
-    ctx.reportedOnDate(ctx.monthFirst, params.report_column) - ctx.expectedOnDate(ctx.monthFirst, key) >= paidDays * H(params.hours);
-  const a = ctx.answer(id) ?? (paid ? ctx.assume(id, 'company', 'לבקשת החברה') : null);
+  const a = ctx.answer(id) ?? (covered(paidDays) ? ctx.assume(id, 'company', 'לבקשת החברה') : null);
   // "היום השני" נספר מבין הימים שוויתרת עליהם לבקשת החברה בלבד (2024 ס' 33), ולכן ויתור מרצון
   // על חלק מהימים מוריד את הפיצוי לפי מה שנשאר לבקשת החברה (בעל המוצר, 29/09/2026).
-  const paidFor = (companyDays) => Math.max(0, companyDays - (params.paid_from_day - 1));
   const days = (n) => (n === 1 ? 'יום אחד' : `${n} ימים`);
   if (!a) {
     ctx.ask({
@@ -2633,7 +2662,7 @@ export const DUTY_PARAMS = {
     'short_stay_max_hours', 'short_stay_factor', 'long_stay_share', 'long_stay_min_hours', 'long_stay_max_hours', 'turnaround_sequence', 'after_sequence', 'after_standby'],
   night_landings: ['fleet', 'window_from', 'window_to', 'min_planned_count', 'paid_from_count', 'hours', 'report_column', 'base_landings_only', 'counted_crews', 'legal_rest_hours'],
   special_date_activity: ['occasions', 'flight_activity_only', 'hours', 'report_column'],
-  free_days_waived: ['hours', 'report_column', 'paid_from_day', 'reserve_code_prefixes', 'reserve_free_from_day', 'training_free_from_day', 'standby_free_days', 'standby_free_fleets', 'off_block_from', 'on_block_until', 'min_free_days'],
+  free_days_waived: ['hours', 'report_column', 'paid_from_day', 'reserve_code_prefixes', 'reserve_free_from_day', 'training_free_from_day', 'standby_free_days', 'standby_free_fleets', 'off_block_from', 'on_block_until', 'min_free_days', 'raised_limit'],
   consecutive_saturdays: ['hours', 'report_column', 'shabbat_from', 'shabbat_to', 'ground_excluded_prefixes'],
   consecutive_night_rounds: ['hours', 'report_column', 'more_than', 'window_from', 'window_to', 'legal_rest_hours'],
   white_flight: ['hours', 'report_column', 'report_after', 'report_until', 'min_block_hours'],
