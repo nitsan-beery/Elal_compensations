@@ -13,7 +13,7 @@ import * as store from './store.js';
 import * as calendar from './calendar.js';
 
 // מספר הגרסה של הקוד שרץ בדף. עולה יחד עם CACHE ב-sw.js, לאותו מספר (בעל המוצר, 15/10/2026).
-const APP_VERSION = 359;
+const APP_VERSION = 360;
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -1286,10 +1286,10 @@ function renderTotals(res) {
         <div class="val num">${minToHhmm(t.expected)}</div>
         <div class="rep">צפוי לפי התכנון</div>
       </div>`).join('')}${sr ? `
-      <div class="total free ${sr.over ? 'warn' : 'ok'}">
-        <div class="label" style="direction:rtl">יחס טיסה-שהייה</div>
-        <div class="val num">1:${sr.ratio.toFixed(2)}</div>
-        <div class="rep">${sr.maxStay ? `שהייה <span class="num">${minToHhmm(sr.stay)}</span> מתוך <span class="num">${sr.maxStay / 60}</span>` : `מקסימום <span class="num">1:${sr.max}</span>`}${sr.over ? '' : ' ✓'}</div>
+      <div class="total free ${sr.over ? 'warn' : 'ok'}"${sr.showStay ? ruleAttr([`בחודש עם פחות מ-${sr.lowFlightHours} שעות טיסה, מקסימום השהייה לפי ההסכם הוא ${sr.maxStay / 60} שעות.`]) : ''}>
+        <div class="label" style="direction:rtl">${sr.showStay ? 'שעות שהייה' : 'יחס טיסה-שהייה'}</div>
+        <div class="val num">${sr.showStay ? minToHhmm(sr.stay) : `1:${sr.ratio.toFixed(2)}`}</div>
+        <div class="rep">מקסימום <span class="num">${sr.showStay ? sr.maxStay / 60 : `1:${sr.max}`}</span>${sr.over ? '' : ' ✓'}</div>
       </div>` : ''}${fd ? `
       <div class="total free ${fd.free >= fd.due ? 'ok' : 'warn'}">
         <div class="label" style="direction:rtl">ימים פנויים בתכנון</div>

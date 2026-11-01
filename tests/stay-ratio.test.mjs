@@ -70,6 +70,30 @@ test('מתחת ל-70 שעות: מעל 210 שעות שהייה חריגה', () =>
   assert.equal(run(withFlight(trip(1, 10), '60:00'), plan).stayRatio.over, true);
 });
 
+// `showStay`: המשבצת עוברת לשעות שהייה מול 210, כי מול 1:3 היא הייתה נראית כמו חריגה (טיוטה 479).
+test('מתחת ל-70 שעות, עד 1:3: תצוגת יחס', () => {
+  assert.equal(run(withFlight(trip(1, 8), '60:00'), plan).stayRatio.showStay, false);
+});
+
+test('מתחת ל-70 שעות, 1:3 בדיוק: תצוגת יחס', () => {
+  assert.equal(run(withFlight(trip(1, 9), '65:40'), plan).stayRatio.showStay, false);
+});
+
+test('מתחת ל-70 שעות, מעל 1:3 ועד 210: שעות שהייה, בלי חריגה', () => {
+  const r = run(withFlight(trip(1, 9), '60:00'), plan).stayRatio;
+  assert.deepEqual([r.showStay, r.over, r.lowFlightHours], [true, false, 70]);
+});
+
+test('מתחת ל-70 שעות, מעל 210: שעות שהייה וחריגה', () => {
+  const r = run(withFlight(trip(1, 10), '60:00'), plan).stayRatio;
+  assert.deepEqual([r.showStay, r.over], [true, true]);
+});
+
+test('70 שעות ומעלה, מעל 1:3: תצוגת יחס וחריגה', () => {
+  const r = run(withFlight(trip(1, 10), '70:00'), plan).stayRatio;
+  assert.deepEqual([r.showStay, r.over], [false, true]);
+});
+
 test('סבב עם יום הדרכה: מ-70 שעות יוצא מהחישוב, גם השהייה וגם הטיסה', () => {
   const r = run(withFlight({ ...trip(1, 4), '03': 'SIM_BER', ...trip(6, 8) }, '80:00'), plan);
   assert.equal(stayOf(r), '53:00');

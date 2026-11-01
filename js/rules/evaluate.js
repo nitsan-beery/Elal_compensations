@@ -43,12 +43,14 @@ function stayRatio(limits, { fleet, plan, pairings, timeline, tz, isTraining }) 
   if (all < hoursToMin(limits.low_flight_hours)) {
     const stay = total(parts, 'stay');
     const maxStay = hoursToMin(limits.low_flight_max_stay_hours);
-    return { flight: all, stay, ratio: stay / all, max: limits.max_ratio, maxStay, over: stay > maxStay };
+    // `showStay`: מעל היחס המגבלה היא השעות, ומול היחס המשבצת הייתה נראית כמו חריגה (טיוטה 479).
+    return { flight: all, stay, ratio: stay / all, max: limits.max_ratio, maxStay, lowFlightHours: limits.low_flight_hours,
+      showStay: stay > limits.max_ratio * all, over: stay > maxStay };
   }
   const flight = all - total(parts.filter((x) => x.training), 'flight');
   if (flight <= 0) return null;
   const stay = total(parts.filter((x) => !x.training), 'stay');
-  return { flight, stay, ratio: stay / flight, max: limits.max_ratio, maxStay: null, over: stay > limits.max_ratio * flight };
+  return { flight, stay, ratio: stay / flight, max: limits.max_ratio, maxStay: null, showStay: false, over: stay > limits.max_ratio * flight };
 }
 
 /** עמודות הדוח שכל סוג ציפייה נבדק מולן. */
