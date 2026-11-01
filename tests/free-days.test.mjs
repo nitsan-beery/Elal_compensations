@@ -74,13 +74,16 @@ test('בלי החודש הקודם: הרצף נספר מ-1 לחודש', () => {
   assert.deepEqual(days(run(oct(fill(1, 5, 'SBY_S'), 'B789'), plan), '10-01', '10-05'), ['10-05']);
 });
 
-// ---------- יום שנגרע בגלל ס' 66 (2024 ס' 33, המשפט האחרון; טיוטה 475) ----------
+// ---------- יום שנגרע בהגדלת המכסה: 2024 ס' 66, ומ-2026 ס' 25 (2024 ס' 33, המשפט האחרון; טיוטות 475–476) ----------
 
 const PEAK = 'free_days_peak:2026-10';
 const WAIVED = 'free_days:2026-10';
-// הימים האחרונים בחודש פנויים, והטיסה ב-1 לחודש קובעת את הצי. `exec`: אותה טיסה ברומה.
-const raised = (free, { sum = '97:00', fict = '12:00', ac = 'B737', exec = false, values = {}, first = null } = {}) => {
-  const m = month(2026, 10, { plan: { ...fill(2, 31 - free, 'SIM'), ...(first ? { '01': first, '02': turn(ac)() } : { '01': turn(ac)() }) },
+// הימים האחרונים בחודש פנויים, והטיסה ב-1 לחודש קובעת את הצי. `ground`: מספר ימי סימולטור, או רשימת קודים. `exec`: אותה טיסה ברומה.
+const raised = (free, { sum = '97:00', fict = '12:00', ac = 'B737', exec = false, values = {}, first = null, ground = 4, ym = [2026, 10] } = {}) => {
+  const start = first ? 3 : 2;
+  const codes = Array.isArray(ground) ? ground : Array(ground).fill('SIM');
+  const m = month(ym[0], ym[1], { plan: { ...fill(start, 31 - free, 'SBY_S'), ...Object.fromEntries(codes.map((c, i) => [pad(start + i), c])),
+    ...(first ? { '01': first, '02': turn(ac)() } : { '01': turn(ac)() }) },
     ...(exec ? { exec: { '01': turn(ac)() }, values } : {}) });
   m.plan.summary = { ...m.plan.summary, sum: min(sum), fictFlightTime: min(fict) };
   return m;
@@ -129,12 +132,38 @@ test('95:00 בדיוק: בתוך התקרה הרגילה, ואין יום שנג
   assert.equal(asked(run(raised(8, { sum: '95:00' }), plan), PEAK), false);
 });
 
-test('10:00 בדיוק לא טיסתי: ס\' 66 אינו חל', () => {
-  assert.equal(asked(run(raised(8, { fict: '10:00' }), plan), PEAK), false);
+test('מ-2026: 3 ימי קרקע וסימולטור אינם מספיקים, וכוננות אינה נספרת', () => {
+  assert.equal(asked(run(raised(8, { ground: 3 }), plan), PEAK), false);
 });
 
-test('רחב גוף: ס\' 66 אינו חל, והמינימום לפי הטבלה שלו', () => {
-  const r = run(raised(8, { ac: 'B789' }), plan);
+test('מ-2026: 4 ימים מספיקים, גם בלי קרדיט לא טיסתי מעל 10', () => {
+  const r = run(raised(8, { fict: '00:00' }), plan);
+  assert.ok(r.questions.find((q) => q.id === PEAK).body.includes('עם 4 ימי קרקע וסימולטור'));
+});
+
+test('מ-2026: קרקע וסימולטור נספרים יחד', () => {
+  assert.equal(asked(run(raised(8, { ground: ['SIM_SHO', 'CPT_BAS', 'SIM', 'HOME_RGT'] }), plan), PEAK), true);
+});
+
+test('מ-2026: קרדיט לא טיסתי גבוה אינו מספיק', () => {
+  assert.equal(asked(run(raised(8, { ground: 3, fict: '40:00' }), plan), PEAK), false);
+});
+
+test('ינואר 2026: כבר לפי ימי הקרקע', () => {
+  assert.equal(asked(run(raised(8, { ground: 0, ym: [2026, 1] }), plan), 'free_days_peak:'), false);
+});
+
+test('עד 2025: לפי הקרדיט הלא טיסתי, בלי קשר לימי קרקע', () => {
+  const r = run(raised(8, { ground: 0, ym: [2025, 12] }), plan);
+  assert.ok(r.questions.find((q) => q.id === 'free_days_peak:2025-12').body.includes('מתוכו 12:00 לא טיסתי'));
+});
+
+test('עד 2025: 10:00 בדיוק לא טיסתי אינו מספיק', () => {
+  assert.equal(asked(run(raised(8, { fict: '10:00', ym: [2025, 12] }), plan), 'free_days_peak:'), false);
+});
+
+test('רחב גוף: אין יום שנגרע, והמינימום לפי הטבלה שלו', () => {
+  const r = run(raised(8, { ac: 'B789', ground: 22 }), plan);
   assert.equal(asked(r, PEAK), false);
   assert.equal(asked(r, WAIVED), true);
   assert.equal(r.freeDays.due, 10);

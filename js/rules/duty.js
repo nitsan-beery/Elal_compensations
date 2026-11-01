@@ -1406,16 +1406,20 @@ function free_days_waived(ctx, params, rule) {
     }
   }
 
-  // יום שנגרע בגלל 2024 ס' 66 (ס' 33, המשפט האחרון; בעל המוצר, 01/11/2026, טיוטה 475): בלי ס' 66 אפשר להגיע לשורה
-  // "95 ומעלה" מחוץ לחודשי העומס רק ב-95:00 בדיוק, ומי שעבר אותה בזכותו ירד יום מהשורה שלפניה. היום הזה נספר לפיצוי.
+  // יום שנגרע בהגדלת המכסה (2024 ס' 33, המשפט האחרון, 66; 2026 ס' 25; בעל המוצר, 01/11/2026, טיוטות 475–476): בלי
+  // ההגדלה אפשר להגיע לשורה "95 ומעלה" מחוץ לחודשי העומס רק ב-95:00 בדיוק, ומי שעבר אותה בזכותה ירד יום מהשורה שלפניה.
+  // היום הזה נספר לפיצוי. התנאי להגדלה: עד 2025 קרדיט לא טיסתי (ס' 66), ומ-2026 ימי קרקע, כולל סימולטור (ס' 25).
   // חודשי העומס אינם בקבצים. עם 9 ימים אין פיצוי בכל מקרה, ולכן שואלים רק מתחת למינימום של הטבלה.
   const raise = params.raised_limit;
+  const byGround = raise && ctx.monthFirst >= raise.ground_days_from;
+  const groundDays = !byGround ? 0 : ctx.timeline.filter((day) =>
+    ctx.planActivityCodes(day).some((c) => ctx.isTrainingCode(c) || c.startsWith(raise.sim_code_prefix))).length;
   const paidFor = (n) => Math.max(0, n - (params.paid_from_day - 1));
   const covered = (n) => ctx.hasExec &&
     ctx.reportedOnDate(ctx.monthFirst, params.report_column) - ctx.expectedOnDate(ctx.monthFirst, keyFor(params.report_column)) >= n * H(params.hours);
   let cutDays = 0;
   if (raise?.fleets.includes(ctx.fleet) && credit > H(raise.above_credit_hours) && free.length < due &&
-    ctx.planSummary.fictFlightTime > H(raise.above_non_flight_hours)) {
+    (byGround ? groundDays > raise.above_ground_days : ctx.planSummary.fictFlightTime > H(raise.above_non_flight_hours))) {
     const pid = `free_days_peak:${ctx.monthFirst.slice(0, 7)}`;
     const pa = ctx.answer(pid) ?? (covered(paidFor(due + raise.days - free.length)) ? ctx.assume(pid, 'regular', 'לא') : null);
     if (!pa && !pendingFirst) {
@@ -1423,7 +1427,7 @@ function free_days_waived(ctx, params, rule) {
         id: pid,
         date: ctx.monthFirst,
         title: 'ימים ללא פעילות: האם החודש הוא חודש עומס?',
-        body: `קרדיט מתוכנן ${minToHhmm(credit)}, מתוכו ${minToHhmm(ctx.planSummary.fictFlightTime)} לא טיסתי. ` +
+        body: `קרדיט מתוכנן ${minToHhmm(credit)}, ${byGround ? `עם ${groundDays} ימי קרקע וסימולטור` : `מתוכו ${minToHhmm(ctx.planSummary.fictFlightTime)} לא טיסתי`}. ` +
           `מחוץ לחודשי העומס, יום אחד נגרע בגלל הגדלת המכסה ל-${raise.limit_hours} שעות, והוא נספר לפיצוי.`,
         options: [
           { value: 'peak', label: 'כן, חודש עומס', hint: `המינימום ${due}` },
