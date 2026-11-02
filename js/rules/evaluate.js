@@ -53,6 +53,9 @@ function stayRatio(limits, { fleet, plan, pairings, timeline, tz, isTraining }) 
   return { flight, stay, ratio: stay / flight, max: limits.max_ratio, maxStay: null, showStay: false, over: stay > limits.max_ratio * flight };
 }
 
+/** שורות פיצוי שביום בלי טיסה מציגות את השהייה (`stayOn`). */
+const STAY_LABEL_COLUMNS = ['COM', 'S/C'];
+
 /** עמודות הדוח שכל סוג ציפייה נבדק מולן. */
 const KEY_COLUMNS = {
   flight: ['Credit', 'FLT+DH'],
@@ -2356,14 +2359,25 @@ function compare({ out, timeline, execPairings, tz, codes: catalog, fdp, hideCod
   // כל סבב בשורה משלו, עם התאריכים שלו בשורה, והקודים בסוף השורה האחרונה (בעל המוצר, 28/09/2026).
   // חזרה לבסיס אחרי המראה שמחוברת לסבב שאחריה מוצגת כסבב נפרד (`pairingParts`), ורק בשורות הקרדיט:
   // פיצוי (COM, S/C) שייך לסבב שאחריה (15/02/2026: נחיתה מאוחרת של LY2368).
+  // יום בתוך סבב שלא המריאה ולא נחתה בו טיסה: השדה שבו שהית, ולא טיסה של יום אחר (בעל המוצר, 02/11/2026, טיוטה 482).
+  const stayOn = (d) => {
+    const around = execPairings.filter((p) => p.from <= d && (p.cutAtEnd || d <= (p.shownTo ?? p.to)));
+    if (around.length !== 1) return null;
+    const flew = around[0].legs.some((l) => { const t = legTimes(l, tz); return l.date === d || dateOf(t.ata ?? t.sta) === d; });
+    return flew ? null : around[0].legs.findLast((l) => l.date < d)?.dst ?? around[0].legs[0].org;
+  };
   // `only`: הסבבים של השורה, ו-`dayCodes`: קודי היום שבה, כשהקבוצה פוצלה (`splitByPairing`).
+  // סבב שיצא בחודש הקודם מתוארך מהטיסה הראשונה שלו בחודש (טיוטה 482).
   const labelOf = (dates, column, only = null, dayCodes = null) => {
+    const stay = dates.length === 1 && STAY_LABEL_COLUMNS.includes(column) ? stayOn(dates[0]) : null;
     const parts = (only ?? [...new Set(dates.flatMap((d) => pairingOf.get(d) ?? []))]).flatMap(pairingParts)
       .map((part) => ({ part, days: reportDates(part, timeline, tz).filter((d) => dates.includes(d)) }))
       .filter(({ part, days }) => days.length && (CREDIT_LABEL_COLUMNS.includes(column) || !part.legs.every((l) => l.org === l.dst)));
+    const inMonth = (part, ds) => (stay || !part.carriedFrom ? ds : ds.filter((d) => d >= part.carriedFrom));
+    const what = (part) => (stay ? `שהייה ב-${stay}` : describeRoute(part));
     const lines = parts.length === 1
-      ? [[range(dates), describeRoute(parts[0].part)]]
-      : parts.map(({ part, days }) => [range(days), describeRoute(part)]);
+      ? [[range(inMonth(parts[0].part, dates)), what(parts[0].part)]]
+      : parts.map(({ part, days }) => [range(inMonth(part, days)), what(part)]);
     // ביום של Soft Start קוד הכוננות אינו בשורת הטיסה: ההערה כבר אומרת זאת (`hideCode`; בעל המוצר, 15/10/2026).
     // יום שאין עליו קוד ברומה (יום כוננות שאינו ברומה, `standbyMissing`): הקוד שבציפייה, מהתכנון.
     const codesOn = (d) => {
@@ -2374,9 +2388,10 @@ function compare({ out, timeline, execPairings, tz, codes: catalog, fdp, hideCod
     const codes = codeNames(dayCodes ?? dates.flatMap(codesOn), catalog);
     // בלי סבב שבוצע: הטיסה שתוכננה, כשציפייה עליה נושאת אותה (`plannedRoute`, הורדה מהטיסה).
     const planned = [...new Set(expectations.filter((e) => e.plannedRoute && dates.includes(e.dates[0])).map((e) => e.plannedRoute))];
-    if (!lines.length) lines.push([range(dates), planned.join(', ')]);
+    if (!lines.length) lines.push([range(dates), stay ? `שהייה ב-${stay}` : planned.join(', ')]);
     if (codes) lines.at(-1).push(codes);
-    return lines.map((l) => l.filter(Boolean).map((t) => `⁦${t}⁩`).join(' · ')).join('\n');
+    // טקסט שמתחיל בעברית ויש בו קוד שדה מבודד מימין לשמאל, אחרת הוא מוצג "BUD-שהייה ב" (טיוטה 482).
+    return lines.map((l) => l.filter(Boolean).map((t) => `${t.startsWith('שהייה') ? '⁧' : '⁦'}${t}⁩`).join(' · ')).join('\n');
   };
   const reportedOn = (d, column) => raw(d, column) + (shift.get(`${d}|${column}`) ?? 0);
 

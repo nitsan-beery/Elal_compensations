@@ -293,7 +293,9 @@ export function describePairing(p) {
   if (parts.length > 1) return parts.map(describePairing).join(' + ');
   // עד יום הנחיתה בבסיס (`shownTo`), ולא עד יום ה-STD של הרגל האחרונה (בעל המוצר, 08/10/2026).
   const to = p.shownTo ?? p.to;
-  const when = p.from === to ? dayOf(p.from) : `${dayOf(p.from)}–${dayOf(to)}`;
+  // סבב שיצא בחודש הקודם: מהטיסה הראשונה שלו בחודש, ולא מ-1 לחודש (בעל המוצר, 02/11/2026, טיוטה 482).
+  const from = p.carriedFrom ?? p.from;
+  const when = from === to ? dayOf(from) : `${dayOf(from)}–${dayOf(to)}`;
   return `⁦${when} ${describeRoute(p)}⁩`;
 }
 
