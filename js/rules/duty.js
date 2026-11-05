@@ -1319,23 +1319,25 @@ function free_days_waived(ctx, params, rule) {
   const offFrom = parseClock(params.off_block_from);
   const onUntil = parseClock(params.on_block_until);
   const spans = spansOf(ctx, ctx.planPairings, (p) => pairingTimes(p, ctx.tz));
-  // ימים ברצף שנחשבים פנויים אף שיש בהם פעילות (2018 ס' 71.1): מילואים מהיום השלישי (בעל המוצר, 16/10/2026) והדרכה
-  // מהיום החמישי, והרצף מתאפס במעבר חודש, כי הימים הפנויים נספרים לפי חודש. בצי רחב גוף היום החמישי והשישי של
-  // כוננות ברצף, גם כשהרצף חוצה חודש (בעל המוצר, 31/10/2026, טיוטה 463).
+  // ימים שנחשבים פנויים אף שיש בהם פעילות (2018 ס' 71.1): מילואים מהיום השלישי בחודש והדרכה מהיום החמישי בחודש, גם
+  // כשאינם ברצף – "ברצף" כתוב שם רק על הכוננות (בעל המוצר, 05/11/2026, טיוטה 483; עד אז ברצף, 16/10/2026). הספירה
+  // מתחילה מחדש בכל חודש, כי הימים הפנויים נספרים לפי חודש. בצי רחב גוף היום החמישי והשישי של כוננות ברצף, גם כשהרצף
+  // חוצה חודש (בעל המוצר, 31/10/2026, טיוטה 463).
   const only = (day, test) => {
     const codes = ctx.planActivityCodes(day);
     return codes.length > 0 && codes.every(test);
   };
   const countedFree = new Set();
-  const countRun = (days, isIn, counts) => {
+  const countRun = (days, isIn, counts, consecutive = true) => {
     let run = 0;
     for (const day of days) {
-      run = isIn(day) ? run + 1 : 0;
-      if (counts(run)) countedFree.add(day.date);
+      const inRun = isIn(day);
+      run = inRun ? run + 1 : consecutive ? 0 : run;
+      if (inRun && counts(run)) countedFree.add(day.date);
     }
   };
-  countRun(ctx.timeline, (day) => only(day, (c) => (params.reserve_code_prefixes ?? []).some((x) => c.startsWith(x))), (n) => n >= params.reserve_free_from_day);
-  countRun(ctx.timeline, (day) => only(day, ctx.isTrainingCode), (n) => n >= params.training_free_from_day);
+  countRun(ctx.timeline, (day) => only(day, (c) => (params.reserve_code_prefixes ?? []).some((x) => c.startsWith(x))), (n) => n >= params.reserve_free_from_day, false);
+  countRun(ctx.timeline, (day) => only(day, ctx.isTrainingCode), (n) => n >= params.training_free_from_day, false);
   if (params.standby_free_fleets?.includes(ctx.fleet)) {
     countRun([...(ctx.prevMonth?.timeline ?? []), ...ctx.timeline], (day) => only(day, (c) => c.startsWith('SBY')), (n) => params.standby_free_days.includes(n));
   }
