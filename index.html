@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex">
+  <title>האתר עבר</title>
+  <style>
+    :root { --bg: #f5f7fa; --fg: #1d2733; --muted: #5b6878; --card: #fff; --line: #d9e0e8; --accent: #0b3a6e; --accent-fg: #fff; }
+    @media (prefers-color-scheme: dark) {
+      :root { --bg: #11161c; --fg: #e6ebf0; --muted: #9aa7b5; --card: #1a222b; --line: #2c3743; --accent: #4f8fd6; --accent-fg: #0b1420; }
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; min-height: 100vh; display: grid; place-items: center; padding: 16px; background: var(--bg); color: var(--fg); font: 17px/1.6 system-ui, -apple-system, "Segoe UI", Arial, sans-serif; }
+    main { max-width: 420px; width: 100%; background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 28px 24px; text-align: center; }
+    h1 { font-size: 1.3rem; margin: 0 0 6px; }
+    p { margin: 0; }
+    #backup { margin-top: 24px; padding-top: 20px; border-top: 1px solid var(--line); }
+    #backup p { color: var(--muted); font-size: .95rem; }
+    button { margin-top: 12px; font: inherit; padding: 10px 18px; border: 0; border-radius: 10px; background: var(--accent); color: var(--accent-fg); cursor: pointer; }
+    button:disabled { opacity: .6; cursor: default; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>האתר עבר שדרוגי אבטחה,</h1>
+  <p>אנא פנה לניצן</p>
+  <div id="backup" hidden>
+    <p id="backup-text"></p>
+    <button type="button" id="backup-btn">הורד גיבוי</button>
+  </div>
+</main>
+<script>
+  // החודשים שנשמרו בדפדפן הזה, בגרסה הקודמת של האתר: גיבוי לקובץ, בפורמט שהאתר החדש משחזר.
+  // אין כאן קישור לאתר החדש, ושום נתון לא יוצא מהמכשיר: הקובץ נוצר בדפדפן ונשמר אצל המשתמש.
+  // פתיחה בלי ליצור מסד שאינו קיים.
+  const openIfExists = (name) => new Promise((resolve) => {
+    const req = indexedDB.open(name);
+    req.onupgradeneeded = () => req.transaction.abort();
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => resolve(null);
+  });
+
+  const getAll = (db, store) => new Promise((resolve, reject) => {
+    if (!db.objectStoreNames.contains(store)) { resolve([]); return; }
+    const r = db.transaction(store, 'readonly').objectStore(store).getAll();
+    r.onsuccess = () => resolve(r.result);
+    r.onerror = () => reject(r.error);
+  });
+
+  const toBase64 = (buf) => {
+    const bytes = new Uint8Array(buf);
+    let s = '';
+    for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+    return btoa(s);
+  };
+
+  // כל מסד בדומיין שיש בו חודשים שמורים; כשיש יותר מאחד – זה שעודכן אחרון. דפדפן בלי רשימת מסדים: לפי השם הקודם.
+  async function savedMonths() {
+    let names = ['elal-compensations'];
+    try {
+      const list = await indexedDB.databases?.();
+      if (list?.length) names = list.map((d) => d.name).filter(Boolean);
+    } catch { /* בלי רשימה: לפי השם */ }
+    let best = null;
+    for (const name of names) {
+      const db = await openIfExists(name);
+      if (!db) continue;
+      const months = await getAll(db, 'months').catch(() => []);
+      const latest = months.reduce((m, r) => ((r.updated ?? '') > m ? r.updated : m), '');
+      if (months.length && (!best || latest > best.latest)) { best?.db.close(); best = { db, months, latest }; } else db.close();
+    }
+    return best;
+  }
+
+  async function cleanOldApp() {
+    // ה-service worker והעותק השמור של האפליקציה הקודמת, רק בנתיב הזה ולא של אתרים אחרים באותו דומיין.
+    const scope = new URL('./', location.href).href;
+    try {
+      for (const r of await navigator.serviceWorker?.getRegistrations?.() ?? []) if (r.scope.startsWith(scope)) await r.unregister();
+      for (const key of await caches.keys()) {
+        const c = await caches.open(key);
+        const reqs = await c.keys();
+        if (reqs.length && reqs.every((q) => q.url.startsWith(scope))) await caches.delete(key);
+      }
+    } catch { /* בלי service worker או מטמון: אין מה לנקות */ }
+  }
+
+  (async () => {
+    await cleanOldApp();
+    let found;
+    try { found = await savedMonths(); } catch { found = null; }
+    if (!found) return;
+    const n = found.months.length;
+    document.getElementById('backup-text').textContent = n === 1
+      ? 'בדפדפן הזה שמור חודש אחד מהאתר הקודם. אפשר להוריד אותו לקובץ גיבוי.'
+      : `בדפדפן הזה שמורים ${n} חודשים מהאתר הקודם. אפשר להוריד אותם לקובץ גיבוי.`;
+    document.getElementById('backup').hidden = false;
+    const btn = document.getElementById('backup-btn');
+    btn.addEventListener('click', async () => {
+      btn.disabled = true;
+      try {
+        const files = await getAll(found.db, 'files');
+        const data = {
+          format: 'elal-compensations-backup',
+          version: 2,
+          exported: new Date().toISOString(),
+          months: found.months,
+          files: files.map((f) => ({ key: f.key, name: f.name, data: toBase64(f.bytes) })),
+        };
+        const url = URL.createObjectURL(new Blob([JSON.stringify(data)], { type: 'application/json' }));
+        const a = Object.assign(document.createElement('a'), { href: url, download: `backup-${new Date().toISOString().slice(0, 10)}.json` });
+        document.body.append(a);
+        a.click();
+        a.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 60000);
+      } catch (err) {
+        alert(`הגיבוי נכשל: ${err.message}`);
+      } finally {
+        btn.disabled = false;
+      }
+    });
+  })();
+</script>
+</body>
+</html>
